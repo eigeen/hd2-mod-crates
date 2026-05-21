@@ -79,18 +79,21 @@ pub(super) fn run(opts: MigrateAllOpts) -> crate::Result<Vec<MigrationReport>> {
                 )
                     })?;
             tracing::info!(
-                hash = %detected.0,
-                name = %detected.1,
-                hits = detected.2,
+                hash = %detected.hash,
+                name = %detected.name,
+                unit_hits = detected.unit_hits,
                 "source archive auto-detected"
             );
-            (detected.0, detected.1)
+            (detected.hash, detected.name)
         }
     };
 
     let source_path = opts.data_dir.join(&source_hash);
     let source = StreamToc::from_files_with_bundle(&source_path, bundle_index_ref)?;
     tracing::info!(entries = source.entries.len(), "source loaded");
+    let filter = super::filter_patch_to_source_archive_units(&patch, &source);
+    log_patch_source_filter(&source_name, &filter);
+    let patch = filter.patch;
 
     let armor_mapping_table = load_armor_mapping_table(opts.armor_mapping_json)?;
 
@@ -181,6 +184,24 @@ fn resolve_target_filters(
 
 fn target_name_matches(name: &str, filter: &str) -> bool {
     name == filter || name.eq_ignore_ascii_case(filter)
+}
+
+fn log_patch_source_filter(source_name: &str, filter: &super::source_selection::PatchSourceFilter) {
+    if filter.dropped_entries == 0 {
+        tracing::info!(
+            source = %source_name,
+            units = filter.kept_units,
+            "patch already matches source archive Unit set"
+        );
+        return;
+    }
+    tracing::warn!(
+        source = %source_name,
+        kept_units = filter.kept_units,
+        dropped_units = filter.dropped_units,
+        dropped_entries = filter.dropped_entries,
+        "filtered patch to selected source archive Unit set"
+    );
 }
 
 #[allow(clippy::too_many_arguments)]

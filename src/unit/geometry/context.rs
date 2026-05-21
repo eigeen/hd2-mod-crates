@@ -7,6 +7,9 @@ use crate::constants::UNIT_ID;
 use crate::unit::names::{extract_customization_name, UnitCustomizationName};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+const EMPTY_PLACEHOLDER_MAX_VERTICES: usize = 100;
+const EMPTY_PLACEHOLDER_MAX_DIAGONAL: f64 = 1e-4;
+
 #[derive(Debug)]
 pub(super) struct UnitMatchContext {
     pub(super) patch_unit_ids: BTreeSet<u64>,
@@ -124,5 +127,37 @@ pub(super) fn empty_patch_source_unit_ids(
 }
 
 fn is_empty_signature(sig: &UnitGeometrySignature) -> bool {
-    sig.vertex_count <= 2 || sig.diagonal < 1e-4
+    sig.vertex_count <= EMPTY_PLACEHOLDER_MAX_VERTICES
+        || sig.diagonal < EMPTY_PLACEHOLDER_MAX_DIAGONAL
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn treats_low_vertex_units_as_empty_placeholders() {
+        assert!(is_empty_signature(&signature(100, 0.5)));
+        assert!(!is_empty_signature(&signature(101, 0.5)));
+    }
+
+    #[test]
+    fn treats_tiny_units_as_empty_placeholders() {
+        assert!(is_empty_signature(&signature(1_000, 0.000_099)));
+        assert!(!is_empty_signature(&signature(1_000, 0.000_1)));
+    }
+
+    fn signature(vertex_count: usize, diagonal: f64) -> UnitGeometrySignature {
+        UnitGeometrySignature {
+            file_id: 1,
+            points: Vec::new(),
+            sample_points: Vec::new(),
+            vertex_count,
+            center: (0.0, 0.0, 0.0),
+            extents: (diagonal, 0.0, 0.0),
+            diagonal,
+            axis_quantiles: Vec::new(),
+            radial_quantiles: Vec::new(),
+        }
+    }
 }

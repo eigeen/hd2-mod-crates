@@ -5,8 +5,10 @@
 
 pub mod mode_a;
 pub mod report;
+mod source_selection;
 
 pub use report::MigrationReport;
+pub(crate) use source_selection::{detect_source_archive, filter_patch_to_source_archive_units};
 
 use crate::archive::{StreamToc, TocEntry};
 use crate::constants::{type_name, MATERIAL_ID, TEX_ID, UNIT_ID};
@@ -189,44 +191,6 @@ fn entries_by_type(entries: &[TocEntry]) -> HashMap<u64, Vec<&TocEntry>> {
         out.entry(e.type_id).or_default().push(e);
     }
     out
-}
-
-/// Probe source archives for the one whose FileIDs overlap the patch most.
-pub(crate) fn detect_source_archive(
-    patch: &StreamToc,
-    data_dir: &Path,
-    archives: &[(String, String)], // (hash, name)
-    bundle_index: Option<&crate::archive::BundleIndex>,
-) -> Option<(String, String, usize)> {
-    let patch_flat: HashSet<(u64, u64)> = patch
-        .entries
-        .iter()
-        .map(|e| (e.type_id, e.file_id))
-        .collect();
-    if patch_flat.is_empty() {
-        return None;
-    }
-    let mut best: Option<(String, String, usize)> = None;
-    for (hash, name) in archives {
-        let path = data_dir.join(hash);
-        let exists = path.exists()
-            || bundle_index.is_some_and(|b| b.has_package(path.to_str().unwrap_or("")));
-        if !exists {
-            continue;
-        }
-        let Ok(ids) = crate::archive::list_file_ids_with_bundle(&path, bundle_index) else {
-            continue;
-        };
-        let arch_flat: HashSet<(u64, u64)> = ids
-            .iter()
-            .flat_map(|(tid, fids)| fids.iter().map(move |fid| (*tid, *fid)))
-            .collect();
-        let hits = patch_flat.intersection(&arch_flat).count();
-        if hits > 0 && best.as_ref().map(|b| hits > b.2).unwrap_or(true) {
-            best = Some((hash.clone(), name.clone(), hits));
-        }
-    }
-    best
 }
 
 /// Texture-ID logger helper used in verbose mode (Mode A).
