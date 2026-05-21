@@ -101,8 +101,9 @@ pub(super) fn run(opts: MigrateAllOpts) -> crate::Result<Vec<MigrationReport>> {
         Some(filter) => resolve_target_filters(filter, &armor_list, &by_hash),
         None => armor_list
             .into_iter()
-            .filter(|(h, _)| h != &source_hash)
-            .filter(|(h, n)| !crate::target_exclusions::is_default_excluded_target(h, n))
+            .filter(|(h, n)| {
+                h == &source_hash || !crate::target_exclusions::is_default_excluded_target(h, n)
+            })
             .collect(),
     };
 
