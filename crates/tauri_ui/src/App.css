@@ -1,0 +1,164 @@
+:root {
+  background: #eef2f6;
+  color: #172033;
+  font-family:
+    Inter, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 760px;
+  min-height: 620px;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.appShell {
+  min-height: 100vh;
+  padding: 22px;
+}
+
+.toolbar {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #d9e1ea;
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgb(35 45 62 / 8%);
+  margin-bottom: 16px;
+  padding: 14px 16px;
+}
+
+.toolbarSpacer {
+  flex: 1;
+}
+
+.statusText {
+  color: #526277;
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.content {
+  background: #ffffff;
+  border: 1px solid #d9e1ea;
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgb(35 45 62 / 8%);
+  padding: 16px;
+}
+
+.pathRow {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.pathRowActive {
+  background: transparent;
+}
+
+.pathField .MuiOutlinedInput-root {
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.pathFieldActive .MuiOutlinedInput-root {
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgb(46 125 97 / 18%);
+}
+
+.pathFieldActive .MuiOutlinedInput-notchedOutline {
+  border-color: #2e7d61;
+}
+
+.helpButton {
+  color: #5f6d7a;
+  flex: 0 0 auto;
+}
+
+.helpButton:hover {
+  background: #eef5f2;
+  color: #2e7d61;
+}
+
+.helpTooltip {
+  max-width: 340px;
+  padding: 2px 0;
+}
+
+.helpTooltipLine {
+  color: #ffffff;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.helpTooltipLine + .helpTooltipLine {
+  margin-top: 4px;
+}
+
+.optionLabel {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.optionLabel .helpButton {
+  margin-left: 2px;
+}
+
+.summaryStrip {
+  align-items: center;
+  background: #f8fafb;
+  border: 1px solid #dce4ed;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.metric {
+  min-width: 110px;
+}
+
+.metricValue {
+  color: #17382e;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 28px;
+}
+
+.metricLabel {
+  color: #637187;
+  font-size: 12px;
+}
+
+.logPanel {
+  background: #111820;
+  border: 1px solid #24313d;
+  border-radius: 8px;
+  color: #dfe8ef;
+  min-height: 210px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.logPanel pre {
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+  white-space: pre-wrap;
+}
