@@ -1,0 +1,309 @@
+import { ScrollView } from "std-widgets.slint";
+
+component TextField inherits Rectangle {
+    in-out property <string> value;
+    in property <string> placeholder;
+
+    height: 40px;
+    background: input.has-focus ? #ffffff : #f8fafc;
+    border-color: input.has-focus ? #2f80ed : #cbd6e2;
+    border-width: 1px;
+    border-radius: 5px;
+    clip: true;
+    forward-focus: input;
+
+    Text {
+        x: 10px;
+        width: parent.width - 20px;
+        height: parent.height;
+        text: root.value == "" ? root.placeholder : "";
+        color: #74859a;
+        font-size: 13px;
+        vertical-alignment: center;
+    }
+
+    input := TextInput {
+        x: 10px;
+        width: parent.width - 20px;
+        height: parent.height;
+        text <=> root.value;
+        color: #172033;
+        selection-background-color: #2f80ed;
+        selection-foreground-color: #ffffff;
+        text-cursor-width: 1px;
+        font-size: 13px;
+        vertical-alignment: center;
+        single-line: true;
+    }
+}
+
+component ActionButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    height: 40px;
+    background: !root.enabled ? #e7edf3 : touch.pressed ? #1d5fbf : touch.has-hover ? #2b74dc : #2f80ed;
+    border-color: !root.enabled ? #d5dee8 : #256fd1;
+    border-width: 1px;
+    border-radius: 5px;
+
+    Text {
+        text: root.text;
+        color: root.enabled ? #ffffff : #8090a3;
+        font-size: 13px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+component ToggleCheck inherits Rectangle {
+    in property <string> text;
+    in-out property <bool> checked;
+
+    height: 28px;
+    background: #00000000;
+
+    HorizontalLayout {
+        spacing: 8px;
+
+        Rectangle {
+            width: 17px;
+            height: 17px;
+            y: 5px;
+            background: root.checked ? #2f80ed : #ffffff;
+            border-color: root.checked ? #2f80ed : #b8c5d3;
+            border-width: 1px;
+            border-radius: 3px;
+
+            Rectangle {
+                width: 7px;
+                height: 7px;
+                x: 5px;
+                y: 5px;
+                background: root.checked ? #ffffff : #00000000;
+                border-radius: 1px;
+            }
+        }
+
+        Text {
+            text: root.text;
+            color: #253244;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        clicked => {
+            root.checked = !root.checked;
+        }
+    }
+}
+
+component PathRow inherits Rectangle {
+    in property <string> label;
+    in property <string> drop-key;
+    in-out property <string> value;
+    callback browse();
+    callback path-dropped(string, string);
+
+    height: 54px;
+    background: #ffffff;
+    border-color: #d9e2ec;
+    border-width: 1px;
+    border-radius: 6px;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 8px;
+        padding-top: 7px;
+        padding-bottom: 7px;
+        spacing: 8px;
+
+        Text {
+            text: root.label;
+            width: 88px;
+            color: #253244;
+            font-size: 14px;
+            vertical-alignment: center;
+        }
+
+        TextField {
+            value <=> root.value;
+            horizontal-stretch: 1;
+        }
+
+        ActionButton {
+            text: "Browse";
+            width: 76px;
+            clicked => {
+                root.browse();
+            }
+        }
+    }
+
+    DropArea {
+        width: parent.width;
+        height: parent.height;
+        can-drop(event) => {
+            return event.mime-type == "text/plain" || event.mime-type == "text/uri-list";
+        }
+        dropped(event) => {
+            root.path-dropped(root.drop-key, event.data);
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    in-out property <string> patch-path;
+    in-out property <string> data-dir;
+    in-out property <string> out-dir;
+    in-out property <string> target-filter;
+    in-out property <bool> no-padding;
+    in-out property <bool> experimental-partial-remap;
+    in-out property <bool> running;
+    in-out property <string> status-text: "Ready";
+    in-out property <string> log-text;
+    in-out property <int> migrated-count;
+    in-out property <int> warning-count;
+
+    callback choose-patch();
+    callback choose-data-dir();
+    callback choose-out-dir();
+    callback run-migration();
+    callback path-dropped(string, string);
+
+    title: "mod armor migrator";
+    width: 760px;
+    height: 560px;
+    background: #f3f7fb;
+
+    VerticalLayout {
+        padding: 22px;
+        spacing: 14px;
+
+        Text {
+            text: "mod armor migrator";
+            color: #172033;
+            font-size: 26px;
+            font-weight: 700;
+        }
+
+        Text {
+            text: root.status-text;
+            color: root.running ? #005ea8 : #4b5c73;
+            font-size: 14px;
+        }
+
+        PathRow {
+            label: "Patch";
+            drop-key: "patch";
+            value <=> root.patch-path;
+            browse => { root.choose-patch(); }
+            path-dropped(kind, payload) => { root.path-dropped(kind, payload); }
+        }
+
+        PathRow {
+            label: "Game data";
+            drop-key: "data";
+            value <=> root.data-dir;
+            browse => { root.choose-data-dir(); }
+            path-dropped(kind, payload) => { root.path-dropped(kind, payload); }
+        }
+
+        PathRow {
+            label: "Output";
+            drop-key: "out";
+            value <=> root.out-dir;
+            browse => { root.choose-out-dir(); }
+            path-dropped(kind, payload) => { root.path-dropped(kind, payload); }
+        }
+
+        Rectangle {
+            height: 92px;
+            background: #ffffff;
+            border-color: #d9e2ec;
+            border-width: 1px;
+            border-radius: 6px;
+
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+
+                Text {
+                    text: "Targets";
+                    color: #253244;
+                    font-size: 14px;
+                }
+
+                TextField {
+                    value <=> root.target-filter;
+                    placeholder: "hash or name, comma separated";
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 18px;
+            height: 34px;
+
+            ToggleCheck {
+                text: "No padding";
+                checked <=> root.no-padding;
+            }
+
+            ToggleCheck {
+                text: "Partial remap";
+                checked <=> root.experimental-partial-remap;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 10px;
+            height: 42px;
+
+            ActionButton {
+                text: root.running ? "Running" : "Run";
+                enabled: !root.running;
+                width: 96px;
+                clicked => { root.run-migration(); }
+            }
+
+            Text {
+                text: "Migrated " + root.migrated-count + " | Warnings " + root.warning-count;
+                color: #4b5c73;
+                font-size: 14px;
+                vertical-alignment: center;
+            }
+        }
+
+        Rectangle {
+            background: #101722;
+            border-radius: 6px;
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+
+            ScrollView {
+                width: parent.width;
+                height: parent.height;
+
+                Text {
+                    text: root.log-text;
+                    color: #d9e6f2;
+                    font-family: "Consolas";
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
