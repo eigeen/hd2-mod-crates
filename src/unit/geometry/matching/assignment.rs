@@ -140,9 +140,7 @@ fn solve_assignment(
             let total = score + tail_score;
             if total < best_score {
                 best_score = total;
-                best_targets = std::iter::once(idx)
-                    .chain(tail_targets.into_iter())
-                    .collect();
+                best_targets = std::iter::once(idx).chain(tail_targets).collect();
             }
         }
         memo.insert((source_pos, used_mask), (best_score, best_targets.clone()));

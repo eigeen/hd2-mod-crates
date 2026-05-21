@@ -46,7 +46,7 @@ pub struct UnitAuthorityMatch {
 
 impl ArmorMappingTable {
     pub fn bundled() -> crate::Result<Self> {
-        Self::from_str(BUILTIN_ARMOR_MAPPING_JSON)
+        BUILTIN_ARMOR_MAPPING_JSON.parse()
     }
 
     pub fn load(path: &Path) -> crate::Result<Self> {
@@ -54,13 +54,7 @@ impl ArmorMappingTable {
             .wrap_err_with(|| format!("read armor mapping {}", path.display()))?;
         let text = String::from_utf8(bytes)
             .wrap_err_with(|| format!("decode armor mapping as UTF-8 {}", path.display()))?;
-        Self::from_str(&text)
-    }
-
-    pub fn from_str(text: &str) -> crate::Result<Self> {
-        let table: Self = serde_json::from_str(text)?;
-        table.validate()?;
-        Ok(table)
+        text.parse()
     }
 
     pub fn armor_count(&self) -> usize {
@@ -76,6 +70,16 @@ impl ArmorMappingTable {
             parts.validate(name)?;
         }
         Ok(())
+    }
+}
+
+impl std::str::FromStr for ArmorMappingTable {
+    type Err = eyre::Report;
+
+    fn from_str(text: &str) -> std::result::Result<Self, Self::Err> {
+        let table: Self = serde_json::from_str(text)?;
+        table.validate()?;
+        Ok(table)
     }
 }
 
@@ -190,7 +194,7 @@ mod tests {
 
     #[test]
     fn builds_patch_unit_matches_by_part_label() {
-        let table = ArmorMappingTable::from_str(RAW_TABLE).unwrap();
+        let table = RAW_TABLE.parse::<ArmorMappingTable>().unwrap();
         let mut patch = StreamToc::default();
         patch.entries.push(TocEntry::new(8, UNIT_ID));
         patch.entries.push(TocEntry::new(9, UNIT_ID));
@@ -221,7 +225,7 @@ mod tests {
 
     #[test]
     fn skips_authority_target_missing_from_archive() {
-        let table = ArmorMappingTable::from_str(RAW_TABLE).unwrap();
+        let table = RAW_TABLE.parse::<ArmorMappingTable>().unwrap();
         let mut patch = StreamToc::default();
         patch.entries.push(TocEntry::new(8, UNIT_ID));
         let target = StreamToc::default();

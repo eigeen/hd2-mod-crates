@@ -189,9 +189,9 @@ fn read_matrix(toc_data: &[u8], offset: usize) -> Matrix4 {
         return identity_matrix();
     }
     let mut m = [0.0f64; 16];
-    for i in 0..16 {
+    for (i, value) in m.iter_mut().enumerate() {
         let raw = read_u32(toc_data, offset + 4 * i);
-        m[i] = f32::from_bits(raw) as f64;
+        *value = f32::from_bits(raw) as f64;
     }
     m
 }
@@ -307,7 +307,7 @@ fn component_size(version: u32, component_format: u32) -> usize {
             3 => 16,
             4 => 4,
             24 => 16,
-            28 | 29 | 30 => 4,
+            28..=30 => 4,
             33 => 4,
             35 => 8,
             _ => 0,

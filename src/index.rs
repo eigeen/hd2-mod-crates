@@ -28,12 +28,7 @@ impl ArchiveIndex {
     pub fn load(path: &Path) -> crate::Result<Self> {
         let text = std::fs::read_to_string(path)
             .map_err(|e| eyre::eyre!("read {}: {e}", path.display()))?;
-        Self::from_str(&text)
-    }
-
-    pub fn from_str(text: &str) -> crate::Result<Self> {
-        let raw: serde_json::Value = serde_json::from_str(text)?;
-        Self::from_value(raw)
+        text.parse()
     }
 
     fn from_value(raw: serde_json::Value) -> crate::Result<Self> {
@@ -60,7 +55,8 @@ impl ArchiveIndex {
     pub fn builtin() -> &'static Self {
         static CACHE: OnceLock<ArchiveIndex> = OnceLock::new();
         CACHE.get_or_init(|| {
-            ArchiveIndex::from_str(BUILTIN_INDEX_JSON)
+            BUILTIN_INDEX_JSON
+                .parse()
                 .expect("builtin archivehashes.json must parse")
         })
     }
@@ -71,6 +67,15 @@ impl ArchiveIndex {
 
     pub fn categories(&self) -> impl Iterator<Item = &str> {
         self.by_category.keys().map(|s| s.as_str())
+    }
+}
+
+impl std::str::FromStr for ArchiveIndex {
+    type Err = eyre::Report;
+
+    fn from_str(text: &str) -> std::result::Result<Self, Self::Err> {
+        let raw: serde_json::Value = serde_json::from_str(text)?;
+        Self::from_value(raw)
     }
 }
 

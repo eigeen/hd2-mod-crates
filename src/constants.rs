@@ -51,7 +51,7 @@ pub const MIN_FILE_PADDING: usize = 256;
 
 #[inline]
 pub const fn align_up(n: usize, alignment: usize) -> usize {
-    (n + alignment - 1) / alignment * alignment
+    n.div_ceil(alignment) * alignment
 }
 
 #[inline]

@@ -14,7 +14,7 @@ use clap::Parser;
 use eyre::WrapErr;
 use owo_colors::OwoColorize;
 use progress::IndicatifProgress;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub fn run() -> crate::Result<()> {
     let mut cli = Cli::parse();
@@ -144,6 +144,6 @@ fn print_startup_banner() {
     );
 }
 
-fn display_path(p: &PathBuf) -> String {
+fn display_path(p: &Path) -> String {
     p.display().to_string()
 }

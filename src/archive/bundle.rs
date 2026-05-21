@@ -104,10 +104,7 @@ impl BundleIndex {
 }
 
 fn basename(path: &str) -> &str {
-    let idx = path
-        .rfind(|c: char| c == '/' || c == '\\')
-        .map(|i| i + 1)
-        .unwrap_or(0);
+    let idx = path.rfind(['/', '\\']).map(|i| i + 1).unwrap_or(0);
     &path[idx..]
 }
 

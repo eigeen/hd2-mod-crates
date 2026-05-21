@@ -11,6 +11,10 @@ use crate::unit::geometry::{
 use crate::unit::names::UnitCustomizationName;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+type TargetPair = (u64, u64);
+type BodyPairCandidate = (TargetPair, f64);
+type BodyPairCandidateMap = HashMap<BodyVariantPair, Vec<BodyPairCandidate>>;
+
 pub fn apply_body_variant_pair_preassignment(
     request: BodyPairPreassignmentRequest<'_>,
 ) -> HashSet<u64> {
@@ -162,19 +166,19 @@ fn unknown_near_twin_target_pairs(req: &BodyPairPreassignmentRequest) -> Vec<(u6
 fn body_pair_candidates(
     req: &BodyPairPreassignmentRequest,
     source_pairs: &[BodyVariantPair],
-    target_pairs: &[(u64, u64)],
-) -> HashMap<BodyVariantPair, Vec<((u64, u64), f64)>> {
+    target_pairs: &[TargetPair],
+) -> BodyPairCandidateMap {
     let mut out = HashMap::new();
     for &pair in source_pairs {
         let mut scoped = target_pairs.to_vec();
         scoped.extend(named_unknown_near_twin_target_pairs(req, pair));
         let deduped = dedupe_target_pairs(&scoped);
-        let mut ranked: Vec<((u64, u64), f64)> = deduped
+        let mut ranked: Vec<BodyPairCandidate> = deduped
             .into_iter()
             .map(|t| (t, body_pair_score(req, pair, t)))
             .collect();
         ranked.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-        let filtered: Vec<((u64, u64), f64)> = ranked
+        let filtered: Vec<BodyPairCandidate> = ranked
             .into_iter()
             .filter(|item| body_pair_candidate_allowed(req, pair, item.0, item.1))
             .collect();
@@ -331,8 +335,8 @@ fn sorted_extents(signature: &UnitGeometrySignature) -> (f64, f64, f64) {
 
 fn solve_body_pair_assignment(
     source_pairs: &[BodyVariantPair],
-    candidates: &HashMap<BodyVariantPair, Vec<((u64, u64), f64)>>,
-) -> BTreeMap<BodyVariantPair, (u64, u64)> {
+    candidates: &BodyPairCandidateMap,
+) -> BTreeMap<BodyVariantPair, TargetPair> {
     let mut sorted_pairs: Vec<BodyVariantPair> = source_pairs.to_vec();
     sorted_pairs.sort_by(|a, b| {
         let sa = best_pair_score(candidates, *a);
@@ -357,10 +361,7 @@ fn solve_body_pair_assignment(
     assigned
 }
 
-fn best_pair_score(
-    candidates: &HashMap<BodyVariantPair, Vec<((u64, u64), f64)>>,
-    pair: BodyVariantPair,
-) -> f64 {
+fn best_pair_score(candidates: &BodyPairCandidateMap, pair: BodyVariantPair) -> f64 {
     candidates
         .get(&pair)
         .and_then(|v| v.first())

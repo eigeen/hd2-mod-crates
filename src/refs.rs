@@ -70,9 +70,7 @@ pub fn rewrite_unit(
         if materials_offset != 0 && materials_offset + 4 <= buf.len() {
             let num_materials = LE::read_u32(&buf[materials_offset..materials_offset + 4]) as usize;
             let mat_id_start = materials_offset + 4 + 4 * num_materials;
-            let end = mat_id_start
-                .checked_add(8 * num_materials)
-                .unwrap_or(usize::MAX);
+            let end = mat_id_start.saturating_add(8 * num_materials);
             if end <= buf.len() {
                 for i in 0..num_materials {
                     let pos = mat_id_start + 8 * i;
@@ -113,9 +111,7 @@ pub fn rewrite_material(toc_data: &[u8], remap: &HashMap<u64, u64>) -> Vec<u8> {
     let num_textures =
         LE::read_u32(&buf[MATERIAL_NUM_TEXTURES_FIELD..MATERIAL_NUM_TEXTURES_FIELD + 4]) as usize;
     let tex_ids_start = MATERIAL_TEX_BASE + 4 * num_textures;
-    let end = tex_ids_start
-        .checked_add(8 * num_textures)
-        .unwrap_or(usize::MAX);
+    let end = tex_ids_start.saturating_add(8 * num_textures);
     if num_textures == 0 || end > buf.len() {
         return buf;
     }
@@ -158,9 +154,7 @@ pub fn list_unit_refs(toc_data: &[u8]) -> Vec<u64> {
         let num_materials =
             LE::read_u32(&toc_data[materials_offset..materials_offset + 4]) as usize;
         let mat_id_start = materials_offset + 4 + 4 * num_materials;
-        let end = mat_id_start
-            .checked_add(8 * num_materials)
-            .unwrap_or(usize::MAX);
+        let end = mat_id_start.saturating_add(8 * num_materials);
         if end <= toc_data.len() {
             for i in 0..num_materials {
                 let pos = mat_id_start + 8 * i;
@@ -179,9 +173,7 @@ pub fn list_material_refs(toc_data: &[u8]) -> Vec<u64> {
         LE::read_u32(&toc_data[MATERIAL_NUM_TEXTURES_FIELD..MATERIAL_NUM_TEXTURES_FIELD + 4])
             as usize;
     let tex_ids_start = MATERIAL_TEX_BASE + 4 * num_textures;
-    let end = tex_ids_start
-        .checked_add(8 * num_textures)
-        .unwrap_or(usize::MAX);
+    let end = tex_ids_start.saturating_add(8 * num_textures);
     if num_textures == 0 || end > toc_data.len() {
         return Vec::new();
     }

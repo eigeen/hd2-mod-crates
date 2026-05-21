@@ -228,8 +228,10 @@ mod tests {
         target_name: &str,
         entries: Vec<TocEntry>,
     ) -> TargetBuild {
-        let mut patch = StreamToc::default();
-        patch.entries = entries;
+        let patch = StreamToc {
+            entries,
+            ..Default::default()
+        };
         TargetBuild {
             order,
             patch,

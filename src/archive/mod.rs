@@ -311,10 +311,12 @@ impl StreamToc {
 
         for (pos, &eidx) in ordered_idx.iter().enumerate() {
             let e = &self.entries[eidx];
-            let mut lay = EntryLayout::default();
-            lay.entry_index = (pos + 1) as u32;
-            lay.toc_data_offset = data_cursor;
-            lay.toc_size = e.toc_data.len() as u32;
+            let mut lay = EntryLayout {
+                entry_index: (pos + 1) as u32,
+                toc_data_offset: data_cursor,
+                toc_size: e.toc_data.len() as u32,
+                ..Default::default()
+            };
             data_cursor += e.toc_data.len() as u64;
 
             if !e.gpu_data.is_empty() {
@@ -594,11 +596,13 @@ mod tests {
 
     #[test]
     fn round_trip_two_entries() {
-        let mut t = StreamToc::default();
-        t.entries = vec![
-            make_entry(0xAA, UNIT_ID, &[1u8; 100], &[2u8; 50], &[3u8; 20]),
-            make_entry(0xBB, MATERIAL_ID, &[4u8; 60], &[], &[]),
-        ];
+        let mut t = StreamToc {
+            entries: vec![
+                make_entry(0xAA, UNIT_ID, &[1u8; 100], &[2u8; 50], &[3u8; 20]),
+                make_entry(0xBB, MATERIAL_ID, &[4u8; 60], &[], &[]),
+            ],
+            ..Default::default()
+        };
         let (toc, gpu, stream) = t.serialize();
         let parsed = StreamToc::from_buffers(&toc, &gpu, &stream, "test".into()).expect("parse");
         assert_eq!(parsed.entries.len(), 2);
@@ -614,12 +618,14 @@ mod tests {
 
     #[test]
     fn list_file_ids_matches() {
-        let mut t = StreamToc::default();
-        t.entries = vec![
-            make_entry(0xAA, UNIT_ID, &[1u8; 10], &[], &[]),
-            make_entry(0xBB, UNIT_ID, &[2u8; 10], &[], &[]),
-            make_entry(0xCC, MATERIAL_ID, &[3u8; 10], &[], &[]),
-        ];
+        let mut t = StreamToc {
+            entries: vec![
+                make_entry(0xAA, UNIT_ID, &[1u8; 10], &[], &[]),
+                make_entry(0xBB, UNIT_ID, &[2u8; 10], &[], &[]),
+                make_entry(0xCC, MATERIAL_ID, &[3u8; 10], &[], &[]),
+            ],
+            ..Default::default()
+        };
         let (toc, _, _) = t.serialize();
         let idx = list_file_ids_from_bytes(&toc).expect("list");
         assert_eq!(idx.get(&UNIT_ID).unwrap(), &vec![0xAAu64, 0xBB]);
@@ -628,24 +634,28 @@ mod tests {
 
     #[test]
     fn min_size_padding() {
-        let mut t = StreamToc::default();
         // 3 entries with tiny bodies → toc header alone is well below 3*256.
-        t.entries = vec![
-            make_entry(0x01, UNIT_ID, &[0u8; 4], &[], &[]),
-            make_entry(0x02, UNIT_ID, &[0u8; 4], &[], &[]),
-            make_entry(0x03, UNIT_ID, &[0u8; 4], &[], &[]),
-        ];
+        let mut t = StreamToc {
+            entries: vec![
+                make_entry(0x01, UNIT_ID, &[0u8; 4], &[], &[]),
+                make_entry(0x02, UNIT_ID, &[0u8; 4], &[], &[]),
+                make_entry(0x03, UNIT_ID, &[0u8; 4], &[], &[]),
+            ],
+            ..Default::default()
+        };
         let (toc, _, _) = t.serialize();
         assert!(toc.len() >= 256 * 3, "got {} bytes", toc.len());
     }
 
     #[test]
     fn gpu_align_64() {
-        let mut t = StreamToc::default();
-        t.entries = vec![
-            make_entry(1, UNIT_ID, &[0; 10], &[0xAA; 100], &[]),
-            make_entry(2, UNIT_ID, &[0; 10], &[0xBB; 50], &[]),
-        ];
+        let mut t = StreamToc {
+            entries: vec![
+                make_entry(1, UNIT_ID, &[0; 10], &[0xAA; 100], &[]),
+                make_entry(2, UNIT_ID, &[0; 10], &[0xBB; 50], &[]),
+            ],
+            ..Default::default()
+        };
         let (toc, _, _) = t.serialize();
         // Round-trip and inspect entry 2's gpu_offset via re-parse.
         let parsed = StreamToc::from_buffers(&toc, &t.serialize().1, &[], "x".into()).unwrap();

@@ -68,7 +68,7 @@ impl EmptyUnitTemplate {
 }
 
 /// Heuristic: smallest GPU+TOC = most likely empty mesh.
-pub fn find_empty_unit_candidates<'a>(patch: &'a StreamToc) -> Vec<&'a TocEntry> {
+pub fn find_empty_unit_candidates(patch: &StreamToc) -> Vec<&TocEntry> {
     let mut units: Vec<&TocEntry> = patch
         .entries
         .iter()
@@ -215,7 +215,7 @@ fn read_material_ids(toc_data: &[u8]) -> Vec<u64> {
     }
     let num_mats = LE::read_u32(&toc_data[materials_off..materials_off + 4]) as usize;
     let ids_off = materials_off + 4 + 4 * num_mats;
-    let end = ids_off.checked_add(8 * num_mats).unwrap_or(usize::MAX);
+    let end = ids_off.saturating_add(8 * num_mats);
     if end > toc_data.len() {
         return Vec::new();
     }

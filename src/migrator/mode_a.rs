@@ -6,11 +6,11 @@
 //! 3. For each target armor:
 //!    a. non-Unit ordinal remap via [`super::build_remap`]
 //!    b. Unit-FileID remap via the authoritative armor-part table first,
-//!       then [`crate::unit::geometry::build_unit_geometry_remap`] for gaps
+//!    then [`crate::unit::geometry::build_unit_geometry_remap`] for gaps
 //!    c. Empty source placeholders are assigned to leftover target Unit slots
 //!    d. Patch entries are rewritten through [`crate::refs::rewrite`], with
-//!       per-Unit header dependency refs specialized to each source→target
-//!       Unit pair
+//!    per-Unit header dependency refs specialized to each source→target
+//!    Unit pair
 //!    e. Extra target Unit slots padded with the empty-mesh template
 
 mod write;

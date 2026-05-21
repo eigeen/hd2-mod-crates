@@ -96,9 +96,14 @@ pub fn build_unit_geometry_remap(
     authority_matches: &[UnitAuthorityMatch],
 ) -> crate::Result<UnitGeometryRemap> {
     let context = context::build_match_context(patch, source, target, settings);
-    let mut result = UnitGeometryRemap::default();
-    result.empty_source_file_ids =
-        context::empty_patch_source_unit_ids(patch, &context.patch_unit_ids, settings);
+    let mut result = UnitGeometryRemap {
+        empty_source_file_ids: context::empty_patch_source_unit_ids(
+            patch,
+            &context.patch_unit_ids,
+            settings,
+        ),
+        ..Default::default()
+    };
     let active_patch_unit_ids: BTreeSet<u64> = context
         .patch_unit_ids
         .iter()
