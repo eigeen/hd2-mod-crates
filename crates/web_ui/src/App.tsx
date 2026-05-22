@@ -35,7 +35,7 @@ function App() {
   const [result, setResult] = useState<MigrationResult | null>(null);
   const [warningOpen, setWarningOpen] = useState(false);
   const [multiConfirmed, setMultiConfirmed] = useState(false);
-  const [showAllSources, setShowAllSources] = useState(true);
+  const [showAllSources, setShowAllSources] = useState(false);
 
   const loadPublicMetadataIntoState = useCallback(async () => {
     const loaded = await loadPublicMetadata();
@@ -67,7 +67,6 @@ function App() {
       setMetadata(loaded);
       setTargets(await listTargets(loaded.json));
       resetMigrationSelection(setSourceHash, setTargetHashes, setResult);
-      setShowAllSources(true);
     });
   }, []);
 
@@ -79,7 +78,6 @@ function App() {
       setMetadata(loaded);
       setTargets(await listTargets(loaded.json));
       resetMigrationSelection(setSourceHash, setTargetHashes, setResult);
-      setShowAllSources(true);
     });
   }, [loadPublicMetadataIntoState, metadata]);
 
@@ -99,8 +97,8 @@ function App() {
         await detectPatchSource({
           metadata: currentMetadata,
           patch: nextPatch,
-          setShowAllSources,
           setSourceHash,
+          setShowAllSources,
         });
       });
     },
@@ -120,14 +118,7 @@ function App() {
 
   const chooseSource = useCallback((hash: string) => {
     setSourceHash(hash);
-    setShowAllSources(false);
     setTargetHashes((current) => current.filter((targetHash) => targetHash !== hash));
-    setResult(null);
-  }, []);
-
-  const resetSource = useCallback(() => {
-    setSourceHash("");
-    setShowAllSources(true);
     setResult(null);
   }, []);
 
@@ -172,7 +163,7 @@ function App() {
             <ElectricBoltIcon />
           </div>
           <div>
-            <h1 className="m-0 text-base font-bold leading-tight text-slate-900">HD2 网页迁移工具</h1>
+            <h1 className="m-0 text-base font-bold leading-tight text-slate-900">HD2 外观 Mod 迁移工具</h1>
             <p className="m-0 text-xs text-slate-500">导入元数据 JSON 并执行迁移</p>
           </div>
         </div>
@@ -196,13 +187,6 @@ function App() {
           <MetadataPanel
             busy={busy}
             metadata={metadata}
-            onLoadPublicMetadata={() => {
-              void runTask(setBusy, setErrorText, async () => {
-                await loadPublicMetadataIntoState();
-                resetMigrationSelection(setSourceHash, setTargetHashes, setResult);
-                setShowAllSources(true);
-              });
-            }}
             onDirectoryMetadata={loadDirectoryMetadata}
             onMetadataFile={importMetadata}
           />
@@ -213,7 +197,6 @@ function App() {
           noPadding={noPadding}
           onMultiTargetChange={toggleMultiTarget}
           onSourceChange={chooseSource}
-          onSourceReset={resetSource}
           onTargetChange={chooseTarget}
           partialRemap={partialRemap}
           patchSuffix={patchSuffix}
@@ -259,12 +242,12 @@ function sourceChoicesForSelection(targets: TargetOption[], sourceHash: string, 
 interface DetectPatchSourceRequest {
   metadata: MetadataState | null;
   patch: PatchFiles;
-  setShowAllSources: (show: boolean) => void;
   setSourceHash: (hash: string) => void;
+  setShowAllSources: (show: boolean) => void;
 }
 
 async function detectPatchSource(request: DetectPatchSourceRequest) {
-  const { metadata, patch, setShowAllSources, setSourceHash } = request;
+  const { metadata, patch, setSourceHash, setShowAllSources } = request;
   if (!metadata || metadata.targetCount === 0) {
     setShowAllSources(true);
     return;
@@ -272,7 +255,6 @@ async function detectPatchSource(request: DetectPatchSourceRequest) {
   const source = await detectSource(metadata.json, patch);
   if (source) {
     setSourceHash(source.hash);
-    setShowAllSources(false);
     return;
   }
   setShowAllSources(true);
@@ -305,6 +287,7 @@ async function runTask(
   try {
     await task();
   } catch (error) {
+    console.error("[hd2-migrator] task failed:", error);
     setErrorText(errorMessage(error));
   } finally {
     setBusy(false);

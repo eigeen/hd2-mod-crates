@@ -105,7 +105,7 @@ textarea {
   font-weight: 700 !important;
   letter-spacing: 0 !important;
   min-height: 40px;
-  text-transform: uppercase !important;
+  text-transform: none !important;
 }
 
 .MuiButton-containedPrimary {
@@ -144,6 +144,29 @@ textarea {
   color: #334155;
   font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 13px;
+}
+
+.targetSearchField {
+  min-width: 180px;
+  max-width: 220px;
+}
+
+.targetSearchField .MuiInput-root {
+  color: #475569;
+  font-size: 12px;
+}
+
+.targetSearchField .MuiInput-root::before {
+  border-bottom-color: #e2e8f0 !important;
+}
+
+.targetSearchField .MuiInput-root:hover::before {
+  border-bottom-color: #cbd5e1 !important;
+}
+
+.targetSearchField .MuiInputAdornment-root svg {
+  color: #94a3b8;
+  font-size: 16px;
 }
 
 .MuiTextField-root .MuiInputLabel-root {

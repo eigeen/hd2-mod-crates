@@ -5,7 +5,7 @@ import DownloadIcon from "@mui/icons-material/Download";
 import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutlined";
 import InventoryIcon from "@mui/icons-material/Inventory2";
-import RestartAltIcon from "@mui/icons-material/RestartAlt";
+import SearchIcon from "@mui/icons-material/Search";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import {
@@ -26,7 +26,7 @@ import {
   TextField,
   Tooltip,
 } from "@mui/material";
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { downloadZip } from "./fileInputs";
 import type { MetadataState, MigrationResult, PatchFiles, TargetOption } from "./types";
@@ -40,7 +40,6 @@ const metaLineClass =
 interface MetadataPanelProps {
   busy: boolean;
   metadata: MetadataState | null;
-  onLoadPublicMetadata: () => void;
   onDirectoryMetadata: () => void;
   onMetadataFile: (files: FileList | null) => void;
 }
@@ -50,23 +49,24 @@ export function MetadataPanel(props: MetadataPanelProps) {
     <div className={setupPanelClass}>
       <SectionTitle icon={<InventoryIcon />} title="元数据" />
       <div className="mb-3 flex flex-wrap items-center gap-2.5">
-        <Button disabled={props.busy} onClick={props.onLoadPublicMetadata} startIcon={<DownloadIcon />} variant="outlined">
-          加载内置
-        </Button>
-        <HelpHint title="使用应用内置的元数据 JSON（推荐快速上手时使用）。" />
         <Button component="label" disabled={props.busy} startIcon={<UploadFileIcon />} variant="outlined">
           导入 JSON
           <input hidden accept="application/json,.json" type="file" onChange={(event) => props.onMetadataFile(event.target.files)} />
         </Button>
-        <HelpHint title="导入自定义元数据 JSON 文件（适用于内置元数据未覆盖的版本）。" />
+        <HelpHint title="导入自定义元数据 JSON 文件。" />
         <Button disabled={props.busy} onClick={props.onDirectoryMetadata} startIcon={<FolderOpenIcon />} variant="outlined">
           浏览器目录
         </Button>
         <HelpHint title="选择本地游戏 data 目录，由浏览器读取存档后实时生成元数据（仅 Chromium 内核浏览器支持）。" />
       </div>
-      <p className={`${metaLineClass} m-0 mt-auto pt-3`}>
-        {props.metadata ? `${props.metadata.targetCount} 个可用目标` : "尚未加载元数据"}
+      <p className="m-0 text-xs leading-[1.5] text-slate-500">
+        若不手动导入或识别失败，将自动使用项目内置的元数据。
       </p>
+      {props.metadata && (
+        <p className={`${metaLineClass} m-0 mt-auto pt-3`}>
+          {`${props.metadata.targetCount} 个可用目标`}
+        </p>
+      )}
     </div>
   );
 }
@@ -81,8 +81,8 @@ export function PatchPanel(props: PatchPanelProps) {
     <div className={setupPanelClass}>
       <SectionTitle icon={<ArchiveIcon />} title="补丁" />
       <div className="flex flex-wrap items-center gap-2.5">
-        <Button component="label" startIcon={<UploadFileIcon />} variant="outlined">
-          选择补丁三件套
+        <Button component="label" startIcon={<UploadFileIcon />} variant="contained">
+          选择patch文件
           <input hidden multiple type="file" onChange={(event) => props.onPatchFiles(event.target.files)} />
         </Button>
         <HelpHint title="同时选择 patch 主文件、.gpu_resources、.stream 三个文件（缺失的辅助文件可省略）。" />
@@ -100,7 +100,6 @@ interface TargetPanelProps {
   noPadding: boolean;
   onMultiTargetChange: (enabled: boolean) => void;
   onSourceChange: (hash: string) => void;
-  onSourceReset: () => void;
   onTargetChange: (hash: string) => void;
   partialRemap: boolean;
   patchSuffix: string;
@@ -129,7 +128,6 @@ export function TargetPanel(props: TargetPanelProps) {
       <MappingGrid
         multiTarget={props.multiTarget}
         onSourceChange={props.onSourceChange}
-        onSourceReset={props.onSourceReset}
         onTargetChange={props.onTargetChange}
         selectedTargets={props.selectedTargets}
         sourceChoices={props.sourceChoices}
@@ -151,7 +149,6 @@ export function TargetPanel(props: TargetPanelProps) {
 interface MappingGridProps {
   multiTarget: boolean;
   onSourceChange: (hash: string) => void;
-  onSourceReset: () => void;
   onTargetChange: (hash: string) => void;
   selectedTargets: string[];
   sourceChoices: TargetOption[];
@@ -161,19 +158,17 @@ interface MappingGridProps {
 
 const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
   const selectedTargetSet = useMemo(() => new Set(props.selectedTargets), [props.selectedTargets]);
+  const [targetQuery, setTargetQuery] = useState("");
+
+  const filteredTargets = useMemo(
+    () => filterTargets(props.targetOptions, targetQuery),
+    [props.targetOptions, targetQuery],
+  );
 
   return (
     <div className="m-3 flex min-h-[260px] flex-col items-stretch bg-slate-50/30 min-[820px]:flex-row">
       <FormControl className="flex min-w-0 flex-1 flex-col p-6 min-[820px]:pr-9">
-        <div className="flex flex-row items-center gap-2">
-          <FormLabel className="mappingFormLabel">源版本</FormLabel>
-          <div className="flex-1" />
-          {props.sourceHash && (
-            <Button onClick={props.onSourceReset} size="small" startIcon={<RestartAltIcon />} variant="text">
-              更改
-            </Button>
-          )}
-        </div>
+        <FormLabel className="mappingFormLabel">源版本</FormLabel>
         {props.sourceChoices.length ? (
           <div className="flex max-h-[360px] flex-1 flex-col overflow-auto">
             <RadioGroup value={props.sourceHash} onChange={(event) => props.onSourceChange(event.target.value)}>
@@ -187,10 +182,22 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
         )}
       </FormControl>
       <FormControl className="flex min-w-0 flex-1 flex-col border-t border-slate-100/95 p-6 min-[820px]:border-t-0 min-[820px]:border-l min-[820px]:pl-4">
-        <FormLabel className="mappingFormLabel">目标版本</FormLabel>
+        <div className="mb-3 flex items-center gap-3">
+          <FormLabel className="mappingFormLabel mb-0!">目标版本</FormLabel>
+          <div className="flex-1" />
+          <TextField
+            className="targetSearchField"
+            onChange={(event) => setTargetQuery(event.target.value)}
+            placeholder="搜索名称或 ID"
+            size="small"
+            slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> } }}
+            value={targetQuery}
+            variant="standard"
+          />
+        </div>
         <div className="flex max-h-[360px] flex-1 flex-col overflow-auto">
-          {props.targetOptions.length ? (
-            props.targetOptions.map((target) => (
+          {filteredTargets.length ? (
+            filteredTargets.map((target) => (
               <TargetChoice
                 key={target.hash}
                 multiTarget={props.multiTarget}
@@ -200,13 +207,23 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
               />
             ))
           ) : (
-            <EmptyMapping icon={<TaskAltIcon />} text="目标版本输出" />
+            <EmptyMapping icon={<TaskAltIcon />} text={targetQuery ? "没有匹配的目标版本" : "目标版本输出"} />
           )}
         </div>
       </FormControl>
     </div>
   );
 });
+
+function filterTargets(targets: TargetOption[], query: string) {
+  const trimmed = query.trim().toLowerCase();
+  if (!trimmed) {
+    return targets;
+  }
+  return targets.filter((target) =>
+    target.name.toLowerCase().includes(trimmed) || target.hash.toLowerCase().includes(trimmed),
+  );
+}
 
 interface TargetChoiceProps {
   multiTarget: boolean;
