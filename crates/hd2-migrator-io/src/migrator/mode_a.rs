@@ -434,12 +434,11 @@ fn entry_target_file_ids(
     remap: &HashMap<u64, u64>,
     unit_targets: &HashMap<u64, Vec<u64>>,
 ) -> Vec<u64> {
-    if entry.type_id == UNIT_ID {
-        if let Some(targets) = unit_targets.get(&entry.file_id) {
-            if !targets.is_empty() {
-                return targets.clone();
-            }
-        }
+    if entry.type_id == UNIT_ID
+        && let Some(targets) = unit_targets.get(&entry.file_id)
+        && !targets.is_empty()
+    {
+        return targets.clone();
     }
     vec![remap.get(&entry.file_id).copied().unwrap_or(entry.file_id)]
 }

@@ -1,7 +1,7 @@
 use crate::error::{Result, message};
 use crate::export::{ExportMode, ExportOptions};
 use crate::pack::PackOptions;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Parses the packer CLI flags.
 pub fn parse_pack_args(args: impl IntoIterator<Item = String>) -> Result<PackOptions> {
@@ -60,7 +60,7 @@ pub fn parse_export_args(args: impl IntoIterator<Item = String>) -> Result<Expor
     })
 }
 
-fn default_zip_path(output: &PathBuf) -> PathBuf {
+fn default_zip_path(output: &Path) -> PathBuf {
     output.with_extension("zip")
 }
 

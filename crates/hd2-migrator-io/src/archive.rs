@@ -255,11 +255,11 @@ impl StreamToc {
 
     pub fn write_files(&mut self, toc_path: &Path) -> crate::Result<()> {
         let (toc_buf, gpu_buf, stream_buf) = self.serialize();
-        if let Some(parent) = toc_path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)
-                    .wrap_err_with(|| format!("create dir {}", parent.display()))?;
-            }
+        if let Some(parent) = toc_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)
+                .wrap_err_with(|| format!("create dir {}", parent.display()))?;
         }
         std::fs::write(toc_path, &toc_buf)
             .wrap_err_with(|| format!("write TOC {}", toc_path.display()))?;

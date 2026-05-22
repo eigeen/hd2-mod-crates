@@ -108,6 +108,6 @@ fn last_suffix(strings: &[String], prefix: &str) -> Option<String> {
     strings
         .iter()
         .filter_map(|value| value.strip_prefix(prefix))
-        .last()
+        .next_back()
         .map(ToOwned::to_owned)
 }

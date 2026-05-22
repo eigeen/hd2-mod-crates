@@ -167,10 +167,10 @@ fn assignment_variants(
         })
         .collect();
     for &id in active_patch_unit_ids {
-        if let Some(v) = context.source_variants.get(&id) {
-            if v != "Any" {
-                variants.insert(v.clone());
-            }
+        if let Some(v) = context.source_variants.get(&id)
+            && v != "Any"
+        {
+            variants.insert(v.clone());
         }
     }
     if variants.is_empty() {

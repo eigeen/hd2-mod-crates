@@ -405,10 +405,10 @@ fn target_id_with_variant(
     variant: &str,
 ) -> Option<u64> {
     for tid in [targets.0, targets.1] {
-        if let Some(Some(name)) = req.target_names.get(&tid) {
-            if name.body_variant() == variant {
-                return Some(tid);
-            }
+        if let Some(Some(name)) = req.target_names.get(&tid)
+            && name.body_variant() == variant
+        {
+            return Some(tid);
         }
     }
     None

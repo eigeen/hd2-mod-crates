@@ -85,18 +85,18 @@ pub fn rewrite_unit(
     }
 
     // Whole-blob u32 SlotID scan — safe because slot IDs are murmur32 hashes.
-    if let Some(slot_remap) = slot_remap {
-        if !slot_remap.is_empty() {
-            let mut pos = 0;
-            while pos + 4 <= buf.len() {
-                let val = LE::read_u32(&buf[pos..pos + 4]);
-                if let Some(&new) = slot_remap.get(&val) {
-                    if new != val {
-                        LE::write_u32(&mut buf[pos..pos + 4], new);
-                    }
-                }
-                pos += 4;
+    if let Some(slot_remap) = slot_remap
+        && !slot_remap.is_empty()
+    {
+        let mut pos = 0;
+        while pos + 4 <= buf.len() {
+            let val = LE::read_u32(&buf[pos..pos + 4]);
+            if let Some(&new) = slot_remap.get(&val)
+                && new != val
+            {
+                LE::write_u32(&mut buf[pos..pos + 4], new);
             }
+            pos += 4;
         }
     }
 

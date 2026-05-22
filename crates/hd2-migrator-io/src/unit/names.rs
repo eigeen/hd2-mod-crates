@@ -111,10 +111,10 @@ fn scan_customization_strings(data: &[u8]) -> Vec<String> {
         while end < data.len() && is_ident_byte(data[end]) {
             end += 1;
         }
-        if end > body_start {
-            if let Ok(s) = std::str::from_utf8(&data[start..end]) {
-                out.push(s.to_string());
-            }
+        if end > body_start
+            && let Ok(s) = std::str::from_utf8(&data[start..end])
+        {
+            out.push(s.to_string());
         }
         i = end.max(i + 1);
     }

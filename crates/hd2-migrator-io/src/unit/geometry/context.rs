@@ -90,10 +90,10 @@ fn source_customization_names(
     let mut names = archive_customization_names(source);
     for entry in patch.entries.iter().filter(|e| e.type_id == UNIT_ID) {
         let new_name = extract_customization_name(&entry.toc_data);
-        if let Some(slot) = names.get_mut(&entry.file_id) {
-            if new_name.is_some() {
-                *slot = new_name;
-            }
+        if let Some(slot) = names.get_mut(&entry.file_id)
+            && new_name.is_some()
+        {
+            *slot = new_name;
         }
     }
     names
@@ -117,10 +117,10 @@ pub(super) fn empty_patch_source_unit_ids(
         if !patch_unit_ids.contains(&entry.file_id) {
             continue;
         }
-        if let Some(sig) = build_unit_signature(entry, settings) {
-            if is_empty_signature(&sig) {
-                empty_ids.insert(entry.file_id);
-            }
+        if let Some(sig) = build_unit_signature(entry, settings)
+            && is_empty_signature(&sig)
+        {
+            empty_ids.insert(entry.file_id);
         }
     }
     empty_ids

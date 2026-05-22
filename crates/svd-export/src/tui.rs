@@ -143,7 +143,7 @@ fn ExporterApp<'a>(
     let submitted = hooks.use_state(|| false);
     let cancelled = hooks.use_state(|| false);
     let search_active = hooks.use_state(|| false);
-    let search_query = hooks.use_state(|| String::new());
+    let search_query = hooks.use_state(String::new);
     let mut system = hooks.use_context_mut::<SystemContext>();
 
     let current_selection = selected.read().clone();
@@ -158,10 +158,10 @@ fn ExporterApp<'a>(
             let visible_clone = visible.clone();
             move || {
                 let current = targets_focus.get();
-                if let Some(&first) = visible_clone.first() {
-                    if !visible_clone.contains(&current) {
-                        targets_focus.set(first);
-                    }
+                if let Some(&first) = visible_clone.first()
+                    && !visible_clone.contains(&current)
+                {
+                    targets_focus.set(first);
                 }
             }
         },
@@ -202,17 +202,15 @@ fn ExporterApp<'a>(
                 search_active.set(true);
                 return;
             }
-            handle_key_event(
-                code,
-                target_count,
-                &visible,
-                &mut active_group,
-                &mut targets_focus,
-                &mut actions_focus,
-                &mut selected,
-                &mut submitted,
-                &mut cancelled,
-            );
+            let mut controls = KeyEventControls {
+                active_group: &mut active_group,
+                targets_focus: &mut targets_focus,
+                actions_focus: &mut actions_focus,
+                selected: &mut selected,
+                submitted: &mut submitted,
+                cancelled: &mut cancelled,
+            };
+            handle_key_event(code, target_count, &visible, &mut controls);
         }
     });
 
@@ -649,60 +647,84 @@ fn handle_key_event(
     code: KeyCode,
     target_count: usize,
     visible: &[usize],
-    active_group: &mut State<usize>,
-    targets_focus: &mut State<usize>,
-    actions_focus: &mut State<usize>,
-    selected: &mut State<Vec<bool>>,
-    submitted: &mut State<bool>,
-    cancelled: &mut State<bool>,
+    controls: &mut KeyEventControls<'_>,
 ) {
-    let group = active_group.get();
+    let group = controls.active_group.get();
     match code {
-        KeyCode::Tab => switch_group(active_group, 1),
-        KeyCode::BackTab => switch_group(active_group, GROUP_COUNT - 1),
-        KeyCode::Up => arrow_within_group(group, true, visible, targets_focus, actions_focus),
-        KeyCode::Down => arrow_within_group(group, false, visible, targets_focus, actions_focus),
-        KeyCode::Left => {
-            arrow_horizontal_within_group(group, true, target_count, targets_focus, actions_focus)
-        }
-        KeyCode::Right => {
-            arrow_horizontal_within_group(group, false, target_count, targets_focus, actions_focus)
-        }
+        KeyCode::Tab => switch_group(controls.active_group, 1),
+        KeyCode::BackTab => switch_group(controls.active_group, GROUP_COUNT - 1),
+        KeyCode::Up => arrow_within_group(
+            group,
+            true,
+            visible,
+            controls.targets_focus,
+            controls.actions_focus,
+        ),
+        KeyCode::Down => arrow_within_group(
+            group,
+            false,
+            visible,
+            controls.targets_focus,
+            controls.actions_focus,
+        ),
+        KeyCode::Left => arrow_horizontal_within_group(
+            group,
+            true,
+            target_count,
+            controls.targets_focus,
+            controls.actions_focus,
+        ),
+        KeyCode::Right => arrow_horizontal_within_group(
+            group,
+            false,
+            target_count,
+            controls.targets_focus,
+            controls.actions_focus,
+        ),
         KeyCode::Enter => {
             activate_focused_control(
                 group,
                 target_count,
-                selected,
-                targets_focus,
-                actions_focus,
-                submitted,
-                cancelled,
+                controls.selected,
+                controls.targets_focus,
+                controls.actions_focus,
+                controls.submitted,
+                controls.cancelled,
             );
         }
         KeyCode::Char(' ') => {
             activate_focused_control(
                 group,
                 target_count,
-                selected,
-                targets_focus,
-                actions_focus,
-                submitted,
-                cancelled,
+                controls.selected,
+                controls.targets_focus,
+                controls.actions_focus,
+                controls.submitted,
+                controls.cancelled,
             );
         }
-        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => cancelled.set(true),
-        KeyCode::Char('a') | KeyCode::Char('A') => toggle_all_variants(selected),
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => controls.cancelled.set(true),
+        KeyCode::Char('a') | KeyCode::Char('A') => toggle_all_variants(controls.selected),
         KeyCode::Char(key) => {
             if visible.len() == target_count
                 && let Some(index) = shortcut_index(key)
                 && index < target_count
             {
-                active_group.set(GROUP_TARGETS);
-                focus_and_toggle_variant(selected, targets_focus, index);
+                controls.active_group.set(GROUP_TARGETS);
+                focus_and_toggle_variant(controls.selected, controls.targets_focus, index);
             }
         }
         _ => {}
     }
+}
+
+struct KeyEventControls<'a> {
+    active_group: &'a mut State<usize>,
+    targets_focus: &'a mut State<usize>,
+    actions_focus: &'a mut State<usize>,
+    selected: &'a mut State<Vec<bool>>,
+    submitted: &'a mut State<bool>,
+    cancelled: &'a mut State<bool>,
 }
 
 fn is_error_close_event(event: TerminalEvent) -> bool {
