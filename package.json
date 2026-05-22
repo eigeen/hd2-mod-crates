@@ -1,0 +1,15 @@
+{
+  "name": "hd2-mod-crates",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "bun@1.3.13",
+  "scripts": {
+    "rust:build": "cargo build --workspace --release",
+    "metadata:extract": "cargo run -r -p hd2-migrator-cli -- extract-web-metadata",
+    "web:dev": "bun run --cwd crates/web_ui dev",
+    "web:build": "bun run --cwd crates/web_ui build",
+    "web:wasm": "bun run --cwd crates/web_ui wasm",
+    "tauri:dev": "bun run --cwd crates/tauri_ui tauri dev",
+    "tauri:build": "bun run --cwd crates/tauri_ui tauri build"
+  }
+}

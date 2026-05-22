@@ -12,8 +12,9 @@ pub mod padding;
 pub mod refs;
 pub mod target_exclusions;
 pub mod unit;
+pub mod web;
 
 pub use error::{MigratorError, Result};
 pub use index::ArchiveIndex;
-pub use migrator::{migrate_all, MigrateAllOpts, MigrationReport, ProgressSink};
-pub use padding::{builtin_template, extract_template, EmptyUnitTemplate, PaddingMode};
+pub use migrator::{MigrateAllOpts, MigrationReport, ProgressSink, migrate_all};
+pub use padding::{EmptyUnitTemplate, PaddingMode, builtin_template, extract_template};

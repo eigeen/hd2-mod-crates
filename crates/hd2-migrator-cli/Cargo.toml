@@ -17,6 +17,7 @@ eyre.workspace = true
 hd2-migrator-io = { path = "../hd2-migrator-io" }
 indicatif = { workspace = true, features = ["rayon"] }
 owo-colors.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 tracing-indicatif.workspace = true
 tracing-subscriber.workspace = true

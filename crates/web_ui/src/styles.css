@@ -1,0 +1,159 @@
+@import "tailwindcss";
+
+@theme {
+  --font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+:root {
+  background: #f8fafc;
+  color: #0f172a;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: rgb(59 130 246 / 20%);
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+/* ---- MUI-targeted overrides ---- */
+
+.statusBanner {
+  align-items: flex-start;
+  border-radius: 16px !important;
+  padding: 13px 16px !important;
+}
+
+.statusBanner.MuiAlert-standardWarning {
+  background: rgb(255 251 235 / 72%);
+  border: 1px solid rgb(251 191 36 / 35%);
+  color: #92400e;
+}
+
+.statusBanner.MuiAlert-standardInfo {
+  background: rgb(239 246 255 / 70%);
+  border: 1px solid rgb(147 197 253 / 42%);
+  color: #1e40af;
+}
+
+.multiToggle {
+  color: #475569;
+  margin: 0 !important;
+}
+
+.multiToggle .MuiFormControlLabel-label {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.sourceChoice {
+  align-items: flex-start !important;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  margin: 0 0 6px !important;
+  padding: 6px 8px;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.sourceChoice:hover {
+  background: #ffffff;
+  border-color: #e2e8f0;
+}
+
+.mappingFormLabel.MuiFormLabel-root {
+  color: #94a3b8;
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+}
+
+.optionsControl.MuiFormControlLabel-root {
+  margin: 0 !important;
+}
+
+.optionsControl .MuiFormControlLabel-label {
+  color: #475569;
+  font-size: 14px;
+}
+
+.suffixField .MuiInputAdornment-root .MuiTypography-root {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.MuiButton-root {
+  border-radius: 12px !important;
+  box-shadow: none !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+  min-height: 40px;
+  text-transform: uppercase !important;
+}
+
+.MuiButton-containedPrimary {
+  background: #2563eb !important;
+  box-shadow: 0 8px 18px rgb(37 99 235 / 12%) !important;
+}
+
+.MuiButton-containedPrimary:hover {
+  background: #1d4ed8 !important;
+}
+
+.MuiButton-outlined {
+  background: #ffffff;
+  border-color: #e2e8f0 !important;
+  color: #334155 !important;
+}
+
+.MuiButton-outlined:hover {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+}
+
+.MuiCheckbox-root,
+.MuiRadio-root,
+.MuiSwitch-switchBase.Mui-checked {
+  color: #2563eb !important;
+}
+
+.MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track {
+  background: #2563eb !important;
+}
+
+.MuiTextField-root .MuiOutlinedInput-root {
+  background: rgb(248 250 252 / 45%);
+  border-radius: 12px;
+  color: #334155;
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+}
+
+.MuiTextField-root .MuiInputLabel-root {
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.MuiAlert-root {
+  letter-spacing: 0;
+}

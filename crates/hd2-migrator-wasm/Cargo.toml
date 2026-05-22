@@ -1,0 +1,18 @@
+[package]
+name = "hd2-migrator-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "WASM API for the HD2 web migrator"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+crc32fast = "1.5.0"
+hd2-migrator-io = { path = "../hd2-migrator-io" }
+js-sys = "0.3.82"
+serde.workspace = true
+serde-wasm-bindgen = "0.6.5"
+serde_json.workspace = true
+wasm-bindgen.workspace = true

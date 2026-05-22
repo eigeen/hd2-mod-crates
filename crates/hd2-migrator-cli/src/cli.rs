@@ -6,12 +6,13 @@ pub mod interactive;
 pub mod logging;
 pub mod progress;
 
-use hd2_migrator_io::index::ArchiveIndex;
-use hd2_migrator_io::migrator::{migrate_all, MigrateAllOpts, MigrationReport};
-use hd2_migrator_io::padding::{builtin_template, extract_template, EmptyUnitTemplate};
-use args::Cli;
+use args::{Cli, CliCommand, ExtractWebMetadataArgs};
 use clap::Parser;
 use eyre::WrapErr;
+use hd2_migrator_io::index::ArchiveIndex;
+use hd2_migrator_io::migrator::{MigrateAllOpts, MigrationReport, migrate_all};
+use hd2_migrator_io::padding::{EmptyUnitTemplate, builtin_template, extract_template};
+use hd2_migrator_io::web::{ExtractMetadataOptions, WebGameMetadata, extract_game_metadata};
 use owo_colors::OwoColorize;
 use progress::IndicatifProgress;
 use std::path::Path;
@@ -20,6 +21,10 @@ pub fn run() -> hd2_migrator_io::Result<()> {
     let mut cli = Cli::parse();
     logging::init(cli.verbose);
     print_startup_banner();
+
+    if let Some(command) = cli.command {
+        return run_command(command);
+    }
 
     let owned_index;
     let index: &ArchiveIndex = match cli.index.as_deref() {
@@ -70,6 +75,54 @@ pub fn run() -> hd2_migrator_io::Result<()> {
     )?;
 
     print_summary(&reports);
+    Ok(())
+}
+
+fn run_command(command: CliCommand) -> hd2_migrator_io::Result<()> {
+    match command {
+        CliCommand::ExtractWebMetadata(args) => extract_web_metadata(args),
+    }
+}
+
+fn extract_web_metadata(args: ExtractWebMetadataArgs) -> hd2_migrator_io::Result<()> {
+    let owned_index;
+    let index = match args.index.as_deref() {
+        Some(path) => {
+            owned_index = ArchiveIndex::load(path)?;
+            &owned_index
+        }
+        None => ArchiveIndex::builtin(),
+    };
+    let metadata = extract_game_metadata(ExtractMetadataOptions {
+        data_dir: &args.data_dir,
+        archive_index: index,
+        category: &args.category,
+    })?;
+    let text = serialize_web_metadata(&metadata)?;
+    write_utf8(&args.out, &text)?;
+    eprintln!(
+        "{} {} targets -> {}",
+        "Extracted".green().bold(),
+        metadata.targets.len(),
+        args.out.display().to_string().cyan()
+    );
+    Ok(())
+}
+
+/// Serializes product metadata as compact JSON to keep browser asset size low.
+fn serialize_web_metadata(metadata: &WebGameMetadata) -> hd2_migrator_io::Result<String> {
+    serde_json::to_string(metadata).map_err(Into::into)
+}
+
+fn write_utf8(path: &Path, text: &str) -> hd2_migrator_io::Result<()> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .wrap_err_with(|| format!("create dir {}", parent.display()))?;
+    }
+    std::fs::write(path, text.as_bytes())
+        .wrap_err_with(|| format!("write UTF-8 {}", path.display()))?;
     Ok(())
 }
 
@@ -146,4 +199,22 @@ fn print_startup_banner() {
 
 fn display_path(p: &Path) -> String {
     p.display().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn web_metadata_serialization_is_compact() {
+        let metadata = WebGameMetadata::new("Armor", Vec::new());
+        let text = serialize_web_metadata(&metadata).unwrap();
+
+        assert_eq!(
+            text,
+            r#"{"schemaVersion":1,"category":"Armor","targets":[]}"#
+        );
+        assert!(!text.contains('\n'));
+        assert!(!text.contains("  "));
+    }
 }

@@ -1,2 +1,4 @@
 /target
 /test_files
+/crates/web_ui/dist
+/crates/web_ui/node_modules

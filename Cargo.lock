@@ -1783,6 +1783,7 @@ dependencies = [
  "hd2-migrator-io",
  "indicatif",
  "owo-colors",
+ "serde_json",
  "tempfile",
  "tracing",
  "tracing-indicatif",
@@ -1820,6 +1821,19 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "hd2-migrator-wasm"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "hd2-migrator-io",
+ "js-sys",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -3528,6 +3542,17 @@ dependencies = [
  "serde",
  "serde_core",
  "typeid",
+]
+
+[[package]]
+name = "serde-wasm-bindgen"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b"
+dependencies = [
+ "js-sys",
+ "serde",
+ "wasm-bindgen",
 ]
 
 [[package]]

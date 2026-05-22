@@ -5,6 +5,7 @@ members = [
     "crates/hd2-migrator-core",
     "crates/hd2-migrator-data",
     "crates/hd2-migrator-io",
+    "crates/hd2-migrator-wasm",
     "crates/hd2-unit-matching",
     "crates/tauri_ui/src-tauri",
     "crates/svd-core",
@@ -39,6 +40,7 @@ tracing = "0.1.44"
 tracing-indicatif = "0.3.14"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 walkdir = "2.5.0"
+wasm-bindgen = "0.2.105"
 zip = { version = "8.6.0", default-features = false, features = [
     "deflate",
     "zstd",
