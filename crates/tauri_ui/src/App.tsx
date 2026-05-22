@@ -20,13 +20,18 @@ import {
   FormControlLabel,
   IconButton,
   Stack,
+  Tab,
+  Tabs,
   TextField,
   Tooltip,
   Typography,
 } from "@mui/material";
 import { fieldFromPhysicalPosition } from "./dropTarget";
+import SvdPanel from "./SvdPanel";
+import TargetPicker from "./TargetPicker";
 import type {
   GameDataDiscovery,
+  MigrationTargetOption,
   MigrationProgressEvent,
   MigrationRequest,
   MigrationSummary,
@@ -34,6 +39,8 @@ import type {
   PathState,
 } from "./types";
 import "./App.css";
+
+type ToolTab = "migration" | "svd";
 
 const initialPaths: PathState = {
   patchPath: "",
@@ -65,12 +72,6 @@ const pathFieldHelp: Record<PathField, string[]> = {
   ],
 };
 
-const targetsHelp = [
-  "Optional comma-separated target filter.",
-  "Accepts armor names or hash-like ids.",
-  "Examples: g_torso_male, g_helmet_shadow, 9ba626afa44a3aa3.",
-];
-
 const noPaddingHelp = [
   "Skip adding padding or empty mesh replacement data.",
   "Use this when you only want remap changes and want to keep source geometry untouched.",
@@ -84,8 +85,13 @@ const partialRemapHelp = [
 ];
 
 function App() {
+  const [activeTool, setActiveTool] = useState<ToolTab>("migration");
   const [paths, setPaths] = useState<PathState>(initialPaths);
-  const [targetFilter, setTargetFilter] = useState("");
+  const [targetOptions, setTargetOptions] = useState<MigrationTargetOption[]>([]);
+  const [selectedTargets, setSelectedTargets] = useState<string[]>([]);
+  const [targetSearch, setTargetSearch] = useState("");
+  const [loadingTargets, setLoadingTargets] = useState(false);
+  const [targetLoadError, setTargetLoadError] = useState("");
   const [noPadding, setNoPadding] = useState(false);
   const [partialRemap, setPartialRemap] = useState(false);
   const [hoveredField, setHoveredField] = useState<PathField | null>(null);
@@ -133,13 +139,38 @@ function App() {
     [setPath],
   );
 
+  const loadTargetOptions = useCallback(async () => {
+    setLoadingTargets(true);
+    setTargetLoadError("");
+    try {
+      setTargetOptions(await invoke<MigrationTargetOption[]>("load_migration_targets"));
+    } catch (error) {
+      setTargetLoadError(String(error));
+    } finally {
+      setLoadingTargets(false);
+    }
+  }, []);
+
+  const toggleTarget = useCallback((hash: string) => {
+    setSelectedTargets((current) => toggledTargetList(hash, current));
+  }, []);
+
+  const selectAllTargets = useCallback(() => {
+    setSelectedTargets(targetOptions.map((target) => target.hash));
+  }, [targetOptions]);
+
   const runMigration = useCallback(async () => {
+    if (selectedTargets.length === 0) {
+      setErrorText("Select at least one target.");
+      setStatus("Select targets");
+      return;
+    }
     setRunning(true);
     setSummary(null);
     setErrorText("");
     setStatus("Preparing migration");
     try {
-      const request = requestFromState(paths, targetFilter, noPadding, partialRemap);
+      const request = requestFromState(paths, selectedTargets, noPadding, partialRemap);
       setSummary(await invoke<MigrationSummary>("run_migration", { request }));
       setStatus("Migration complete");
     } catch (error) {
@@ -148,11 +179,15 @@ function App() {
     } finally {
       setRunning(false);
     }
-  }, [noPadding, partialRemap, paths, targetFilter]);
+  }, [noPadding, partialRemap, paths, selectedTargets]);
 
   useEffect(() => {
     return subscribeToProgress(setStatus);
   }, []);
+
+  useEffect(() => {
+    void loadTargetOptions();
+  }, [loadTargetOptions]);
 
   useEffect(() => {
     if (autoDetectRef.current) {
@@ -167,95 +202,113 @@ function App() {
   }, [setPath]);
 
   const reportLines = useMemo(() => formatReports(summary), [summary]);
+  const toolbarTitle = activeTool === "migration" ? "HD2 Migrator" : "Super Variant Dist";
+  const toolbarStatus = activeTool === "migration" ? status : "Compression packer and exporter";
 
   return (
     <Box className="appShell">
       <Stack className="toolbar" direction="row" spacing={2}>
         <Box>
           <Typography variant="h5" component="h1">
-            Mod Armor Migrator
+            {toolbarTitle}
           </Typography>
-          <Typography className="statusText">{status}</Typography>
+          <Typography className="statusText">{toolbarStatus}</Typography>
         </Box>
-        <Box className="toolbarSpacer" />
-        {running && <CircularProgress size={24} />}
-        <Button
-          disabled={running}
-          onClick={runMigration}
-          startIcon={<PlayArrowIcon />}
-          variant="contained"
+        <Tabs
+          className="toolTabs"
+          onChange={(_, value: ToolTab) => setActiveTool(value)}
+          value={activeTool}
         >
-          Run
-        </Button>
+          <Tab label="Migrator" value="migration" />
+          <Tab label="SVD" value="svd" />
+        </Tabs>
+        <Box className="toolbarSpacer" />
+        {activeTool === "migration" && running && <CircularProgress size={24} />}
+        {activeTool === "migration" && (
+          <Button
+            disabled={running}
+            onClick={runMigration}
+            startIcon={<PlayArrowIcon />}
+            variant="contained"
+          >
+            Run
+          </Button>
+        )}
       </Stack>
 
       <Stack className="content" spacing={2}>
-        <PathInput
-          field="patchPath"
-          hoveredField={hoveredField}
-          label={pathFieldLabels.patchPath}
-          onBrowse={choosePath}
-          onChange={setPath}
-          value={paths.patchPath}
-        />
-        <PathInput
-          field="dataDir"
-          hoveredField={hoveredField}
-          label={pathFieldLabels.dataDir}
-          detectingDataDir={detectingDataDir}
-          onBrowse={choosePath}
-          onChange={setPath}
-          onDetectDataDir={() => void detectGameDataDir("manual")}
-          value={paths.dataDir}
-        />
-        <PathInput
-          field="outDir"
-          hoveredField={hoveredField}
-          label={pathFieldLabels.outDir}
-          onBrowse={choosePath}
-          onChange={setPath}
-          value={paths.outDir}
-        />
+        {activeTool === "migration" ? (
+          <>
+            <PathInput
+              field="patchPath"
+              hoveredField={hoveredField}
+              label={pathFieldLabels.patchPath}
+              onBrowse={choosePath}
+              onChange={setPath}
+              value={paths.patchPath}
+            />
+            <PathInput
+              field="dataDir"
+              hoveredField={hoveredField}
+              label={pathFieldLabels.dataDir}
+              detectingDataDir={detectingDataDir}
+              onBrowse={choosePath}
+              onChange={setPath}
+              onDetectDataDir={() => void detectGameDataDir("manual")}
+              value={paths.dataDir}
+            />
+            <PathInput
+              field="outDir"
+              hoveredField={hoveredField}
+              label={pathFieldLabels.outDir}
+              onBrowse={choosePath}
+              onChange={setPath}
+              value={paths.outDir}
+            />
 
-        <Box className="pathRow">
-          <TextField
-            fullWidth
-            label="Targets"
-            onChange={(event) => setTargetFilter(event.target.value)}
-            placeholder="hash or name, comma separated"
-            size="small"
-            value={targetFilter}
-          />
-          <HelpTooltip lines={targetsHelp} title="Targets help" />
-        </Box>
+            <TargetPicker
+              errorText={targetLoadError}
+              loading={loadingTargets}
+              onClear={() => setSelectedTargets([])}
+              onQueryChange={setTargetSearch}
+              onSelectAll={selectAllTargets}
+              onToggle={toggleTarget}
+              options={targetOptions}
+              query={targetSearch}
+              selectedHashes={selectedTargets}
+            />
 
-        <Stack direction="row" spacing={3}>
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={noPadding}
-                onChange={(event) => setNoPadding(event.target.checked)}
+            <Stack direction="row" spacing={3}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={noPadding}
+                    onChange={(event) => setNoPadding(event.target.checked)}
+                  />
+                }
+                label={<OptionLabel help={noPaddingHelp} text="No padding" />}
               />
-            }
-            label={<OptionLabel help={noPaddingHelp} text="No padding" />}
-          />
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={partialRemap}
-                onChange={(event) => setPartialRemap(event.target.checked)}
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={partialRemap}
+                    onChange={(event) => setPartialRemap(event.target.checked)}
+                  />
+                }
+                label={<OptionLabel help={partialRemapHelp} text="Partial remap" />}
               />
-            }
-            label={<OptionLabel help={partialRemapHelp} text="Partial remap" />}
-          />
-        </Stack>
+            </Stack>
 
-        <Divider />
+            <Divider />
 
-        <SummaryPanel errorText={errorText} summary={summary} />
-        <Box className="logPanel">
-          <pre>{reportLines}</pre>
-        </Box>
+            <SummaryPanel errorText={errorText} summary={summary} />
+            <Box className="logPanel">
+              <pre>{reportLines}</pre>
+            </Box>
+          </>
+        ) : (
+          <SvdPanel />
+        )}
       </Stack>
     </Box>
   );
@@ -390,16 +443,23 @@ function dialogOptions(field: PathField) {
 
 function requestFromState(
   paths: PathState,
-  targetFilter: string,
+  selectedTargets: string[],
   noPadding: boolean,
   experimentalPartialRemap: boolean,
 ): MigrationRequest {
   return {
     ...paths,
-    targetFilter,
+    targetFilter: selectedTargets.join(","),
     noPadding,
     experimentalPartialRemap,
   };
+}
+
+function toggledTargetList(hash: string, selected: string[]) {
+  if (selected.includes(hash)) {
+    return selected.filter((value) => value !== hash);
+  }
+  return [...selected, hash];
 }
 
 type DetectMode = "auto" | "manual";

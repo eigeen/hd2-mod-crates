@@ -10,7 +10,7 @@ use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-const BUILTIN_ARMOR_MAPPING_JSON: &str = include_str!("../../assets/armor_mappings.merged.json");
+const BUILTIN_ARMOR_MAPPING_JSON: &str = hd2_migrator_data::ARMOR_MAPPING_JSON;
 
 pub const EXPECTED_PART_LABELS: [&str; 10] = [
     "slim waist",

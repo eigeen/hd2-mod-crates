@@ -2,7 +2,7 @@ use clap::{ArgAction, Parser};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
-#[command(name = "mod_armor_migrator", version, about, long_about = None)]
+#[command(name = "hd2-migrator", version, about, long_about = None)]
 pub struct Cli {
     /// Path to the source mod patch (e.g. 9ba626afa44a3aa3.patch_0).
     #[arg(long)]
@@ -66,13 +66,13 @@ pub struct Cli {
 }
 
 impl Cli {
-    pub fn padding_mode(&self) -> crate::padding::PaddingMode {
+    pub fn padding_mode(&self) -> hd2_migrator_io::padding::PaddingMode {
         if self.no_padding {
-            crate::padding::PaddingMode::Disabled
+            hd2_migrator_io::padding::PaddingMode::Disabled
         } else if self.empty_mesh_verbatim {
-            crate::padding::PaddingMode::Verbatim
+            hd2_migrator_io::padding::PaddingMode::Verbatim
         } else {
-            crate::padding::PaddingMode::Sanitized
+            hd2_migrator_io::padding::PaddingMode::Sanitized
         }
     }
 }

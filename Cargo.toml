@@ -1,12 +1,11 @@
-[package]
-name = "mod_armor_migrator"
-version = "0.1.0"
-edition = "2024"
-description = "Migrate Helldivers 2 armor mod patches across all armor archives"
-license = "MIT OR Apache-2.0"
-
 [workspace]
 members = [
+    "crates/hd2-archive-format",
+    "crates/hd2-migrator-cli",
+    "crates/hd2-migrator-core",
+    "crates/hd2-migrator-data",
+    "crates/hd2-migrator-io",
+    "crates/hd2-unit-matching",
     "crates/tauri_ui/src-tauri",
     "crates/svd-core",
     "crates/svd-export",
@@ -17,47 +16,31 @@ resolver = "3"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+byteorder = "1.5.0"
+clap = { version = "4.6.1", features = ["derive"] }
+color-eyre = "0.6.5"
+dialoguer = { version = "0.12.0", features = ["fuzzy-select"] }
+eyre = "0.6.12"
+indicatif = "0.18.3"
+lz4_flex = { version = "0.13.1", default-features = false, features = [
+    "std",
+    "safe-decode",
+] }
+owo-colors = { version = "4.3.0", features = ["supports-colors"] }
+rayon = "1.11.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
 tempfile = "3.23.0"
+thiserror = "2.0.18"
+tracing = "0.1.44"
+tracing-indicatif = "0.3.14"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+walkdir = "2.5.0"
 zip = { version = "8.6.0", default-features = false, features = [
     "deflate",
     "zstd",
 ] }
 zstd = "0.13.3"
-indicatif = "0.18.3"
-rayon = "1.11.0"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-
-[lib]
-path = "src/lib.rs"
-
-[[bin]]
-name = "mod_armor_migrator"
-path = "src/main.rs"
-
-[dependencies]
-clap = { version = "4.6.1", features = ["derive"] }
-color-eyre = "0.6.5"
-eyre = "0.6.12"
-thiserror = "2.0.18"
-rayon.workspace = true
-byteorder = "1.5.0"
-lz4_flex = { version = "0.13.1", default-features = false, features = [
-    "std",
-    "safe-decode",
-] }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-walkdir = "2.5.0"
-indicatif = { version = "0.18.4", features = ["rayon"] }
-dialoguer = { version = "0.12.0", features = ["fuzzy-select"] }
-owo-colors = { version = "4.3.0", features = ["supports-colors"] }
-tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-tracing-indicatif = "0.3.14"
-
-
-[dev-dependencies]
-tempfile = "3.27.0"

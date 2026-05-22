@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Mod Armor Migrator Tauri",
+  "productName": "HD2 Migrator Tauri",
   "version": "0.1.0",
   "identifier": "dev.modarmor.migrator.tauriui",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Mod Armor Migrator",
+        "title": "HD2 Migrator",
         "width": 960,
         "height": 720,
         "minWidth": 760,

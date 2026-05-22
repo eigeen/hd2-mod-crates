@@ -44,6 +44,14 @@ textarea {
   flex: 1;
 }
 
+.toolTabs {
+  min-height: 36px;
+}
+
+.toolTabs .MuiTab-root {
+  min-height: 36px;
+}
+
 .statusText {
   color: #526277;
   font-size: 13px;
@@ -161,4 +169,132 @@ textarea {
   line-height: 18px;
   margin: 0;
   white-space: pre-wrap;
+}
+
+.svdPanel {
+  width: 100%;
+}
+
+.toolSection {
+  padding: 4px 0;
+}
+
+.sectionTitle {
+  align-items: center;
+  color: #24364d;
+  margin-bottom: 12px;
+}
+
+.numericGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
+}
+
+.jobsField {
+  max-width: 220px;
+}
+
+.targetPanel {
+  background: #f8fafb;
+  border: 1px solid #dce4ed;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.targetPanelHeader {
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.targetPanelTitle {
+  color: #17382e;
+  font-weight: 700;
+}
+
+.targetPanelMeta {
+  color: #637187;
+  font-size: 12px;
+}
+
+.targetLoading {
+  align-items: center;
+  color: #526277;
+  margin-top: 10px;
+}
+
+.targetList {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  margin-top: 10px;
+  max-height: 300px;
+  overflow: auto;
+}
+
+.targetRow {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #dce4ed;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  min-height: 58px;
+  padding: 4px 8px 4px 2px;
+}
+
+.targetRow:hover {
+  border-color: #2e7d61;
+  box-shadow: 0 0 0 2px rgb(46 125 97 / 12%);
+}
+
+.targetRowText {
+  min-width: 0;
+}
+
+.targetName {
+  color: #24364d;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.targetHash {
+  color: #637187;
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.targetEmpty {
+  color: #637187;
+  padding: 12px;
+}
+
+.variantPanel {
+  background: #f8fafb;
+  border: 1px solid #dce4ed;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.packageName {
+  color: #17382e;
+  font-weight: 700;
+}
+
+.baseVariant {
+  color: #637187;
+  font-size: 12px;
+}
+
+.variantList {
+  display: grid;
+  gap: 2px 16px;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  max-height: 180px;
+  overflow: auto;
 }

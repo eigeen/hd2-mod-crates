@@ -1,6 +1,6 @@
-use mod_armor_migrator::{
-    builtin_template, migrate_all, ArchiveIndex, EmptyUnitTemplate, MigrateAllOpts,
-    MigrationReport, PaddingMode, ProgressSink,
+use hd2_migrator_io::{
+    ArchiveIndex, EmptyUnitTemplate, MigrateAllOpts, MigrationReport, PaddingMode, ProgressSink,
+    builtin_template, migrate_all,
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -15,6 +15,13 @@ pub struct MigrationRequest {
     target_filter: String,
     no_padding: bool,
     experimental_partial_remap: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MigrationTargetOption {
+    hash: String,
+    name: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -40,6 +47,15 @@ struct MigrationProgressEvent {
     status: String,
 }
 
+/// Return all armor migration targets for the selection list.
+#[tauri::command]
+pub fn load_migration_targets() -> Result<Vec<MigrationTargetOption>, String> {
+    let targets = ArchiveIndex::builtin()
+        .category("Armor")
+        .ok_or_else(|| "Armor category not found in archive index".to_owned())?;
+    Ok(targets.iter().map(target_option_from_entry).collect())
+}
+
 /// Run the migration away from the webview thread and return a compact summary.
 #[tauri::command]
 pub async fn run_migration(
@@ -55,7 +71,8 @@ pub async fn run_migration(
 fn validate_request(request: &MigrationRequest) -> Result<(), String> {
     validate_path(&request.patch_path, "Patch path")?;
     validate_path(&request.data_dir, "Game data directory")?;
-    validate_path(&request.out_dir, "Output directory")
+    validate_path(&request.out_dir, "Output directory")?;
+    validate_target_filter(&request.target_filter)
 }
 
 fn validate_path(path: &Path, label: &str) -> Result<(), String> {
@@ -63,6 +80,22 @@ fn validate_path(path: &Path, label: &str) -> Result<(), String> {
         Err(format!("{label} is required"))
     } else {
         Ok(())
+    }
+}
+
+fn validate_target_filter(value: &str) -> Result<(), String> {
+    if parse_target_filter(value).is_some() {
+        return Ok(());
+    }
+    Err("Select at least one target".to_owned())
+}
+
+fn target_option_from_entry(
+    entry: &hd2_migrator_io::index::ArmorEntry,
+) -> MigrationTargetOption {
+    MigrationTargetOption {
+        hash: entry.hash.clone(),
+        name: entry.name.clone(),
     }
 }
 
@@ -79,7 +112,7 @@ fn execute_migration(
 fn run_core_migration(
     request: &MigrationRequest,
     app: &AppHandle,
-) -> mod_armor_migrator::Result<Vec<MigrationReport>> {
+) -> hd2_migrator_io::Result<Vec<MigrationReport>> {
     let targets = parse_target_filter(&request.target_filter);
     let template = padding_template(request.no_padding);
     let progress = TauriProgress::new(app.clone());

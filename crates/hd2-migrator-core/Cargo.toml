@@ -1,0 +1,14 @@
+[package]
+name = "hd2-migrator-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Wasm-safe core migration planning types for HD2 migration"
+
+[dependencies]
+hd2-archive-format = { path = "../hd2-archive-format" }
+hd2-migrator-data = { path = "../hd2-migrator-data" }
+hd2-unit-matching = { path = "../hd2-unit-matching" }
+eyre.workspace = true
+serde.workspace = true
+serde_json.workspace = true

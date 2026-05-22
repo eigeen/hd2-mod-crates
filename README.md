@@ -1,6 +1,6 @@
-# mod_armor_migrator (Rust)
+# hd2-migrator (Rust)
 
-Rust port of the Python `mod_armor_migrator` tool. Takes a Helldivers 2 armor
+Rust port of the Python armor migrator tool. Takes a Helldivers 2 armor
 mod patch (the `9ba626afa44a3aa3.patch_0` trio) and re-keys it to every other
 armor archive, producing one ready-to-drop variant per target.
 
@@ -25,7 +25,7 @@ fill gaps that the authoritative table cannot cover.
 
 ```
 cargo build --release
-./target/release/mod_armor_migrator --help
+./target/release/hd2-migrator --help
 ```
 
 ## Usage
@@ -33,7 +33,7 @@ cargo build --release
 ### Migrate with the game `data/` directory
 
 ```
-mod_armor_migrator \
+hd2-migrator \
   --patch  path/to/your_mod/9ba626afa44a3aa3.patch_0 \
   --data-dir /path/to/Helldivers_2/data \
   --out-dir out/
@@ -48,7 +48,7 @@ Run with no arguments to be prompted for the patch path, game data directory,
 category, targets, and output directory:
 
 ```
-mod_armor_migrator
+hd2-migrator
 ```
 
 The `--non-interactive` flag turns missing required args into fatal errors

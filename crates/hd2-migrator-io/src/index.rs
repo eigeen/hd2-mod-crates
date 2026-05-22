@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::OnceLock;
 
-const BUILTIN_INDEX_JSON: &str = include_str!("../assets/archivehashes.json");
+const BUILTIN_INDEX_JSON: &str = hd2_migrator_data::ARCHIVE_INDEX_JSON;
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct ArmorEntry {

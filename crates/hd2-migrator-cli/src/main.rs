@@ -13,7 +13,7 @@ fn run_cli(should_pause: bool) -> ExitCode {
         return finish_with_error(error, should_pause);
     }
 
-    match mod_armor_migrator::cli::run() {
+    match crate::cli::run() {
         Ok(()) => finish_successfully(should_pause),
         Err(error) => finish_with_error(error, should_pause),
     }
@@ -49,3 +49,5 @@ fn pause_before_exit(should_pause: bool) {
     let mut input = String::new();
     let _ = io::stdin().read_line(&mut input);
 }
+
+mod cli;

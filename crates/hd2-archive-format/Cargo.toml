@@ -1,0 +1,13 @@
+[package]
+name = "hd2-archive-format"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Wasm-safe in-memory archive format primitives for HD2 migration"
+
+[dependencies]
+byteorder.workspace = true
+eyre.workspace = true
+lz4_flex.workspace = true
+serde.workspace = true
+thiserror.workspace = true

@@ -1,6 +1,6 @@
-//! Indicatif-backed implementation of [`crate::ProgressSink`].
+//! Indicatif-backed implementation of the migrator progress sink.
 
-use crate::migrator::ProgressSink;
+use hd2_migrator_io::migrator::ProgressSink;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::collections::HashMap;
 use std::sync::Mutex;

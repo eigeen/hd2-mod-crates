@@ -1,0 +1,26 @@
+[package]
+name = "hd2-migrator-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Command line interface for the Helldivers 2 armor migrator"
+
+[[bin]]
+name = "hd2-migrator"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+color-eyre.workspace = true
+dialoguer.workspace = true
+eyre.workspace = true
+hd2-migrator-io = { path = "../hd2-migrator-io" }
+indicatif = { workspace = true, features = ["rayon"] }
+owo-colors.workspace = true
+tracing.workspace = true
+tracing-indicatif.workspace = true
+tracing-subscriber.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

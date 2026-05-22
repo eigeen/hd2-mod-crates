@@ -6,9 +6,9 @@ pub mod interactive;
 pub mod logging;
 pub mod progress;
 
-use crate::index::ArchiveIndex;
-use crate::migrator::{migrate_all, MigrateAllOpts, MigrationReport};
-use crate::padding::{builtin_template, extract_template, EmptyUnitTemplate};
+use hd2_migrator_io::index::ArchiveIndex;
+use hd2_migrator_io::migrator::{migrate_all, MigrateAllOpts, MigrationReport};
+use hd2_migrator_io::padding::{builtin_template, extract_template, EmptyUnitTemplate};
 use args::Cli;
 use clap::Parser;
 use eyre::WrapErr;
@@ -16,7 +16,7 @@ use owo_colors::OwoColorize;
 use progress::IndicatifProgress;
 use std::path::Path;
 
-pub fn run() -> crate::Result<()> {
+pub fn run() -> hd2_migrator_io::Result<()> {
     let mut cli = Cli::parse();
     logging::init(cli.verbose);
     print_startup_banner();
@@ -80,8 +80,8 @@ fn run_mode_a(
     out_dir: &Path,
     data_dir: &Path,
     template: Option<&EmptyUnitTemplate>,
-    padding_mode: crate::padding::PaddingMode,
-) -> crate::Result<Vec<MigrationReport>> {
+    padding_mode: hd2_migrator_io::padding::PaddingMode,
+) -> hd2_migrator_io::Result<Vec<MigrationReport>> {
     let target_filter = if cli.target.is_empty() {
         None
     } else {

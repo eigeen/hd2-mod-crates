@@ -45,7 +45,7 @@ const DEFAULT_EXCLUDED_TARGET_NAMES: &[&str] = &[
 ];
 
 /// Return true for targets that should not be selected in broad default runs.
-pub(crate) fn is_default_excluded_target(hash: &str, name: &str) -> bool {
+pub fn is_default_excluded_target(hash: &str, name: &str) -> bool {
     is_default_excluded_hash(hash) || is_default_excluded_name(name)
 }
 

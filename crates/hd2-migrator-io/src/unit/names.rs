@@ -8,8 +8,7 @@
 //! 3. If any of the four are missing, fall back to a bonehash-based inference
 //!    from the shared `hashlists/bonehash.txt`.
 
-const BONEHASH_TEXT: &str =
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/bonehash.txt"));
+const BONEHASH_TEXT: &str = hd2_migrator_data::BONEHASH_TEXT;
 
 use std::sync::OnceLock;
 

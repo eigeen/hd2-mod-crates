@@ -1,0 +1,20 @@
+[package]
+name = "hd2-migrator-io"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native filesystem migrator adapter for Helldivers 2 armor mods"
+
+[dependencies]
+byteorder.workspace = true
+eyre.workspace = true
+hd2-migrator-data = { path = "../hd2-migrator-data" }
+lz4_flex.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

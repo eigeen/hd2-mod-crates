@@ -12,6 +12,11 @@ export interface MigrationRequest extends PathState {
   experimentalPartialRemap: boolean;
 }
 
+export interface MigrationTargetOption {
+  hash: string;
+  name: string;
+}
+
 export interface MigrationSummary {
   migratedCount: number;
   warningCount: number;
@@ -33,4 +38,37 @@ export interface MigrationProgressEvent {
 export interface GameDataDiscovery {
   dataDir: string | null;
   candidates: string[];
+}
+
+export interface SvdPackRequest {
+  inputDir: string;
+  baseVariant: string;
+  outputDir: string;
+  packagePath: string | null;
+  compressionLevel: number;
+  jobs: number | null;
+}
+
+export interface SvdPackSummary {
+  outputDir: string;
+  packagePath: string | null;
+}
+
+export interface SvdPackageSummary {
+  modName: string | null;
+  baseVariant: string;
+  variants: string[];
+}
+
+export interface SvdExportRequest {
+  packagePath: string;
+  outputZip: string;
+  allVariants: boolean;
+  variants: string[];
+  jobs: number | null;
+}
+
+export interface SvdExportSummary {
+  outputZip: string;
+  variantCount: number;
 }

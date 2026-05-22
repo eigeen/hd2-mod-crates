@@ -1,7 +1,7 @@
 [package]
-name = "mod_armor_migrator_tauri_ui"
+name = "hd2_migrator_tauri_ui"
 version = "0.1.0"
-description = "Tauri desktop UI prototype for mod_armor_migrator"
+description = "Tauri desktop UI prototype for hd2-migrator"
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -10,14 +10,17 @@ edition = "2024"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "mod_armor_migrator_tauri_ui_lib"
+name = "hd2_migrator_tauri_ui_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-mod_armor_migrator = { path = "../../.." }
+hd2-migrator-io = { path = "../../hd2-migrator-io" }
+hd2-migrator-core = { path = "../../hd2-migrator-core" }
+hd2-migrator-data = { path = "../../hd2-migrator-data" }
+svd-core = { path = "../../svd-core" }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
