@@ -6,8 +6,8 @@ description = "Migrate Helldivers 2 armor mod patches across all armor archives"
 license = "MIT OR Apache-2.0"
 
 [workspace]
-members = ["crates/slint_ui", "crates/tauri_ui/src-tauri"]
-resolver = "2"
+members = ["crates/tauri_ui/src-tauri"]
+resolver = "3"
 
 [lib]
 path = "src/lib.rs"
