@@ -1,0 +1,13 @@
+[package]
+name = "svd-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+indicatif.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+zip.workspace = true
+zstd.workspace = true

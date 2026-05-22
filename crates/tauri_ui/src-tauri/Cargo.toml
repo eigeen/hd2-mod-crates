@@ -2,7 +2,7 @@
 name = "mod_armor_migrator_tauri_ui"
 version = "0.1.0"
 description = "Tauri desktop UI prototype for mod_armor_migrator"
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

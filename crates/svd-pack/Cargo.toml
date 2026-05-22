@@ -1,0 +1,7 @@
+[package]
+name = "svd-pack"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+svd-core = { path = "../svd-core" }

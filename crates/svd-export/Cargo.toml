@@ -1,0 +1,10 @@
+[package]
+name = "svd-export"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tempfile.workspace = true
+iocraft = "0.8.2"
+smol = "2.0.1"
+svd-core = { path = "../svd-core" }
