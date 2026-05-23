@@ -16,9 +16,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  FormControl,
   FormControlLabel,
-  FormLabel,
   InputAdornment,
   Radio,
   RadioGroup,
@@ -28,8 +26,7 @@ import {
 } from "@mui/material";
 import { memo, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { downloadZip } from "./fileInputs";
-import type { AuthorityMappings, MigrationResult, PatchFiles, TargetOption } from "./types";
+import type { AuthorityMappings, MigrationSummary, PatchInfo, TargetOption } from "./types";
 
 const panelClass =
   "rounded-2xl border border-slate-200/85 bg-white shadow-[0_1px_2px_rgb(15_23_42_/_0.04)] overflow-hidden";
@@ -52,8 +49,8 @@ export function AuthorityPanel(props: AuthorityPanelProps) {
           已连接游戏 data 目录，浏览器版可执行完整跨版本迁移（与桌面/命令行版本结果一致）。
         </p>
       ) : (
-        <p className="m-0 text-xs leading-[1.55] text-slate-600">
-          未连接游戏目录时仅支持「识别补丁来源 + 输出到源版本」。识别基于人工校对的甲胄部件映射表；选择下方游戏 data 目录可启用完整跨版本迁移。
+        <p className="m-0 text-xs leading-[1.55] text-amber-700">
+          必须先选择游戏 data 目录（下方面板）才能进行迁移。需读取源 / 目标 archive 字节；浏览器无法内置游戏数据。
         </p>
       )}
       <div className="mt-auto flex flex-col gap-1.5 pt-4">
@@ -73,7 +70,7 @@ export function AuthorityPanel(props: AuthorityPanelProps) {
 }
 
 interface PatchPanelProps {
-  patch: PatchFiles | null;
+  patch: PatchInfo | null;
   onPatchFiles: (files: FileList | null) => void;
 }
 
@@ -166,8 +163,10 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
 
   return (
     <div className="m-3 flex min-h-[260px] flex-col items-stretch bg-slate-50/30 min-[820px]:flex-row">
-      <FormControl className="flex min-w-0 flex-1 flex-col p-6 min-[820px]:pr-9">
-        <FormLabel className="mappingFormLabel">源版本</FormLabel>
+      {/* 注意：故意不用 MUI FormControl 包裹 Radio 列表 —— FormControl 在 dev 模式下 childContext useMemo 每次都会变 ref，
+          会导致内部所有 Radio 在每次父级 render 时都重渲染，对几百项列表非常卡。 */}
+      <div className="flex min-w-0 flex-1 flex-col p-6 min-[820px]:pr-9">
+        <MappingSectionLabel>源版本</MappingSectionLabel>
         {props.sourceChoices.length ? (
           <div className="flex max-h-[360px] flex-1 flex-col overflow-auto">
             <RadioGroup value={props.sourceHash} onChange={(event) => props.onSourceChange(event.target.value)}>
@@ -179,10 +178,10 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
         ) : (
           <EmptyMapping icon={<DescriptionIcon />} text="请先导入补丁文件" />
         )}
-      </FormControl>
-      <FormControl className="flex min-w-0 flex-1 flex-col border-t border-slate-100/95 p-6 min-[820px]:border-t-0 min-[820px]:border-l min-[820px]:pl-4">
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col border-t border-slate-100/95 p-6 min-[820px]:border-t-0 min-[820px]:border-l min-[820px]:pl-4">
         <div className="mb-3 flex items-center gap-3">
-          <FormLabel className="mappingFormLabel mb-0!">目标版本</FormLabel>
+          <MappingSectionLabel inline>目标版本</MappingSectionLabel>
           <div className="flex-1" />
           <TextField
             className="targetSearchField"
@@ -209,10 +208,22 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
             <EmptyMapping icon={<TaskAltIcon />} text={targetQuery ? "没有匹配的目标版本" : "目标版本输出"} />
           )}
         </div>
-      </FormControl>
+      </div>
     </div>
   );
 });
+
+function MappingSectionLabel({ children, inline }: { children: ReactNode; inline?: boolean }) {
+  return (
+    <p
+      className={`m-0 text-[12px] font-bold uppercase tracking-[0.08em] leading-none text-slate-400 ${
+        inline ? "" : "mb-3"
+      }`}
+    >
+      {children}
+    </p>
+  );
+}
 
 function filterTargets(targets: TargetOption[], query: string) {
   const trimmed = query.trim().toLowerCase();
@@ -300,26 +311,27 @@ const OptionsPanel = memo(function OptionsPanel(props: OptionsPanelProps) {
 
 interface ResultPanelProps {
   errorText: string;
-  result: MigrationResult | null;
+  onDownload: () => void;
+  summary: MigrationSummary | null;
 }
 
-export function ResultPanel({ errorText, result }: ResultPanelProps) {
+export function ResultPanel({ errorText, onDownload, summary }: ResultPanelProps) {
   if (errorText) {
     return <Alert severity="error">{errorText}</Alert>;
   }
-  if (!result) {
+  if (!summary) {
     return null;
   }
   return (
     <div className={`${panelClass} mb-6 p-5`}>
       <div className="flex flex-row items-center gap-4">
         <div>
-          <p className="m-0 text-base font-bold text-slate-900">已迁移 {result.summary.migratedCount} 个目标</p>
-          <p className={`${metaLineClass} m-0 mt-3`}>{result.summary.warningCount} 条警告</p>
+          <p className="m-0 text-base font-bold text-slate-900">已迁移 {summary.migratedCount} 个目标</p>
+          <p className={`${metaLineClass} m-0 mt-3`}>{summary.warningCount} 条警告</p>
         </div>
         <div className="flex-1" />
         <Button
-          onClick={() => downloadZip(result.zipBytes, "hd2-migrated-patch.zip")}
+          onClick={onDownload}
           startIcon={<DownloadIcon />}
           variant="contained"
         >
@@ -327,7 +339,7 @@ export function ResultPanel({ errorText, result }: ResultPanelProps) {
         </Button>
       </div>
       <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 p-3">
-        {result.summary.reports.map((report) => (
+        {summary.reports.map((report) => (
           <p
             className="m-0 font-mono text-xs text-slate-700 [overflow-wrap:anywhere]"
             key={report.targetHash}

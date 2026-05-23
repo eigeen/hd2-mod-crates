@@ -1,8 +1,8 @@
 import ElectricBoltIcon from "@mui/icons-material/ElectricBolt";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { Button, CircularProgress } from "@mui/material";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { patchFilesFromList } from "./fileInputs";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { downloadZip, patchFilesFromList } from "./fileInputs";
 import { GameDataDirPanel, type GameDirSelection } from "./GameDataDirPanel";
 import { GameDataSource } from "./gameDataSource";
 import {
@@ -16,8 +16,9 @@ import { loadAuthorityMappings } from "./metadata";
 import type {
   AuthorityMappings,
   MigrateOptions,
-  MigrationResult,
+  MigrationSummary,
   PatchFiles,
+  PatchInfo,
   TargetOption,
 } from "./types";
 import { builtinTargetOptions, detectSource, migrate, migrateCrossArchive } from "./wasmClient";
@@ -27,7 +28,10 @@ const PATCH_SUFFIX = "9ba626afa44a3aa3.patch_0";
 function App() {
   const [authority, setAuthority] = useState<AuthorityMappings | null>(null);
   const [targets, setTargets] = useState<TargetOption[]>([]);
-  const [patch, setPatch] = useState<PatchFiles | null>(null);
+  // patch 的 Uint8Array 可能上百 MB，放在 React state 里会被 React DevTools 扩展枚举/序列化导致 CPU 拉满 + 堆 OOM。
+  // 因此把字节存到 ref，state 只留小元数据用于驱动 UI。
+  const patchRef = useRef<PatchFiles | null>(null);
+  const [patchInfo, setPatchInfo] = useState<PatchInfo | null>(null);
   const [sourceHash, setSourceHash] = useState("");
   const [targetHashes, setTargetHashes] = useState<string[]>([]);
   const [multiTarget, setMultiTarget] = useState(false);
@@ -36,7 +40,9 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [progressLabel, setProgressLabel] = useState("");
   const [errorText, setErrorText] = useState("");
-  const [result, setResult] = useState<MigrationResult | null>(null);
+  // zipBytes 同样可能上百 MB —— 与 patch 字节一样放 ref，state 只留 summary，避免 React DevTools 枚举触发 OOM。
+  const resultBytesRef = useRef<Uint8Array | null>(null);
+  const [resultSummary, setResultSummary] = useState<MigrationSummary | null>(null);
   const [warningOpen, setWarningOpen] = useState(false);
   const [multiConfirmed, setMultiConfirmed] = useState(false);
   const [showAllSources, setShowAllSources] = useState(false);
@@ -55,12 +61,19 @@ function App() {
   }, []);
 
   const selectedTargetCount = targetHashes.length;
-  const canRun = Boolean(targets.length && patch && sourceHash && selectedTargetCount);
   const crossArchiveReady = gameDir !== null && gameDir.status.kind !== "empty";
+  const canRun = Boolean(
+    targets.length && patchInfo && sourceHash && selectedTargetCount && crossArchiveReady,
+  );
+  const blockerHint = nextBlockerHint({
+    crossArchiveReady,
+    patchInfo,
+    selectedTargetCount,
+  });
 
   const sourceChoices = useMemo(
-    () => (patch ? sourceChoicesForSelection(targets, sourceHash, showAllSources, crossArchiveReady) : []),
-    [crossArchiveReady, patch, showAllSources, sourceHash, targets],
+    () => (patchInfo ? sourceChoicesForSelection(targets, sourceHash, showAllSources) : []),
+    [patchInfo, showAllSources, sourceHash, targets],
   );
 
   const targetOptions = useMemo(
@@ -68,9 +81,24 @@ function App() {
     [sourceHash, targets],
   );
 
+  const clearResult = useCallback(() => {
+    resultBytesRef.current = null;
+    setResultSummary(null);
+  }, []);
+
+  const downloadResult = useCallback(() => {
+    const bytes = resultBytesRef.current;
+    if (!bytes) {
+      return;
+    }
+    downloadZip(bytes, "hd2-migrated-patch.zip");
+  }, []);
+
   const applyPatch = useCallback(async (nextPatch: PatchFiles) => {
-    setPatch(nextPatch);
-    setResult(null);
+    patchRef.current = nextPatch;
+    setPatchInfo({ name: nextPatch.name });
+    resultBytesRef.current = null;
+    setResultSummary(null);
     setSourceHash("");
     setTargetHashes([]);
     setShowAllSources(false);
@@ -108,22 +136,23 @@ function App() {
   const chooseSource = useCallback((hash: string) => {
     setSourceHash(hash);
     setTargetHashes((current) => current.filter((targetHash) => targetHash !== hash));
-    setResult(null);
-  }, []);
+    clearResult();
+  }, [clearResult]);
 
   const chooseTarget = useCallback(
     (hash: string) => {
-      setResult(null);
+      clearResult();
       if (!multiTarget) {
         setTargetHashes([hash]);
         return;
       }
       setTargetHashes((current) => toggleHash(current, hash));
     },
-    [multiTarget],
+    [clearResult, multiTarget],
   );
 
   const runMigration = useCallback(async () => {
+    const patch = patchRef.current;
     if (!patch) {
       return;
     }
@@ -141,18 +170,15 @@ function App() {
     const useCrossArchive = gameDir !== null && targetHashes.some((hash) => hash !== sourceHash);
     setProgressLabel("");
     await runTask(setBusy, setErrorText, async () => {
-      if (useCrossArchive && gameDir) {
-        const dataSource = new GameDataSource(gameDir.handle);
-        const output = await migrateCrossArchive(patch, options, dataSource, {
-          onTargetStart: (name) => setProgressLabel(`正在迁移 ${name}`),
-          onStage: (name, stage) => setProgressLabel(`${name} · ${stage}`),
-          onTargetFinish: () => setProgressLabel(""),
-        });
-        setResult(output);
-      } else {
-        const output = await migrate(patch, options);
-        setResult(output);
-      }
+      const output = useCrossArchive && gameDir
+        ? await migrateCrossArchive(patch, options, new GameDataSource(gameDir.handle), {
+            onTargetStart: (name) => setProgressLabel(`正在迁移 ${name}`),
+            onStage: (name, stage) => setProgressLabel(`${name} · ${stage}`),
+            onTargetFinish: () => setProgressLabel(""),
+          })
+        : await migrate(patch, options);
+      resultBytesRef.current = output.zipBytes;
+      setResultSummary(output.summary);
     });
     setProgressLabel("");
   }, [
@@ -161,7 +187,6 @@ function App() {
     multiTarget,
     noPadding,
     partialRemap,
-    patch,
     sourceHash,
     targetHashes,
   ]);
@@ -203,7 +228,7 @@ function App() {
             crossArchiveReady={crossArchiveReady}
             targetCount={targets.length}
           />
-          <PatchPanel onPatchFiles={importPatchFiles} patch={patch} />
+          <PatchPanel onPatchFiles={importPatchFiles} patch={patchInfo} />
         </div>
         <GameDataDirPanel onChange={setGameDir} selection={gameDir} />
         <TargetPanel
@@ -220,11 +245,15 @@ function App() {
           sourceChoices={sourceChoices}
           targetOptions={targetOptions}
         />
-        <ResultPanel errorText={errorText} result={result} />
-        {!errorText && !result && (
+        <ResultPanel
+          errorText={errorText}
+          onDownload={downloadResult}
+          summary={resultSummary}
+        />
+        {!errorText && !resultSummary && (
           <div className="flex items-center gap-2.5 rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-blue-800">
             <span className="h-2 w-2 rounded-full bg-blue-600 shadow-[0_0_0_5px_rgb(59_130_246_/_0.16)]" />
-            <p className="m-0 text-xs font-bold">{busy && progressLabel ? progressLabel : "就绪"}</p>
+            <p className="m-0 text-xs font-bold">{busy && progressLabel ? progressLabel : blockerHint}</p>
           </div>
         )}
       </main>
@@ -248,13 +277,31 @@ function sourceChoicesForSelection(
   targets: TargetOption[],
   sourceHash: string,
   showAllSources: boolean,
-  crossArchiveReady: boolean,
 ) {
-  if (showAllSources || crossArchiveReady) {
+  if (showAllSources) {
     return targets;
   }
   const selectedSource = targets.find((target) => target.hash === sourceHash);
   return selectedSource ? [selectedSource] : [];
+}
+
+interface BlockerHintInput {
+  crossArchiveReady: boolean;
+  patchInfo: PatchInfo | null;
+  selectedTargetCount: number;
+}
+
+function nextBlockerHint(input: BlockerHintInput): string {
+  if (!input.crossArchiveReady) {
+    return "请先在下方选择游戏 data 目录";
+  }
+  if (!input.patchInfo) {
+    return "请选择补丁文件";
+  }
+  if (!input.selectedTargetCount) {
+    return "请选择目标版本";
+  }
+  return "就绪";
 }
 
 interface DetectPatchSourceRequest {

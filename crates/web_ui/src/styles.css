@@ -73,17 +73,6 @@ textarea {
   border-color: #e2e8f0;
 }
 
-.mappingFormLabel.MuiFormLabel-root {
-  color: #94a3b8;
-  display: block;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  line-height: 1;
-  margin-bottom: 12px;
-  text-transform: uppercase;
-}
-
 .optionsControl.MuiFormControlLabel-root {
   margin: 0 !important;
 }

@@ -10,6 +10,11 @@ export interface PatchFiles {
   stream: Uint8Array;
 }
 
+// 仅供 UI 展示用的轻量元数据；patch 的字节存在 ref 里，避免 React DevTools 在 state 里枚举上百 MB 数据。
+export interface PatchInfo {
+  name: string;
+}
+
 export interface AuthorityMappings {
   armorCount: number;
   hasArmor: (name: string) => boolean;
