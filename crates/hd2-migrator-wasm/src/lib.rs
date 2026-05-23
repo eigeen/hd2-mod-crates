@@ -4,6 +4,4 @@ mod api;
 mod error;
 mod zip_store;
 
-pub use api::{
-    build_metadata, builtin_target_options, detect_source, list_targets, migrate_many, migrate_one,
-};
+pub use api::{builtin_target_options, detect_source, migrate_many, migrate_one};

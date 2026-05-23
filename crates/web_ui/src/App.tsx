@@ -1,28 +1,28 @@
 import ElectricBoltIcon from "@mui/icons-material/ElectricBolt";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { Button, CircularProgress } from "@mui/material";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { patchFilesFromList } from "./fileInputs";
 import {
-  MetadataPanel,
+  AuthorityPanel,
   PatchPanel,
   PerformanceDialog,
   ResultPanel,
   TargetPanel,
 } from "./MigratorPanels";
-import {
-  buildMetadataFromDirectory,
-  fallbackTargetOptions,
-  loadMetadataFile,
-  loadPublicMetadata,
-} from "./metadata";
-import type { MetadataState, MigrationResult, PatchFiles, TargetOption } from "./types";
-import { detectSource, listTargets, migrate } from "./wasmClient";
+import { loadAuthorityMappings } from "./metadata";
+import type {
+  AuthorityMappings,
+  MigrationResult,
+  PatchFiles,
+  TargetOption,
+} from "./types";
+import { builtinTargetOptions, detectSource, migrate } from "./wasmClient";
 
-const patchSuffix = "9ba626afa44a3aa3.patch_0";
+const PATCH_SUFFIX = "9ba626afa44a3aa3.patch_0";
 
 function App() {
-  const [metadata, setMetadata] = useState<MetadataState | null>(null);
+  const [authority, setAuthority] = useState<AuthorityMappings | null>(null);
   const [targets, setTargets] = useState<TargetOption[]>([]);
   const [patch, setPatch] = useState<PatchFiles | null>(null);
   const [sourceHash, setSourceHash] = useState("");
@@ -37,15 +37,20 @@ function App() {
   const [multiConfirmed, setMultiConfirmed] = useState(false);
   const [showAllSources, setShowAllSources] = useState(false);
 
-  const loadPublicMetadataIntoState = useCallback(async () => {
-    const loaded = await loadPublicMetadata();
-    setMetadata(loaded);
-    setTargets(await listTargets(loaded.json));
-    return loaded;
+  useEffect(() => {
+    loadAuthorityMappings()
+      .then(setAuthority)
+      .catch((error) => console.error("[hd2-migrator] load authority mappings failed:", error));
+  }, []);
+
+  useEffect(() => {
+    builtinTargetOptions()
+      .then(setTargets)
+      .catch((error) => console.error("[hd2-migrator] load builtin targets failed:", error));
   }, []);
 
   const selectedTargetCount = targetHashes.length;
-  const canRun = Boolean(metadata?.targetCount && patch && sourceHash && selectedTargetCount);
+  const canRun = Boolean(targets.length && patch && sourceHash && selectedTargetCount);
 
   const sourceChoices = useMemo(
     () => (patch ? sourceChoicesForSelection(targets, sourceHash, showAllSources) : []),
@@ -56,30 +61,6 @@ function App() {
     () => targets.filter((target) => target.hash !== sourceHash),
     [sourceHash, targets],
   );
-
-  const importMetadata = useCallback(async (files: FileList | null) => {
-    const file = files?.[0];
-    if (!file) {
-      return;
-    }
-    await runTask(setBusy, setErrorText, async () => {
-      const loaded = await loadMetadataFile(file);
-      setMetadata(loaded);
-      setTargets(await listTargets(loaded.json));
-      resetMigrationSelection(setSourceHash, setTargetHashes, setResult);
-    });
-  }, []);
-
-  const loadDirectoryMetadata = useCallback(async () => {
-    await runTask(setBusy, setErrorText, async () => {
-      const currentMetadata = metadata ?? (await loadPublicMetadataIntoState());
-      const options = await fallbackTargetOptions(currentMetadata);
-      const loaded = await buildMetadataFromDirectory(options);
-      setMetadata(loaded);
-      setTargets(await listTargets(loaded.json));
-      resetMigrationSelection(setSourceHash, setTargetHashes, setResult);
-    });
-  }, [loadPublicMetadataIntoState, metadata]);
 
   const importPatch = useCallback(
     async (files: FileList | null) => {
@@ -93,16 +74,14 @@ function App() {
         setSourceHash("");
         setTargetHashes([]);
         setShowAllSources(false);
-        const currentMetadata = metadata ?? (await loadPublicMetadataIntoState());
         await detectPatchSource({
-          metadata: currentMetadata,
           patch: nextPatch,
           setSourceHash,
           setShowAllSources,
         });
       });
     },
-    [loadPublicMetadataIntoState, metadata],
+    [],
   );
 
   const toggleMultiTarget = useCallback((enabled: boolean) => {
@@ -143,17 +122,16 @@ function App() {
       return;
     }
     await runTask(setBusy, setErrorText, async () => {
-      const currentMetadata = metadata ?? (await loadPublicMetadataIntoState());
-      const output = await migrate(currentMetadata.json, patch, {
+      const output = await migrate(patch, {
         sourceHash,
         targetHashes,
-        patchSuffix,
+        patchSuffix: PATCH_SUFFIX,
         noPadding,
         experimentalPartialRemap: partialRemap,
       });
       setResult(output);
     });
-  }, [loadPublicMetadataIntoState, metadata, multiConfirmed, multiTarget, noPadding, partialRemap, patch, sourceHash, targetHashes]);
+  }, [multiConfirmed, multiTarget, noPadding, partialRemap, patch, sourceHash, targetHashes]);
 
   return (
     <div className="min-h-screen">
@@ -164,7 +142,7 @@ function App() {
           </div>
           <div>
             <h1 className="m-0 text-base font-bold leading-tight text-slate-900">HD2 外观 Mod 迁移工具</h1>
-            <p className="m-0 text-xs text-slate-500">导入元数据 JSON 并执行迁移</p>
+            <p className="m-0 text-xs text-slate-500">导入补丁、识别来源、选择目标</p>
           </div>
         </div>
         <div className="hidden flex-1 min-[820px]:block" />
@@ -184,12 +162,7 @@ function App() {
 
       <main className="mx-auto flex w-full max-w-[896px] flex-col gap-5 px-4 py-6 min-[820px]:px-6 min-[820px]:py-10">
         <div className="flex flex-col items-stretch gap-5 min-[820px]:flex-row">
-          <MetadataPanel
-            busy={busy}
-            metadata={metadata}
-            onDirectoryMetadata={loadDirectoryMetadata}
-            onMetadataFile={importMetadata}
-          />
+          <AuthorityPanel authority={authority} targetCount={targets.length} />
           <PatchPanel patch={patch} onPatchFiles={importPatch} />
         </div>
         <TargetPanel
@@ -199,7 +172,6 @@ function App() {
           onSourceChange={chooseSource}
           onTargetChange={chooseTarget}
           partialRemap={partialRemap}
-          patchSuffix={patchSuffix}
           selectedTargets={targetHashes}
           setNoPadding={setNoPadding}
           setPartialRemap={setPartialRemap}
@@ -240,19 +212,14 @@ function sourceChoicesForSelection(targets: TargetOption[], sourceHash: string, 
 }
 
 interface DetectPatchSourceRequest {
-  metadata: MetadataState | null;
   patch: PatchFiles;
   setSourceHash: (hash: string) => void;
   setShowAllSources: (show: boolean) => void;
 }
 
 async function detectPatchSource(request: DetectPatchSourceRequest) {
-  const { metadata, patch, setSourceHash, setShowAllSources } = request;
-  if (!metadata || metadata.targetCount === 0) {
-    setShowAllSources(true);
-    return;
-  }
-  const source = await detectSource(metadata.json, patch);
+  const { patch, setSourceHash, setShowAllSources } = request;
+  const source = await detectSource(patch);
   if (source) {
     setSourceHash(source.hash);
     return;
@@ -265,16 +232,6 @@ function toggleHash(values: string[], hash: string) {
     return values.filter((value) => value !== hash);
   }
   return [...values, hash];
-}
-
-function resetMigrationSelection(
-  setSourceHash: (value: string) => void,
-  setTargetHashes: (value: string[]) => void,
-  setResult: (value: MigrationResult | null) => void,
-) {
-  setSourceHash("");
-  setTargetHashes([]);
-  setResult(null);
 }
 
 async function runTask(

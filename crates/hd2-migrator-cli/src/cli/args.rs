@@ -1,12 +1,9 @@
-use clap::{ArgAction, Parser, Subcommand};
+use clap::{ArgAction, Parser};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(name = "hd2-migrator", version, about, long_about = None)]
 pub struct Cli {
-    #[command(subcommand)]
-    pub command: Option<CliCommand>,
-
     /// Path to the source mod patch (e.g. 9ba626afa44a3aa3.patch_0).
     #[arg(long)]
     pub patch: Option<PathBuf>,
@@ -66,31 +63,6 @@ pub struct Cli {
     /// Fail (don't prompt) when required args are missing.
     #[arg(long = "non-interactive")]
     pub non_interactive: bool,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum CliCommand {
-    /// Extract browser migration metadata from a Helldivers 2 game data folder.
-    ExtractWebMetadata(ExtractWebMetadataArgs),
-}
-
-#[derive(Debug, Parser)]
-pub struct ExtractWebMetadataArgs {
-    /// Game data/ directory.
-    #[arg(long = "data-dir")]
-    pub data_dir: PathBuf,
-
-    /// Output JSON path.
-    #[arg(long)]
-    pub out: PathBuf,
-
-    /// Archive category in archivehashes.json.
-    #[arg(long, default_value = "Armor")]
-    pub category: String,
-
-    /// Override archivehashes.json path; defaults to the bundled copy.
-    #[arg(long)]
-    pub index: Option<PathBuf>,
 }
 
 impl Cli {

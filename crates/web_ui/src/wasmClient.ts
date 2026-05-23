@@ -1,10 +1,4 @@
-import type {
-  DirectoryArchiveInput,
-  MigrateOptions,
-  MigrationResult,
-  PatchFiles,
-  TargetOption,
-} from "./types";
+import type { MigrateOptions, MigrationResult, PatchFiles, TargetOption } from "./types";
 
 let ready: Promise<typeof import("./wasm/hd2_migrator_wasm/hd2_migrator_wasm.js")> | null = null;
 
@@ -23,29 +17,19 @@ export async function builtinTargetOptions(category = "Armor") {
   return callWasm("builtin_target_options", () => wasm.builtin_target_options(category)) as Promise<TargetOption[]>;
 }
 
-export async function buildMetadataJson(category: string, archives: DirectoryArchiveInput[]) {
-  const wasm = await loadWasm();
-  return callWasm("build_metadata", () => wasm.build_metadata(category, archives));
-}
-
-export async function listTargets(metadataJson: string) {
-  const wasm = await loadWasm();
-  return callWasm("list_targets", () => wasm.list_targets(metadataJson)) as Promise<TargetOption[]>;
-}
-
-export async function detectSource(metadataJson: string, patch: PatchFiles) {
+export async function detectSource(patch: PatchFiles, category = "Armor") {
   const wasm = await loadWasm();
   return callWasm("detect_source", () =>
-    wasm.detect_source(metadataJson, patch.name, patch.toc, patch.gpu, patch.stream),
+    wasm.detect_source(patch.name, patch.toc, patch.gpu, patch.stream, category),
   ) as Promise<TargetOption | null>;
 }
 
-export async function migrate(metadataJson: string, patch: PatchFiles, options: MigrateOptions) {
+export async function migrate(patch: PatchFiles, options: MigrateOptions, category = "Armor") {
   const wasm = await loadWasm();
   const fnName = options.targetHashes.length === 1 ? "migrate_one" : "migrate_many";
   const fn = options.targetHashes.length === 1 ? wasm.migrate_one : wasm.migrate_many;
   return callWasm(fnName, () =>
-    fn(metadataJson, patch.name, patch.toc, patch.gpu, patch.stream, options),
+    fn(patch.name, patch.toc, patch.gpu, patch.stream, options, category),
   ) as Promise<MigrationResult>;
 }
 

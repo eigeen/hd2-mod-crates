@@ -93,11 +93,6 @@ textarea {
   font-size: 14px;
 }
 
-.suffixField .MuiInputAdornment-root .MuiTypography-root {
-  color: #94a3b8;
-  font-size: 12px;
-}
-
 .MuiButton-root {
   border-radius: 12px !important;
   box-shadow: none !important;

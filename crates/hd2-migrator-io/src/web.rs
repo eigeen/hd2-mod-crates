@@ -1,15 +1,15 @@
 //! Browser-oriented migration entry points.
 //!
-//! This module keeps Web/WASM callers on byte buffers and JSON metadata so the
-//! native filesystem migrator can remain unchanged.
+//! The browser surface intentionally trades cross-archive migration for
+//! safety: the native filesystem migrator remains the only path that can
+//! synthesize real cross-archive output. WASM callers list targets from the
+//! bundled archive index, identify the source via the authoritative armor
+//! mapping, and may pass-through to the source archive itself.
 
-pub mod extract;
-pub mod metadata;
 pub mod migration;
 
-pub use extract::{ExtractMetadataOptions, extract_game_metadata};
-pub use metadata::{WebArchiveMetadata, WebGameMetadata, WebTargetOption};
 pub use migration::{
     PatchBytes, WebMigrateOptions, WebMigrationBundle, WebMigrationReportRow, WebMigrationSummary,
-    WebOutputFile, detect_source_archive, list_target_options, migrate_many, migrate_one,
+    WebOutputFile, WebTargetOption, detect_source_archive, list_target_options, migrate_many,
+    migrate_one,
 };

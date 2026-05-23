@@ -1,10 +1,4 @@
-import type {
-  DirectoryArchiveInput,
-  FileSystemDirectoryHandle,
-  PatchFiles,
-  TargetOption,
-  WindowWithDirectoryPicker,
-} from "./types";
+import type { PatchFiles } from "./types";
 
 const GPU_SUFFIX = ".gpu_resources";
 const STREAM_SUFFIX = ".stream";
@@ -39,29 +33,6 @@ export async function patchFilesFromList(files: FileList | File[]) {
     gpu: gpuBytes,
     stream: streamBytes,
   } satisfies PatchFiles;
-}
-
-export async function metadataTextFromFile(file: File) {
-  return file.text();
-}
-
-export async function archivesFromGameDirectory(targets: TargetOption[]) {
-  const picker = (window as WindowWithDirectoryPicker).showDirectoryPicker;
-  if (!picker) {
-    throw new Error("访问目录功能需要 Chromium 内核浏览器。");
-  }
-  const directory = await picker();
-  const archives: DirectoryArchiveInput[] = [];
-  for (const target of targets) {
-    const archive = await tryReadArchive(directory, target);
-    if (archive) {
-      archives.push(archive);
-    }
-  }
-  if (archives.length === 0) {
-    throw new Error("所选目录中未找到任何匹配的存档文件，请确认选择了正确的游戏 data 目录。");
-  }
-  return archives;
 }
 
 export function downloadZip(bytes: Uint8Array, filename: string) {
@@ -154,27 +125,6 @@ function patchSidecarRequirements(toc: Uint8Array): SidecarRequirements | null {
     }
   }
   return { gpu: gpuEnd, stream: streamEnd };
-}
-
-async function tryReadArchive(directory: FileSystemDirectoryHandle, target: TargetOption) {
-  try {
-    const handle = await directory.getFileHandle(target.hash);
-    const toc = await fileBytes(await handle.getFile());
-    return {
-      hash: target.hash,
-      name: target.name,
-      toc,
-    } satisfies DirectoryArchiveInput;
-  } catch (error) {
-    if (isNotFoundError(error)) {
-      return null;
-    }
-    throw error;
-  }
-}
-
-function isNotFoundError(error: unknown) {
-  return error instanceof DOMException && error.name === "NotFoundError";
 }
 
 function isTocFile(file: File) {

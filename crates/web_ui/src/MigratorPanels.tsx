@@ -2,12 +2,12 @@ import ArchiveIcon from "@mui/icons-material/Archive";
 import CompareArrowsIcon from "@mui/icons-material/CompareArrows";
 import DescriptionIcon from "@mui/icons-material/Description";
 import DownloadIcon from "@mui/icons-material/Download";
-import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutlined";
 import InventoryIcon from "@mui/icons-material/Inventory2";
 import SearchIcon from "@mui/icons-material/Search";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
+import VerifiedIcon from "@mui/icons-material/Verified";
 import {
   Alert,
   Button,
@@ -29,7 +29,7 @@ import {
 import { memo, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { downloadZip } from "./fileInputs";
-import type { MetadataState, MigrationResult, PatchFiles, TargetOption } from "./types";
+import type { AuthorityMappings, MigrationResult, PatchFiles, TargetOption } from "./types";
 
 const panelClass =
   "rounded-2xl border border-slate-200/85 bg-white shadow-[0_1px_2px_rgb(15_23_42_/_0.04)] overflow-hidden";
@@ -37,36 +37,30 @@ const setupPanelClass = `${panelClass} flex flex-1 flex-col p-6`;
 const metaLineClass =
   "flex items-center gap-[7px] text-xs text-slate-500 [overflow-wrap:anywhere]";
 
-interface MetadataPanelProps {
-  busy: boolean;
-  metadata: MetadataState | null;
-  onDirectoryMetadata: () => void;
-  onMetadataFile: (files: FileList | null) => void;
+interface AuthorityPanelProps {
+  authority: AuthorityMappings | null;
+  targetCount: number;
 }
 
-export function MetadataPanel(props: MetadataPanelProps) {
+export function AuthorityPanel(props: AuthorityPanelProps) {
   return (
     <div className={setupPanelClass}>
-      <SectionTitle icon={<InventoryIcon />} title="元数据" />
-      <div className="mb-3 flex flex-wrap items-center gap-2.5">
-        <Button component="label" disabled={props.busy} startIcon={<UploadFileIcon />} variant="outlined">
-          导入 JSON
-          <input hidden accept="application/json,.json" type="file" onChange={(event) => props.onMetadataFile(event.target.files)} />
-        </Button>
-        <HelpHint title="导入自定义元数据 JSON 文件。" />
-        <Button disabled={props.busy} onClick={props.onDirectoryMetadata} startIcon={<FolderOpenIcon />} variant="outlined">
-          浏览器目录
-        </Button>
-        <HelpHint title="选择本地游戏 data 目录，由浏览器读取存档后实时生成元数据（仅 Chromium 内核浏览器支持）。" />
-      </div>
-      <p className="m-0 text-xs leading-[1.5] text-slate-500">
-        若不手动导入或识别失败，将自动使用项目内置的元数据。
+      <SectionTitle icon={<InventoryIcon />} title="数据来源" />
+      <p className="m-0 text-xs leading-[1.55] text-slate-600">
+        浏览器版仅支持「识别补丁来源 + 输出到源版本」。识别基于人工校对的甲胄部件映射表，跨版本迁移请使用桌面或命令行版本。
       </p>
-      {props.metadata && (
-        <p className={`${metaLineClass} m-0 mt-auto pt-3`}>
-          {`${props.metadata.targetCount} 个可用目标`}
+      <div className="mt-auto flex flex-col gap-1.5 pt-4">
+        <p className={`${metaLineClass} m-0`}>
+          <span className="inline-flex h-[5px] w-[5px] rounded-full bg-slate-300" />
+          内置 archive 索引：{props.targetCount} 个条目
         </p>
-      )}
+        {props.authority && (
+          <p className={`${metaLineClass} m-0 text-emerald-700`}>
+            <VerifiedIcon sx={{ fontSize: 14 }} />
+            人工校对映射：{props.authority.armorCount} 件甲
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -102,7 +96,6 @@ interface TargetPanelProps {
   onSourceChange: (hash: string) => void;
   onTargetChange: (hash: string) => void;
   partialRemap: boolean;
-  patchSuffix: string;
   selectedTargets: string[];
   setNoPadding: (value: boolean) => void;
   setPartialRemap: (value: boolean) => void;
@@ -138,7 +131,6 @@ export function TargetPanel(props: TargetPanelProps) {
       <OptionsPanel
         noPadding={props.noPadding}
         partialRemap={props.partialRemap}
-        patchSuffix={props.patchSuffix}
         setNoPadding={props.setNoPadding}
         setPartialRemap={props.setPartialRemap}
       />
@@ -276,7 +268,6 @@ function EmptyMapping({ icon, text }: { icon: ReactNode; text: string }) {
 interface OptionsPanelProps {
   noPadding: boolean;
   partialRemap: boolean;
-  patchSuffix: string;
   setNoPadding: (value: boolean) => void;
   setPartialRemap: (value: boolean) => void;
 }
@@ -296,15 +287,6 @@ const OptionsPanel = memo(function OptionsPanel(props: OptionsPanelProps) {
         label="部分重映射"
       />
       <HelpHint title="实验功能：即使某些 Unit 不完整也输出重映射结果，仅用于调试不完整的元数据，正常使用请勿勾选。" />
-      <TextField
-        className="suffixField max-[819px]:min-w-full! min-[820px]:ml-auto! min-[820px]:min-w-[280px]!"
-        disabled
-        label="补丁后缀"
-        size="small"
-        slotProps={{ input: { startAdornment: <InputAdornment position="start">文件</InputAdornment> } }}
-        value={props.patchSuffix}
-      />
-      <HelpHint title="输出到每个目标版本目录中的补丁文件名。固定为该值以确保游戏可识别。" />
     </div>
   );
 });

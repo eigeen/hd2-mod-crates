@@ -10,10 +10,9 @@ export interface PatchFiles {
   stream: Uint8Array;
 }
 
-export interface MetadataState {
-  json: string;
-  source: string;
-  targetCount: number;
+export interface AuthorityMappings {
+  armorCount: number;
+  hasArmor: (name: string) => boolean;
 }
 
 export interface MigrateOptions {
@@ -45,20 +44,3 @@ export interface MigrationReportRow {
   warnings: string[];
 }
 
-export interface DirectoryArchiveInput {
-  hash: string;
-  name: string;
-  toc: Uint8Array;
-}
-
-export interface FileSystemFileHandle {
-  getFile(): Promise<File>;
-}
-
-export interface FileSystemDirectoryHandle {
-  getFileHandle(name: string): Promise<FileSystemFileHandle>;
-}
-
-export interface WindowWithDirectoryPicker extends Window {
-  showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle>;
-}

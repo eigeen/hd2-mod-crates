@@ -88,6 +88,10 @@ impl ArmorPartMap {
         self.parts.get(part_label).copied()
     }
 
+    pub fn all_file_ids(&self) -> Vec<u64> {
+        self.parts.values().copied().collect()
+    }
+
     fn validate(&self, armor_name: &str) -> crate::Result<()> {
         for label in EXPECTED_PART_LABELS {
             if !self.parts.contains_key(label) {

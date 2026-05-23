@@ -5,7 +5,6 @@
   "packageManager": "bun@1.3.13",
   "scripts": {
     "rust:build": "cargo build --workspace --release",
-    "metadata:extract": "cargo run -r -p hd2-migrator-cli -- extract-web-metadata",
     "web:dev": "bun run --cwd crates/web_ui dev",
     "web:build": "bun run --cwd crates/web_ui build",
     "web:wasm": "bun run --cwd crates/web_ui wasm",

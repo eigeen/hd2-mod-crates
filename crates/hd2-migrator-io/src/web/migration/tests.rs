@@ -1,66 +1,27 @@
 use super::*;
 use crate::archive::TocEntry;
 use crate::constants::UNIT_ID;
-use crate::web::metadata::WebArchiveMetadata;
 
 #[test]
-fn lists_targets_from_metadata() {
-    let metadata =
-        WebGameMetadata::new("Armor", vec![archive_metadata("source", "Source", &[1, 2])]);
+fn lists_targets_from_builtin_index() {
+    let targets = list_target_options("Armor").unwrap();
 
-    let targets = list_target_options(&metadata);
-
-    assert_eq!(targets.len(), 1);
-    assert_eq!(targets[0].name, "Source");
+    assert!(!targets.is_empty(), "builtin index has Armor entries");
 }
 
 #[test]
-fn detects_source_by_unit_overlap() {
-    let metadata = WebGameMetadata::new(
-        "Armor",
-        vec![
-            archive_metadata("a", "Weak", &[1]),
-            archive_metadata("b", "Strong", &[1, 2]),
-        ],
-    );
-    let patch = patch_bytes("patch", &[1, 2]);
+fn detect_source_returns_none_when_patch_has_no_known_units() {
+    let patch = patch_bytes("patch", &[0xDEADBEEF]);
 
-    let detected = detect_source_archive(&metadata, &patch).unwrap().unwrap();
+    let detected = detect_source_archive("Armor", &patch).unwrap();
 
-    assert_eq!(detected.hash, "b");
-}
-
-#[test]
-fn detects_source_with_stable_tie_breaker() {
-    let metadata = WebGameMetadata::new(
-        "Armor",
-        vec![
-            archive_metadata("b", "Later Hash", &[1]),
-            archive_metadata("a", "Earlier Hash", &[1]),
-        ],
-    );
-    let patch = patch_bytes("patch", &[1]);
-
-    let detected = detect_source_archive(&metadata, &patch).unwrap().unwrap();
-
-    assert_eq!(detected.hash, "a");
-}
-
-#[test]
-fn detects_source_from_toc_when_gpu_body_is_unavailable() {
-    let metadata = WebGameMetadata::new("Armor", vec![archive_metadata("source", "Source", &[1])]);
-    let patch = patch_bytes_without_gpu("patch", &[1]);
-
-    let detected = detect_source_archive(&metadata, &patch).unwrap().unwrap();
-
-    assert_eq!(detected.hash, "source");
+    assert!(detected.is_none());
 }
 
 #[test]
 fn migrate_one_requires_one_target() {
-    let metadata = WebGameMetadata::new("Armor", Vec::new());
     let err = migrate_one(
-        &metadata,
+        "Armor",
         patch_bytes("patch", &[1]),
         WebMigrateOptions {
             source_hash: None,
@@ -75,57 +36,66 @@ fn migrate_one_requires_one_target() {
     assert!(err.to_string().contains("exactly one target"));
 }
 
-fn archive_metadata(hash: &str, name: &str, unit_ids: &[u64]) -> WebArchiveMetadata {
-    WebArchiveMetadata::from_stream(
-        hash.to_string(),
-        name.to_string(),
-        &archive_stream(name, unit_ids),
+#[test]
+fn migrate_cross_archive_is_unavailable_in_browser() {
+    let table = ArmorMappingTable::bundled().unwrap();
+    let by_hash = archive_name_lookup("Armor").unwrap();
+    let (source_entry, target_entry) = pick_two_authoritative_armors(&table, &by_hash);
+    let source_unit_id = first_authoritative_file_id(&table, &source_entry.1);
+    let patch = patch_bytes("patch", &[source_unit_id]);
+
+    let err = migrate_one(
+        "Armor",
+        patch,
+        WebMigrateOptions {
+            source_hash: Some(source_entry.0.clone()),
+            target_hashes: vec![target_entry.0.clone()],
+            patch_suffix: None,
+            no_padding: true,
+            experimental_partial_remap: false,
+        },
     )
+    .unwrap_err();
+
+    assert!(err.to_string().contains("cross-archive migration is not available"));
+}
+
+fn pick_two_authoritative_armors(
+    table: &ArmorMappingTable,
+    by_hash: &[(String, String)],
+) -> ((String, String), (String, String)) {
+    let mut iter = by_hash
+        .iter()
+        .filter(|(_, name)| table.armor(name).is_some())
+        .cloned();
+    let source = iter.next().expect("at least one authoritative armor");
+    let target = iter.next().expect("at least two authoritative armors");
+    (source, target)
+}
+
+fn first_authoritative_file_id(table: &ArmorMappingTable, armor_name: &str) -> u64 {
+    *table
+        .armor(armor_name)
+        .expect("armor in table")
+        .all_file_ids()
+        .first()
+        .expect("non-empty part map")
 }
 
 fn patch_bytes(name: &str, unit_ids: &[u64]) -> PatchBytes {
-    let mut archive = archive_stream(name, unit_ids);
-    let (toc, gpu, stream) = archive.serialize();
-    PatchBytes {
-        name: name.to_string(),
-        toc,
-        gpu,
-        stream,
-    }
-}
-
-fn patch_bytes_without_gpu(name: &str, unit_ids: &[u64]) -> PatchBytes {
-    let mut patch = patch_bytes_with_gpu(name, unit_ids);
-    patch.gpu.clear();
-    patch
-}
-
-fn patch_bytes_with_gpu(name: &str, unit_ids: &[u64]) -> PatchBytes {
-    let mut archive = archive_stream_with_gpu(name, unit_ids);
-    let (toc, gpu, stream) = archive.serialize();
-    PatchBytes {
-        name: name.to_string(),
-        toc,
-        gpu,
-        stream,
-    }
-}
-
-fn archive_stream(name: &str, unit_ids: &[u64]) -> StreamToc {
-    StreamToc {
+    let mut archive = StreamToc {
         entries: unit_ids
             .iter()
             .map(|file_id| TocEntry::new(*file_id, UNIT_ID))
             .collect(),
         name: name.to_string(),
         ..Default::default()
+    };
+    let (toc, gpu, stream) = archive.serialize();
+    PatchBytes {
+        name: name.to_string(),
+        toc,
+        gpu,
+        stream,
     }
-}
-
-fn archive_stream_with_gpu(name: &str, unit_ids: &[u64]) -> StreamToc {
-    let mut archive = archive_stream(name, unit_ids);
-    for entry in &mut archive.entries {
-        entry.gpu_data = vec![7, 8, 9];
-    }
-    archive
 }

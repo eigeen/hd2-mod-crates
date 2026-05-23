@@ -1,7 +1,8 @@
 use crate::archive::StreamToc;
 use crate::constants::UNIT_ID;
+use crate::index::ArchiveIndex;
 use crate::migrator::safe_filename;
-use crate::web::metadata::{WebArchiveMetadata, WebGameMetadata, WebTargetOption};
+use crate::unit::authority::ArmorMappingTable;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -17,6 +18,13 @@ pub struct PatchBytes {
     pub toc: Vec<u8>,
     pub gpu: Vec<u8>,
     pub stream: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebTargetOption {
+    pub hash: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,37 +77,47 @@ struct TargetBuild {
     report: WebMigrationReportRow,
 }
 
-pub fn list_target_options(metadata: &WebGameMetadata) -> Vec<WebTargetOption> {
-    metadata.target_options()
+pub fn list_target_options(category: &str) -> crate::Result<Vec<WebTargetOption>> {
+    let entries = ArchiveIndex::builtin()
+        .category(category)
+        .ok_or_else(|| eyre::eyre!("category {:?} not found in builtin index", category))?;
+    Ok(entries
+        .iter()
+        .map(|entry| WebTargetOption {
+            hash: entry.hash.clone(),
+            name: entry.name.clone(),
+        })
+        .collect())
 }
 
 pub fn detect_source_archive(
-    metadata: &WebGameMetadata,
+    category: &str,
     patch_bytes: &PatchBytes,
 ) -> crate::Result<Option<WebTargetOption>> {
     let patch_unit_ids = unit_file_ids_from_toc(&patch_bytes.toc)?;
-    Ok(detect_source_from_unit_ids(metadata, &patch_unit_ids))
+    Ok(detect_source_via_authority(category, &patch_unit_ids))
 }
 
 pub fn migrate_one(
-    metadata: &WebGameMetadata,
+    category: &str,
     patch_bytes: PatchBytes,
     options: WebMigrateOptions,
 ) -> crate::Result<WebMigrationBundle> {
     if options.target_hashes.len() != 1 {
         eyre::bail!("migrate_one requires exactly one target");
     }
-    migrate_many(metadata, patch_bytes, options)
+    migrate_many(category, patch_bytes, options)
 }
 
 pub fn migrate_many(
-    metadata: &WebGameMetadata,
+    category: &str,
     patch_bytes: PatchBytes,
     options: WebMigrateOptions,
 ) -> crate::Result<WebMigrationBundle> {
     validate_targets(&options)?;
+    let by_hash = archive_name_lookup(category)?;
     let patch = patch_from_bytes(&patch_bytes)?;
-    let source_hash = resolve_source_hash(metadata, &patch, options.source_hash.as_deref())?;
+    let source_hash = resolve_source_hash(category, &by_hash, &patch, options.source_hash.as_deref())?;
     let patch_suffix = options
         .patch_suffix
         .as_deref()
@@ -107,12 +125,12 @@ pub fn migrate_many(
     let mut files = Vec::new();
     let mut reports = Vec::new();
     for target_hash in &options.target_hashes {
-        let build = build_target(BuildTargetOptions {
-            metadata,
-            patch: &patch,
-            source_hash: &source_hash,
-            target_hash,
-        })?;
+        let target_name = by_hash
+            .iter()
+            .find(|(hash, _)| hash == target_hash)
+            .map(|(_, name)| name.clone())
+            .ok_or_else(|| eyre::eyre!("target {target_hash} not found in builtin index"))?;
+        let build = build_target(&patch, &source_hash, target_hash, &target_name)?;
         files.extend(output_files(
             build.patch,
             &build.report.target_name,
@@ -133,48 +151,70 @@ fn validate_targets(options: &WebMigrateOptions) -> crate::Result<()> {
     Ok(())
 }
 
+fn archive_name_lookup(category: &str) -> crate::Result<Vec<(String, String)>> {
+    let entries = ArchiveIndex::builtin()
+        .category(category)
+        .ok_or_else(|| eyre::eyre!("category {:?} not found in builtin index", category))?;
+    Ok(entries
+        .iter()
+        .map(|entry| (entry.hash.clone(), entry.name.clone()))
+        .collect())
+}
+
 fn patch_from_bytes(bytes: &PatchBytes) -> crate::Result<StreamToc> {
     StreamToc::from_buffers(&bytes.toc, &bytes.gpu, &bytes.stream, bytes.name.clone())
 }
 
 fn resolve_source_hash(
-    metadata: &WebGameMetadata,
+    category: &str,
+    by_hash: &[(String, String)],
     patch: &StreamToc,
     source_hash: Option<&str>,
 ) -> crate::Result<String> {
     if let Some(hash) = source_hash {
-        ensure_archive(metadata, hash)?;
+        ensure_archive(by_hash, hash)?;
         return Ok(hash.to_string());
     }
-    detect_source_from_patch(metadata, patch)
+    let patch_unit_ids = unit_file_ids(patch);
+    detect_source_via_authority(category, &patch_unit_ids)
         .map(|option| option.hash)
-        .ok_or_else(|| eyre::eyre!("could not auto-detect source archive"))
+        .ok_or_else(|| eyre::eyre!("could not auto-detect source archive from authoritative mapping"))
 }
 
-fn ensure_archive(metadata: &WebGameMetadata, hash: &str) -> crate::Result<()> {
-    if metadata.archive(hash).is_some() {
+fn ensure_archive(by_hash: &[(String, String)], hash: &str) -> crate::Result<()> {
+    if by_hash.iter().any(|(h, _)| h == hash) {
         return Ok(());
     }
-    eyre::bail!("archive {hash} not found in web metadata")
+    eyre::bail!("archive {hash} not found in builtin index")
 }
 
-fn detect_source_from_patch(
-    metadata: &WebGameMetadata,
-    patch: &StreamToc,
-) -> Option<WebTargetOption> {
-    let patch_unit_ids = unit_file_ids(patch);
-    detect_source_from_unit_ids(metadata, &patch_unit_ids)
-}
-
-fn detect_source_from_unit_ids(
-    metadata: &WebGameMetadata,
+fn detect_source_via_authority(
+    category: &str,
     patch_unit_ids: &HashSet<u64>,
 ) -> Option<WebTargetOption> {
-    let mut candidates = metadata
-        .targets
+    if patch_unit_ids.is_empty() {
+        return None;
+    }
+    let table = ArmorMappingTable::bundled().ok()?;
+    let by_hash = ArchiveIndex::builtin().category(category)?;
+    let mut candidates: Vec<SourceCandidate> = by_hash
         .iter()
-        .filter_map(|target| source_candidate(target, &patch_unit_ids))
-        .collect::<Vec<_>>();
+        .filter_map(|entry| {
+            let parts = table.armor(&entry.name)?;
+            let unit_hits = parts
+                .all_file_ids()
+                .into_iter()
+                .filter(|id| patch_unit_ids.contains(id))
+                .count();
+            (unit_hits > 0).then_some(SourceCandidate {
+                option: WebTargetOption {
+                    hash: entry.hash.clone(),
+                    name: entry.name.clone(),
+                },
+                unit_hits,
+            })
+        })
+        .collect();
     candidates.sort_by(compare_source_candidates);
     candidates.pop().map(|candidate| candidate.option)
 }
@@ -192,75 +232,47 @@ struct SourceCandidate {
     unit_hits: usize,
 }
 
-fn source_candidate(
-    target: &WebArchiveMetadata,
-    patch_unit_ids: &HashSet<u64>,
-) -> Option<SourceCandidate> {
-    let archive_unit_ids = target
-        .archive
-        .unit_file_ids()
-        .into_iter()
-        .collect::<HashSet<_>>();
-    let unit_hits = patch_unit_ids.intersection(&archive_unit_ids).count();
-    (unit_hits > 0).then(|| SourceCandidate {
-        option: WebTargetOption {
-            hash: target.hash.clone(),
-            name: target.name.clone(),
-        },
-        unit_hits,
-    })
-}
-
 fn compare_source_candidates(left: &SourceCandidate, right: &SourceCandidate) -> Ordering {
     left.unit_hits
         .cmp(&right.unit_hits)
         .then_with(|| right.option.hash.cmp(&left.option.hash))
 }
 
-struct BuildTargetOptions<'a> {
-    metadata: &'a WebGameMetadata,
-    patch: &'a StreamToc,
-    source_hash: &'a str,
-    target_hash: &'a str,
-}
-
-fn build_target(options: BuildTargetOptions<'_>) -> crate::Result<TargetBuild> {
-    let target_meta = options
-        .metadata
-        .archive(options.target_hash)
-        .ok_or_else(|| eyre::eyre!("target {} not found in metadata", options.target_hash))?;
-    if options.target_hash == options.source_hash {
-        return build_source_target(options.patch, target_meta);
+fn build_target(
+    patch: &StreamToc,
+    source_hash: &str,
+    target_hash: &str,
+    target_name: &str,
+) -> crate::Result<TargetBuild> {
+    if target_hash == source_hash {
+        return Ok(build_source_target(patch, target_hash, target_name));
     }
-    build_migrated_target(options, target_meta)
+    build_migrated_target(target_hash, target_name)
 }
 
 fn build_source_target(
     patch: &StreamToc,
-    target_meta: &WebArchiveMetadata,
-) -> crate::Result<TargetBuild> {
-    Ok(TargetBuild {
+    target_hash: &str,
+    target_name: &str,
+) -> TargetBuild {
+    TargetBuild {
         patch: patch.clone(),
         report: WebMigrationReportRow {
-            target_hash: target_meta.hash.clone(),
-            target_name: target_meta.name.clone(),
+            target_hash: target_hash.to_string(),
+            target_name: target_name.to_string(),
             file_id_remapped: patch.entries.len(),
             slot_id_remapped: 0,
             padded_units: 0,
             skipped_entries: 0,
             warnings: Vec::new(),
         },
-    })
+    }
 }
 
-fn build_migrated_target(
-    _options: BuildTargetOptions<'_>,
-    target_meta: &WebArchiveMetadata,
-) -> crate::Result<TargetBuild> {
+fn build_migrated_target(target_hash: &str, target_name: &str) -> crate::Result<TargetBuild> {
     eyre::bail!(
-        "web metadata for target {} ({}) is an index only and cannot be used as target archive data",
-        target_meta.name,
-        target_meta.hash
+        "cross-archive migration is not available in the browser: pick the source archive as target, \
+         or run the CLI/desktop migrator (target {target_name} / {target_hash})"
     )
 }
 
