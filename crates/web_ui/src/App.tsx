@@ -3,6 +3,8 @@ import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { Button, CircularProgress } from "@mui/material";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { patchFilesFromList } from "./fileInputs";
+import { GameDataDirPanel, type GameDirSelection } from "./GameDataDirPanel";
+import { GameDataSource } from "./gameDataSource";
 import {
   AuthorityPanel,
   PatchPanel,
@@ -13,11 +15,12 @@ import {
 import { loadAuthorityMappings } from "./metadata";
 import type {
   AuthorityMappings,
+  MigrateOptions,
   MigrationResult,
   PatchFiles,
   TargetOption,
 } from "./types";
-import { builtinTargetOptions, detectSource, migrate } from "./wasmClient";
+import { builtinTargetOptions, detectSource, migrate, migrateCrossArchive } from "./wasmClient";
 
 const PATCH_SUFFIX = "9ba626afa44a3aa3.patch_0";
 
@@ -31,11 +34,13 @@ function App() {
   const [noPadding, setNoPadding] = useState(false);
   const [partialRemap, setPartialRemap] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [progressLabel, setProgressLabel] = useState("");
   const [errorText, setErrorText] = useState("");
   const [result, setResult] = useState<MigrationResult | null>(null);
   const [warningOpen, setWarningOpen] = useState(false);
   const [multiConfirmed, setMultiConfirmed] = useState(false);
   const [showAllSources, setShowAllSources] = useState(false);
+  const [gameDir, setGameDir] = useState<GameDirSelection | null>(null);
 
   useEffect(() => {
     loadAuthorityMappings()
@@ -51,10 +56,11 @@ function App() {
 
   const selectedTargetCount = targetHashes.length;
   const canRun = Boolean(targets.length && patch && sourceHash && selectedTargetCount);
+  const crossArchiveReady = gameDir !== null && gameDir.status.kind !== "empty";
 
   const sourceChoices = useMemo(
-    () => (patch ? sourceChoicesForSelection(targets, sourceHash, showAllSources) : []),
-    [patch, showAllSources, sourceHash, targets],
+    () => (patch ? sourceChoicesForSelection(targets, sourceHash, showAllSources, crossArchiveReady) : []),
+    [crossArchiveReady, patch, showAllSources, sourceHash, targets],
   );
 
   const targetOptions = useMemo(
@@ -62,26 +68,30 @@ function App() {
     [sourceHash, targets],
   );
 
-  const importPatch = useCallback(
+  const applyPatch = useCallback(async (nextPatch: PatchFiles) => {
+    setPatch(nextPatch);
+    setResult(null);
+    setSourceHash("");
+    setTargetHashes([]);
+    setShowAllSources(false);
+    await detectPatchSource({
+      patch: nextPatch,
+      setSourceHash,
+      setShowAllSources,
+    });
+  }, []);
+
+  const importPatchFiles = useCallback(
     async (files: FileList | null) => {
       if (!files) {
         return;
       }
       await runTask(setBusy, setErrorText, async () => {
         const nextPatch = await patchFilesFromList(files);
-        setPatch(nextPatch);
-        setResult(null);
-        setSourceHash("");
-        setTargetHashes([]);
-        setShowAllSources(false);
-        await detectPatchSource({
-          patch: nextPatch,
-          setSourceHash,
-          setShowAllSources,
-        });
+        await applyPatch(nextPatch);
       });
     },
-    [],
+    [applyPatch],
   );
 
   const toggleMultiTarget = useCallback((enabled: boolean) => {
@@ -121,17 +131,40 @@ function App() {
       setWarningOpen(true);
       return;
     }
+    const options: MigrateOptions = {
+      sourceHash,
+      targetHashes,
+      patchSuffix: PATCH_SUFFIX,
+      noPadding,
+      experimentalPartialRemap: partialRemap,
+    };
+    const useCrossArchive = gameDir !== null && targetHashes.some((hash) => hash !== sourceHash);
+    setProgressLabel("");
     await runTask(setBusy, setErrorText, async () => {
-      const output = await migrate(patch, {
-        sourceHash,
-        targetHashes,
-        patchSuffix: PATCH_SUFFIX,
-        noPadding,
-        experimentalPartialRemap: partialRemap,
-      });
-      setResult(output);
+      if (useCrossArchive && gameDir) {
+        const dataSource = new GameDataSource(gameDir.handle);
+        const output = await migrateCrossArchive(patch, options, dataSource, {
+          onTargetStart: (name) => setProgressLabel(`正在迁移 ${name}`),
+          onStage: (name, stage) => setProgressLabel(`${name} · ${stage}`),
+          onTargetFinish: () => setProgressLabel(""),
+        });
+        setResult(output);
+      } else {
+        const output = await migrate(patch, options);
+        setResult(output);
+      }
     });
-  }, [multiConfirmed, multiTarget, noPadding, partialRemap, patch, sourceHash, targetHashes]);
+    setProgressLabel("");
+  }, [
+    gameDir,
+    multiConfirmed,
+    multiTarget,
+    noPadding,
+    partialRemap,
+    patch,
+    sourceHash,
+    targetHashes,
+  ]);
 
   return (
     <div className="min-h-screen">
@@ -148,6 +181,9 @@ function App() {
         <div className="hidden flex-1 min-[820px]:block" />
         <div className="flex flex-row items-center gap-3 max-[819px]:w-full">
           {busy && <CircularProgress size={22} />}
+          {busy && progressLabel && (
+            <span className="text-xs text-slate-600 max-[819px]:hidden">{progressLabel}</span>
+          )}
           <Button
             className="max-[819px]:flex-1!"
             disabled={!canRun || busy}
@@ -162,9 +198,14 @@ function App() {
 
       <main className="mx-auto flex w-full max-w-[896px] flex-col gap-5 px-4 py-6 min-[820px]:px-6 min-[820px]:py-10">
         <div className="flex flex-col items-stretch gap-5 min-[820px]:flex-row">
-          <AuthorityPanel authority={authority} targetCount={targets.length} />
-          <PatchPanel patch={patch} onPatchFiles={importPatch} />
+          <AuthorityPanel
+            authority={authority}
+            crossArchiveReady={crossArchiveReady}
+            targetCount={targets.length}
+          />
+          <PatchPanel onPatchFiles={importPatchFiles} patch={patch} />
         </div>
+        <GameDataDirPanel onChange={setGameDir} selection={gameDir} />
         <TargetPanel
           multiTarget={multiTarget}
           noPadding={noPadding}
@@ -183,7 +224,7 @@ function App() {
         {!errorText && !result && (
           <div className="flex items-center gap-2.5 rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-blue-800">
             <span className="h-2 w-2 rounded-full bg-blue-600 shadow-[0_0_0_5px_rgb(59_130_246_/_0.16)]" />
-            <p className="m-0 text-xs font-bold">就绪</p>
+            <p className="m-0 text-xs font-bold">{busy && progressLabel ? progressLabel : "就绪"}</p>
           </div>
         )}
       </main>
@@ -203,8 +244,13 @@ function App() {
   );
 }
 
-function sourceChoicesForSelection(targets: TargetOption[], sourceHash: string, showAllSources: boolean) {
-  if (showAllSources) {
+function sourceChoicesForSelection(
+  targets: TargetOption[],
+  sourceHash: string,
+  showAllSources: boolean,
+  crossArchiveReady: boolean,
+) {
+  if (showAllSources || crossArchiveReady) {
     return targets;
   }
   const selectedSource = targets.find((target) => target.hash === sourceHash);

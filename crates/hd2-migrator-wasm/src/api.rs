@@ -1,4 +1,6 @@
+use crate::data_source::JsDataSource;
 use crate::error::{WasmResult, js_error};
+use crate::progress::JsProgress;
 use crate::zip_store::zip_store;
 use hd2_migrator_io::{
     index::ArchiveIndex,
@@ -29,16 +31,15 @@ pub fn builtin_target_options(category: Option<String>) -> WasmResult<JsValue> {
 pub fn detect_source(
     patch_name: String,
     toc: Vec<u8>,
-    gpu: Vec<u8>,
-    stream: Vec<u8>,
     category: Option<String>,
 ) -> WasmResult<JsValue> {
     let category = category.unwrap_or_else(|| DEFAULT_CATEGORY.to_string());
+    // 仅 toc 参与识别；gpu/stream 不需要传入，避免无谓地把数百 MB 拷贝进 WASM 内存导致 OOM。
     let patch = PatchBytes {
         name: patch_name,
         toc,
-        gpu,
-        stream,
+        gpu: Vec::new(),
+        stream: Vec::new(),
     };
     let source = web::detect_source_archive(&category, &patch).map_err(js_error)?;
     serde_wasm_bindgen::to_value(&source).map_err(js_error)
@@ -71,6 +72,39 @@ pub fn migrate_many(
 ) -> WasmResult<JsValue> {
     let request = parse_options(options)?;
     run_migration(patch_name, toc, gpu, stream, request, category, false)
+}
+
+/// Full cross-archive migration backed by a JS-supplied `DataSource`.
+///
+/// The `data_source` argument is a JS object with `readFull`, `readRange`,
+/// `exists`, and `listBundleChunks` methods (see `data_source.rs` for the
+/// expected shape). The optional `progress` argument is a JS object with
+/// `onTargetStart`/`onStage`/`onTargetFinish` callbacks.
+#[wasm_bindgen]
+pub async fn migrate_cross_archive(
+    patch_name: String,
+    toc: Vec<u8>,
+    gpu: Vec<u8>,
+    stream: Vec<u8>,
+    options: JsValue,
+    data_source: JsValue,
+    progress: JsValue,
+    category: Option<String>,
+) -> WasmResult<JsValue> {
+    let category = category.unwrap_or_else(|| DEFAULT_CATEGORY.to_string());
+    let request: WebMigrateOptions = parse_options(options)?;
+    let source = JsDataSource::from_js(data_source)?;
+    let progress_sink = JsProgress::from_js(progress)?;
+    let patch = PatchBytes {
+        name: patch_name,
+        toc,
+        gpu,
+        stream,
+    };
+    let bundle = web::migrate_many_with_source(&category, patch, request, &source, Some(&progress_sink))
+        .await
+        .map_err(js_error)?;
+    migration_result(zip_store(&bundle.files), bundle.summary)
 }
 
 fn run_migration(

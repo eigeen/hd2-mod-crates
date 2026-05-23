@@ -4,8 +4,10 @@
 //! Parallelism: per-target via rayon `par_iter` inside Mode A.
 
 pub mod mode_a;
+pub mod mode_a_common;
+pub mod mode_a_web;
 pub mod report;
-mod source_selection;
+pub(crate) mod source_selection;
 
 pub use report::MigrationReport;
 pub(crate) use source_selection::{detect_source_archive, filter_patch_to_source_archive_units};

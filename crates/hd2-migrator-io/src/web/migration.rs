@@ -1,6 +1,8 @@
 use crate::archive::StreamToc;
 use crate::constants::UNIT_ID;
 use crate::index::ArchiveIndex;
+use crate::io::DataSource;
+use crate::migrator::mode_a_web::{self, WebProgress};
 use crate::migrator::safe_filename;
 use crate::unit::authority::ArmorMappingTable;
 use serde::{Deserialize, Serialize};
@@ -144,6 +146,47 @@ pub fn migrate_many(
     })
 }
 
+/// Full cross-archive migration via an async [`DataSource`].
+///
+/// Unlike [`migrate_many`], this entry point can read source and target
+/// archives from a game `data/` directory (legacy or Slim install), and will
+/// run the full Mode A migration sequentially over the supplied targets.
+pub async fn migrate_many_with_source<S: DataSource + ?Sized>(
+    category: &str,
+    patch_bytes: PatchBytes,
+    options: WebMigrateOptions,
+    source: &S,
+    progress: Option<&dyn WebProgress>,
+) -> crate::Result<WebMigrationBundle> {
+    validate_targets(&options)?;
+    let patch_suffix = options
+        .patch_suffix
+        .clone()
+        .unwrap_or_else(|| DEFAULT_PATCH_SUFFIX.to_string());
+    let results =
+        mode_a_web::run(&patch_bytes, &options, source, category, progress).await?;
+
+    let mut files = Vec::new();
+    let mut reports = Vec::new();
+    for result in results {
+        let report_row = WebMigrationReportRow {
+            target_hash: result.target_hash.clone(),
+            target_name: result.target_name.clone(),
+            file_id_remapped: result.report.file_id_remapped,
+            slot_id_remapped: result.report.slot_id_remapped,
+            padded_units: result.report.padded_units,
+            skipped_entries: result.report.skipped_entries,
+            warnings: result.report.warnings.clone(),
+        };
+        files.extend(output_files(result.patch, &result.target_name, &patch_suffix));
+        reports.push(report_row);
+    }
+    Ok(WebMigrationBundle {
+        files,
+        summary: summary_from_reports(reports),
+    })
+}
+
 fn validate_targets(options: &WebMigrateOptions) -> crate::Result<()> {
     if options.target_hashes.is_empty() {
         eyre::bail!("select at least one target");
@@ -188,7 +231,7 @@ fn ensure_archive(by_hash: &[(String, String)], hash: &str) -> crate::Result<()>
     eyre::bail!("archive {hash} not found in builtin index")
 }
 
-fn detect_source_via_authority(
+pub(crate) fn detect_source_via_authority(
     category: &str,
     patch_unit_ids: &HashSet<u64>,
 ) -> Option<WebTargetOption> {
@@ -301,7 +344,7 @@ fn summary_from_reports(reports: Vec<WebMigrationReportRow>) -> WebMigrationSumm
     }
 }
 
-fn unit_file_ids(archive: &StreamToc) -> HashSet<u64> {
+pub(crate) fn unit_file_ids(archive: &StreamToc) -> HashSet<u64> {
     archive
         .entries
         .iter()

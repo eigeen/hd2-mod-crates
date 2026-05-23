@@ -7,6 +7,7 @@ pub mod constants;
 pub mod error;
 pub mod hashing;
 pub mod index;
+pub mod io;
 pub mod migrator;
 pub mod padding;
 pub mod refs;

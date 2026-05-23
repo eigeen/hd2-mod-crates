@@ -19,20 +19,32 @@ export async function patchFilesFromList(files: FileList | File[]) {
   const tocBytes = await fileBytes(toc);
   const gpuBytes = gpuFile ? await fileBytes(gpuFile) : new Uint8Array();
   const streamBytes = streamFile ? await fileBytes(streamFile) : new Uint8Array();
-  validatePatchSidecars({
-    name: toc.name,
-    toc: tocBytes,
-    gpuLen: gpuBytes.length,
-    streamLen: streamBytes.length,
-    hasGpuFile: Boolean(gpuFile),
-    hasStreamFile: Boolean(streamFile),
-  });
-  return {
+  const patch: PatchFiles = {
     name: toc.name,
     toc: tocBytes,
     gpu: gpuBytes,
     stream: streamBytes,
-  } satisfies PatchFiles;
+  };
+  validatePatchFiles(patch, {
+    hasGpuFile: Boolean(gpuFile),
+    hasStreamFile: Boolean(streamFile),
+  });
+  return patch;
+}
+
+// 校验已加载的 PatchFiles 是否满足 TOC 引用的 sidecar 尺寸；任何路径加载后都应调用。
+export function validatePatchFiles(
+  patch: PatchFiles,
+  presence?: { hasGpuFile: boolean; hasStreamFile: boolean },
+) {
+  validatePatchSidecars({
+    name: patch.name,
+    toc: patch.toc,
+    gpuLen: patch.gpu.length,
+    streamLen: patch.stream.length,
+    hasGpuFile: presence?.hasGpuFile ?? patch.gpu.length > 0,
+    hasStreamFile: presence?.hasStreamFile ?? patch.stream.length > 0,
+  });
 }
 
 export function downloadZip(bytes: Uint8Array, filename: string) {

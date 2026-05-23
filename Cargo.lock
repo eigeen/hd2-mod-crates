@@ -1815,6 +1815,7 @@ dependencies = [
  "eyre",
  "hd2-migrator-data",
  "lz4_flex",
+ "pollster",
  "rayon",
  "serde",
  "serde_json",
@@ -1828,12 +1829,14 @@ name = "hd2-migrator-wasm"
 version = "0.1.0"
 dependencies = [
  "crc32fast",
+ "eyre",
  "hd2-migrator-io",
  "js-sys",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]
@@ -3104,6 +3107,12 @@ dependencies = [
  "rustix",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "pollster"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
 
 [[package]]
 name = "portable-atomic"

@@ -1,15 +1,18 @@
 //! Browser-oriented migration entry points.
 //!
-//! The browser surface intentionally trades cross-archive migration for
-//! safety: the native filesystem migrator remains the only path that can
-//! synthesize real cross-archive output. WASM callers list targets from the
-//! bundled archive index, identify the source via the authoritative armor
-//! mapping, and may pass-through to the source archive itself.
+//! Two entry points coexist:
+//! - [`migrate_many`]: same-source pass-through only (no game data access).
+//!   Identifies the source via the authoritative armor mapping and outputs
+//!   the patch unchanged under the source archive's directory.
+//! - [`migrate_many_with_source`]: full Mode A cross-archive migration backed
+//!   by an async [`crate::io::DataSource`] (browser supplies it via the File
+//!   System Access API; native callers can use [`crate::io::NativeDataSource`]).
 
 pub mod migration;
 
+pub use crate::migrator::mode_a_web::WebProgress;
 pub use migration::{
     PatchBytes, WebMigrateOptions, WebMigrationBundle, WebMigrationReportRow, WebMigrationSummary,
     WebOutputFile, WebTargetOption, detect_source_archive, list_target_options, migrate_many,
-    migrate_one,
+    migrate_many_with_source, migrate_one,
 };

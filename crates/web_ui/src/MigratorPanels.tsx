@@ -40,15 +40,22 @@ const metaLineClass =
 interface AuthorityPanelProps {
   authority: AuthorityMappings | null;
   targetCount: number;
+  crossArchiveReady: boolean;
 }
 
 export function AuthorityPanel(props: AuthorityPanelProps) {
   return (
     <div className={setupPanelClass}>
       <SectionTitle icon={<InventoryIcon />} title="数据来源" />
-      <p className="m-0 text-xs leading-[1.55] text-slate-600">
-        浏览器版仅支持「识别补丁来源 + 输出到源版本」。识别基于人工校对的甲胄部件映射表，跨版本迁移请使用桌面或命令行版本。
-      </p>
+      {props.crossArchiveReady ? (
+        <p className="m-0 text-xs leading-[1.55] text-emerald-700">
+          已连接游戏 data 目录，浏览器版可执行完整跨版本迁移（与桌面/命令行版本结果一致）。
+        </p>
+      ) : (
+        <p className="m-0 text-xs leading-[1.55] text-slate-600">
+          未连接游戏目录时仅支持「识别补丁来源 + 输出到源版本」。识别基于人工校对的甲胄部件映射表；选择下方游戏 data 目录可启用完整跨版本迁移。
+        </p>
+      )}
       <div className="mt-auto flex flex-col gap-1.5 pt-4">
         <p className={`${metaLineClass} m-0`}>
           <span className="inline-flex h-[5px] w-[5px] rounded-full bg-slate-300" />

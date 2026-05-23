@@ -4,6 +4,12 @@
 //! lays every package out across many LZ4-compressed chunks scattered through
 //! `bundles.00.nxa` … `bundles.NN.nxa`. The catalogue (which chunk holds which
 //! byte of which logical package) lives in `bundles.nxa` (DSAR-compressed).
+//!
+//! Parsing helpers ([`parse_bundle_packages`], [`parse_chunk_descriptor_table`],
+//! [`parse_chunk_count`], [`plan_chunk_walk`], [`decompress_chunk`]) are pure
+//! byte-in / data-out functions shared between the synchronous [`BundleIndex`]
+//! (used by the CLI) and the async `BundleSlicer` (used by the web/wasm driver
+//! in `crate::io::bundle_async`).
 
 use super::dsar;
 use byteorder::{ByteOrder, LittleEndian as LE};
@@ -26,12 +32,28 @@ pub struct BundlePackage {
     pub entries: Vec<BundleEntry>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ChunkDescriptor {
+    pub unc_off: u64,
+    pub comp_off: u64,
+    pub unc_sz: u32,
+    pub comp_sz: u32,
+    pub comp_type: u8,
+    pub chunk_type: u8,
+}
+
+#[derive(Debug, Clone)]
+pub struct BundleChunkHeader {
+    pub descriptors: Vec<ChunkDescriptor>,
+    /// Maps a chunk's `unc_off` to its index in `descriptors`.
+    pub offsets: HashMap<u64, u32>,
+}
+
 #[derive(Debug)]
 pub struct BundleIndex {
     pub data_dir: PathBuf,
     pub packages: HashMap<String, BundlePackage>,
-    /// chunk_offsets["bundles.07.nxa"] -> { raw_offset_u64 -> chunk_index }
-    pub chunk_offsets: HashMap<String, HashMap<u64, u32>>,
+    pub headers: HashMap<String, BundleChunkHeader>,
 }
 
 impl BundleIndex {
@@ -39,12 +61,12 @@ impl BundleIndex {
         let bundle_toc_path = data_dir.join("bundles.nxa");
         let bundle_toc = dsar::decompress_file(&bundle_toc_path)
             .wrap_err_with(|| format!("decompress bundle TOC {}", bundle_toc_path.display()))?;
-        let chunk_offsets = read_bundle_chunk_offsets(data_dir)?;
-        let packages = read_bundle_packages(&bundle_toc)?;
+        let packages = parse_bundle_packages(&bundle_toc)?;
+        let headers = read_bundle_headers_sync(data_dir)?;
         Ok(Self {
             data_dir: data_dir.to_path_buf(),
             packages,
-            chunk_offsets,
+            headers,
         })
     }
 
@@ -76,13 +98,23 @@ impl BundleIndex {
         let mut out = vec![0u8; package.size as usize];
         for (index, entry) in package.entries.iter().enumerate() {
             let item_size = bundle_entry_size(package, index);
-            let data = self.read_resource(entry, item_size)?;
+            let bundle_name = format!("bundles.{:02}.nxa", entry.bundle_index);
+            let header = self
+                .headers
+                .get(&bundle_name)
+                .ok_or_else(|| eyre::eyre!("missing chunk header for {bundle_name}"))?;
+            let bundle_path = self.data_dir.join(&bundle_name);
+            let data = read_resource_range_sync(
+                &bundle_path,
+                header,
+                entry.start_offset as u64,
+                item_size,
+            )?;
             let start = entry.original_archive_offset as usize;
             let end = start + data.len();
             if end > out.len() {
                 eyre::bail!(
-                    "bundle entry overruns package: offset {} + {} > {}",
-                    start,
+                    "bundle entry overruns package: offset {start} + {} > {}",
                     data.len(),
                     out.len()
                 );
@@ -91,24 +123,112 @@ impl BundleIndex {
         }
         Ok(out)
     }
+}
 
-    fn read_resource(&self, entry: &BundleEntry, size: u64) -> crate::Result<Vec<u8>> {
-        let bundle_name = format!("bundles.{:02}.nxa", entry.bundle_index);
-        let bundle_path = self.data_dir.join(&bundle_name);
-        let chunk_offsets = self
-            .chunk_offsets
-            .get(&bundle_name)
-            .ok_or_else(|| eyre::eyre!("missing chunk offsets for {bundle_name}"))?;
-        read_bundle_range(&bundle_path, chunk_offsets, entry.start_offset as u64, size)
+// ---------- pure parsers (shared by sync + async drivers) ---------------
+
+/// Reads the chunk count stored at offset 8 of a `bundles.NN.nxa` file. The
+/// input must contain at least 12 bytes from the bundle file's start.
+pub fn parse_chunk_count(prefix: &[u8]) -> crate::Result<u32> {
+    if prefix.len() < 12 {
+        eyre::bail!("bundle prefix too small: {}", prefix.len());
+    }
+    Ok(LE::read_u32(&prefix[8..12]))
+}
+
+/// Parses the chunk-descriptor table located at `0x20..0x20 + 0x20 * num_chunks`
+/// of a `bundles.NN.nxa` file. `table` must be exactly that range.
+pub fn parse_chunk_descriptor_table(table: &[u8]) -> crate::Result<BundleChunkHeader> {
+    if table.len() % 0x20 != 0 {
+        eyre::bail!(
+            "chunk descriptor table size {} not a multiple of 0x20",
+            table.len()
+        );
+    }
+    let num_chunks = table.len() / 0x20;
+    let mut descriptors = Vec::with_capacity(num_chunks);
+    let mut offsets = HashMap::with_capacity(num_chunks);
+    for index in 0..num_chunks {
+        let desc = parse_chunk_descriptor(&table[index * 0x20..(index + 1) * 0x20]);
+        offsets.insert(desc.unc_off, index as u32);
+        descriptors.push(desc);
+    }
+    Ok(BundleChunkHeader {
+        descriptors,
+        offsets,
+    })
+}
+
+/// Parses the decompressed `bundles.nxa` table-of-contents into package entries.
+pub fn parse_bundle_packages(bundle_toc: &[u8]) -> crate::Result<HashMap<String, BundlePackage>> {
+    if bundle_toc.len() < 0x14 {
+        eyre::bail!("bundle TOC too small: {}", bundle_toc.len());
+    }
+    let num_packages = LE::read_u32(&bundle_toc[0x10..0x14]) as usize;
+    let mut out = HashMap::with_capacity(num_packages);
+    for index in 0..num_packages {
+        let (name, size, entries) = read_bundle_package(bundle_toc, index)?;
+        out.insert(name, BundlePackage { size, entries });
+    }
+    Ok(out)
+}
+
+/// Plans the sequence of chunks that make up a single resource starting at
+/// `resource_offset` (an `unc_off` from the descriptor table). A resource ends
+/// at the next chunk whose `chunk_type & 0x02` boundary flag is set, or at the
+/// end of the bundle if no such chunk follows.
+pub fn plan_chunk_walk(
+    header: &BundleChunkHeader,
+    resource_offset: u64,
+) -> crate::Result<Vec<u32>> {
+    let start = *header
+        .offsets
+        .get(&resource_offset)
+        .ok_or_else(|| eyre::eyre!("no chunk at offset {resource_offset}"))?;
+    let mut out = Vec::new();
+    for index in (start as usize)..header.descriptors.len() {
+        let desc = &header.descriptors[index];
+        if desc.chunk_type & 0x02 != 0 && !out.is_empty() {
+            break;
+        }
+        out.push(index as u32);
+    }
+    Ok(out)
+}
+
+/// Decompresses a single chunk's compressed payload using the descriptor's
+/// declared compression type. `comp_type == 3` is LZ4 block; anything else is
+/// treated as a literal pass-through.
+pub fn decompress_chunk(compressed: &[u8], desc: &ChunkDescriptor) -> crate::Result<Vec<u8>> {
+    if desc.comp_type == 3 {
+        lz4_flex::block::decompress(compressed, desc.unc_sz as usize)
+            .map_err(|e| crate::error::MigratorError::Lz4(e.to_string()).into())
+    } else {
+        Ok(compressed.to_vec())
     }
 }
 
-fn basename(path: &str) -> &str {
+/// Computes the byte size of bundle entry `index` from the package's size and
+/// the next entry's `original_archive_offset`.
+pub fn bundle_entry_size(package: &BundlePackage, index: usize) -> u64 {
+    let entry = &package.entries[index];
+    if index + 1 == package.entries.len() {
+        package.size - entry.original_archive_offset
+    } else {
+        package.entries[index + 1].original_archive_offset - entry.original_archive_offset
+    }
+}
+
+/// Filename basename (after the last `/` or `\`). Bundle TOC keys store
+/// package names without their directory prefix.
+pub fn basename(path: &str) -> &str {
     let idx = path.rfind(['/', '\\']).map(|i| i + 1).unwrap_or(0);
     &path[idx..]
 }
 
-fn read_bundle_chunk_offsets(data_dir: &Path) -> crate::Result<HashMap<String, HashMap<u64, u32>>> {
+// ---------- sync chunk reads (native CLI path) --------------------------
+
+fn read_bundle_headers_sync(data_dir: &Path) -> crate::Result<HashMap<String, BundleChunkHeader>> {
     let mut out = HashMap::new();
     let read_dir =
         std::fs::read_dir(data_dir).wrap_err_with(|| format!("read dir {}", data_dir.display()))?;
@@ -119,15 +239,60 @@ fn read_bundle_chunk_offsets(data_dir: &Path) -> crate::Result<HashMap<String, H
         if !is_bundle_name(s) {
             continue;
         }
-        let path = entry.path();
-        let offsets = read_single_bundle_offsets(&path)?;
-        out.insert(s.to_string(), offsets);
+        let header = read_single_bundle_header(&entry.path())?;
+        out.insert(s.to_string(), header);
     }
     Ok(out)
 }
 
+fn read_single_bundle_header(path: &Path) -> crate::Result<BundleChunkHeader> {
+    let mut f = File::open(path).wrap_err_with(|| format!("open {}", path.display()))?;
+    let mut prefix = [0u8; 12];
+    f.read_exact(&mut prefix)?;
+    let num_chunks = parse_chunk_count(&prefix)?;
+    f.seek(SeekFrom::Start(0x20))?;
+    let mut table = vec![0u8; 0x20 * num_chunks as usize];
+    f.read_exact(&mut table)?;
+    parse_chunk_descriptor_table(&table)
+}
+
+fn read_resource_range_sync(
+    path: &Path,
+    header: &BundleChunkHeader,
+    start_offset: u64,
+    size: u64,
+) -> crate::Result<Vec<u8>> {
+    let mut file = File::open(path).wrap_err_with(|| format!("open bundle {}", path.display()))?;
+    let mut data: Vec<u8> = Vec::with_capacity(size as usize);
+    let mut current: u64 = 0;
+    while current < size {
+        let resource_offset = start_offset + current;
+        let chunk_indices = plan_chunk_walk(header, resource_offset)?;
+        let mut resource: Vec<u8> = Vec::new();
+        for chunk_index in chunk_indices {
+            let desc = &header.descriptors[chunk_index as usize];
+            file.seek(SeekFrom::Start(desc.comp_off))?;
+            let mut buf = vec![0u8; desc.comp_sz as usize];
+            file.read_exact(&mut buf)?;
+            let decompressed = decompress_chunk(&buf, desc)?;
+            resource.extend_from_slice(&decompressed);
+        }
+        if resource.is_empty() {
+            eyre::bail!(
+                "bundle resource read returned zero bytes at offset {resource_offset}"
+            );
+        }
+        current += resource.len() as u64;
+        data.extend_from_slice(&resource);
+    }
+    data.truncate(size as usize);
+    Ok(data)
+}
+
+// ---------- pure-byte helpers used by both sync and async loaders -------
+
 fn is_bundle_name(name: &str) -> bool {
-    // Matches `bundles.\d\d.nxa` — needs prefix + 2 digits + suffix = >= 14 bytes
+    // Matches `bundles.NN.nxa` where NN is exactly two ASCII digits.
     const PREFIX: &str = "bundles.";
     const SUFFIX: &str = ".nxa";
     if name.len() != PREFIX.len() + 2 + SUFFIX.len() {
@@ -140,34 +305,16 @@ fn is_bundle_name(name: &str) -> bool {
     middle.chars().all(|c| c.is_ascii_digit())
 }
 
-fn read_single_bundle_offsets(path: &Path) -> crate::Result<HashMap<u64, u32>> {
-    let mut f = File::open(path).wrap_err_with(|| format!("open {}", path.display()))?;
-    f.seek(SeekFrom::Start(8))?;
-    let mut buf4 = [0u8; 4];
-    f.read_exact(&mut buf4)?;
-    let num_chunks = LE::read_u32(&buf4) as usize;
-    f.seek(SeekFrom::Start(0x20))?;
-    let mut buf = vec![0u8; 0x20 * num_chunks];
-    f.read_exact(&mut buf)?;
-    let mut out = HashMap::with_capacity(num_chunks);
-    for index in 0..num_chunks {
-        let off = LE::read_u64(&buf[index * 0x20..index * 0x20 + 8]);
-        out.insert(off, index as u32);
+fn parse_chunk_descriptor(bytes: &[u8]) -> ChunkDescriptor {
+    debug_assert_eq!(bytes.len(), 0x20);
+    ChunkDescriptor {
+        unc_off: LE::read_u64(&bytes[0..8]),
+        comp_off: LE::read_u64(&bytes[8..16]),
+        unc_sz: LE::read_u32(&bytes[16..20]),
+        comp_sz: LE::read_u32(&bytes[20..24]),
+        comp_type: bytes[24],
+        chunk_type: bytes[25],
     }
-    Ok(out)
-}
-
-fn read_bundle_packages(bundle_toc: &[u8]) -> crate::Result<HashMap<String, BundlePackage>> {
-    if bundle_toc.len() < 0x14 {
-        eyre::bail!("bundle TOC too small: {}", bundle_toc.len());
-    }
-    let num_packages = LE::read_u32(&bundle_toc[0x10..0x14]) as usize;
-    let mut out = HashMap::with_capacity(num_packages);
-    for index in 0..num_packages {
-        let (name, size, entries) = read_bundle_package(bundle_toc, index)?;
-        out.insert(name, BundlePackage { size, entries });
-    }
-    Ok(out)
 }
 
 fn read_bundle_package(
@@ -219,96 +366,6 @@ fn read_null_string(data: &[u8], offset: usize) -> crate::Result<String> {
         .map_err(|e| eyre::eyre!("invalid UTF-8 in name: {e}"))
 }
 
-fn bundle_entry_size(package: &BundlePackage, index: usize) -> u64 {
-    let entry = &package.entries[index];
-    if index + 1 == package.entries.len() {
-        package.size - entry.original_archive_offset
-    } else {
-        package.entries[index + 1].original_archive_offset - entry.original_archive_offset
-    }
-}
-
-fn read_bundle_range(
-    path: &Path,
-    chunk_offsets: &HashMap<u64, u32>,
-    start_offset: u64,
-    size: u64,
-) -> crate::Result<Vec<u8>> {
-    let mut data: Vec<u8> = Vec::with_capacity(size as usize);
-    let mut current: u64 = 0;
-    let mut file = File::open(path).wrap_err_with(|| format!("open bundle {}", path.display()))?;
-    let num_chunks = {
-        file.seek(SeekFrom::Start(8))?;
-        let mut buf = [0u8; 4];
-        file.read_exact(&mut buf)?;
-        LE::read_u32(&buf)
-    };
-    while current < size {
-        let resource =
-            read_bundle_resource(&mut file, chunk_offsets, num_chunks, start_offset + current)?;
-        let n = resource.len() as u64;
-        if n == 0 {
-            eyre::bail!(
-                "bundle resource read returned zero bytes at offset {}",
-                start_offset + current
-            );
-        }
-        data.extend_from_slice(&resource);
-        current += n;
-    }
-    data.truncate(size as usize);
-    Ok(data)
-}
-
-fn read_bundle_resource(
-    file: &mut File,
-    chunk_offsets: &HashMap<u64, u32>,
-    num_chunks: u32,
-    resource_offset: u64,
-) -> crate::Result<Vec<u8>> {
-    let mut chunk_index = *chunk_offsets
-        .get(&resource_offset)
-        .ok_or_else(|| eyre::eyre!("no chunk for offset {resource_offset}"))?;
-    let mut parts: Vec<Vec<u8>> = Vec::new();
-    while chunk_index < num_chunks {
-        let (chunk, chunk_type) = read_bundle_chunk(file, chunk_index)?;
-        if chunk_type & 0x02 != 0 && !parts.is_empty() {
-            break;
-        }
-        parts.push(chunk);
-        chunk_index += 1;
-    }
-    let total: usize = parts.iter().map(|p| p.len()).sum();
-    let mut out = Vec::with_capacity(total);
-    for p in parts {
-        out.extend_from_slice(&p);
-    }
-    Ok(out)
-}
-
-fn read_bundle_chunk(file: &mut File, chunk_index: u32) -> crate::Result<(Vec<u8>, u8)> {
-    file.seek(SeekFrom::Start(0x20 + 0x20 * chunk_index as u64))?;
-    let mut desc = [0u8; 0x20];
-    file.read_exact(&mut desc)?;
-    // Q Q I I B B 6x
-    let _unc_off = LE::read_u64(&desc[0..8]);
-    let comp_off = LE::read_u64(&desc[8..16]);
-    let unc_sz = LE::read_u32(&desc[16..20]) as usize;
-    let comp_sz = LE::read_u32(&desc[20..24]) as usize;
-    let comp_type = desc[24];
-    let chunk_type = desc[25];
-    file.seek(SeekFrom::Start(comp_off))?;
-    let mut buf = vec![0u8; comp_sz];
-    file.read_exact(&mut buf)?;
-    let data = if comp_type == 3 {
-        lz4_flex::block::decompress(&buf, unc_sz)
-            .map_err(|e| crate::error::MigratorError::Lz4(e.to_string()))?
-    } else {
-        buf
-    };
-    Ok((data, chunk_type))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,5 +385,53 @@ mod tests {
         assert!(!is_bundle_name("bundles.1.nxa"));
         assert!(!is_bundle_name("foo.bundles.00.nxa"));
         assert!(!is_bundle_name("bundles.00.nxa.bak"));
+    }
+
+    #[test]
+    fn parse_chunk_count_reads_offset_8() {
+        let mut bytes = [0u8; 16];
+        LE::write_u32(&mut bytes[8..12], 0x1234);
+        assert_eq!(parse_chunk_count(&bytes).unwrap(), 0x1234);
+    }
+
+    #[test]
+    fn parse_chunk_count_rejects_short_input() {
+        assert!(parse_chunk_count(&[0u8; 11]).is_err());
+    }
+
+    #[test]
+    fn parse_chunk_descriptor_table_round_trips() {
+        let mut table = vec![0u8; 0x40]; // 2 chunks
+        LE::write_u64(&mut table[0..8], 100); // chunk 0 unc_off
+        LE::write_u64(&mut table[8..16], 200); // chunk 0 comp_off
+        LE::write_u32(&mut table[16..20], 300); // chunk 0 unc_sz
+        LE::write_u32(&mut table[20..24], 50); // chunk 0 comp_sz
+        table[24] = 3; // LZ4
+        table[25] = 0; // chunk_type
+        LE::write_u64(&mut table[0x20..0x20 + 8], 400);
+        table[0x20 + 25] = 2; // boundary flag
+        let header = parse_chunk_descriptor_table(&table).unwrap();
+        assert_eq!(header.descriptors.len(), 2);
+        assert_eq!(header.offsets.get(&100), Some(&0));
+        assert_eq!(header.offsets.get(&400), Some(&1));
+        assert_eq!(header.descriptors[0].unc_sz, 300);
+        assert_eq!(header.descriptors[1].chunk_type, 2);
+    }
+
+    #[test]
+    fn plan_chunk_walk_stops_at_boundary() {
+        let header = BundleChunkHeader {
+            descriptors: vec![
+                ChunkDescriptor { unc_off: 0, comp_off: 0, unc_sz: 0, comp_sz: 0, comp_type: 0, chunk_type: 0 },
+                ChunkDescriptor { unc_off: 100, comp_off: 0, unc_sz: 0, comp_sz: 0, comp_type: 0, chunk_type: 0 },
+                ChunkDescriptor { unc_off: 200, comp_off: 0, unc_sz: 0, comp_sz: 0, comp_type: 0, chunk_type: 2 },
+                ChunkDescriptor { unc_off: 300, comp_off: 0, unc_sz: 0, comp_sz: 0, comp_type: 0, chunk_type: 0 },
+            ],
+            offsets: [(0, 0), (100, 1), (200, 2), (300, 3)].into_iter().collect(),
+        };
+        // From chunk 0: takes 0, 1, stops before 2 (boundary).
+        assert_eq!(plan_chunk_walk(&header, 0).unwrap(), vec![0, 1]);
+        // From chunk 2: takes 2 (the first chunk includes its own boundary flag), 3
+        assert_eq!(plan_chunk_walk(&header, 200).unwrap(), vec![2, 3]);
     }
 }
