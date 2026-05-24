@@ -1,72 +1,34 @@
 import ArchiveIcon from "@mui/icons-material/Archive";
+import MenuIcon from "@mui/icons-material/Menu";
 import CompareArrowsIcon from "@mui/icons-material/CompareArrows";
 import DescriptionIcon from "@mui/icons-material/Description";
-import DownloadIcon from "@mui/icons-material/Download";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutlined";
-import InventoryIcon from "@mui/icons-material/Inventory2";
 import SearchIcon from "@mui/icons-material/Search";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
-import VerifiedIcon from "@mui/icons-material/Verified";
 import {
-  Alert,
   Button,
   Checkbox,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   FormControlLabel,
   InputAdornment,
+  IconButton,
+  Menu,
+  MenuItem,
   Radio,
   RadioGroup,
   Switch,
   TextField,
   Tooltip,
 } from "@mui/material";
+import { Hd2Dialog, Hd2DialogActions, Hd2DialogContent, Hd2DialogTitle } from "./Hd2Dialog";
 import { memo, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import type { AuthorityMappings, MigrationSummary, PatchInfo, TargetOption } from "./types";
+import type { PatchInfo, TargetOption } from "./types";
 
 const panelClass = "overflow-hidden";
 const setupPanelClass = `${panelClass} flex flex-1 flex-col p-6`;
 const metaLineClass =
   "flex items-center gap-[0.4375rem] text-xs text-hd2-muted [overflow-wrap:anywhere]";
-
-interface AuthorityPanelProps {
-  authority: AuthorityMappings | null;
-  targetCount: number;
-  crossArchiveReady: boolean;
-}
-
-export function AuthorityPanel(props: AuthorityPanelProps) {
-  return (
-    <div className={setupPanelClass}>
-      <SectionTitle icon={<InventoryIcon />} title="数据来源" />
-      {props.crossArchiveReady ? (
-        <p className="m-0 text-xs leading-[1.55] text-emerald-400">
-          已连接游戏 data 目录，浏览器版可执行完整跨版本迁移（与桌面/命令行版本结果一致）。
-        </p>
-      ) : (
-        <p className="m-0 text-xs leading-[1.55] text-amber-400">
-          必须先选择游戏 data 目录（下方面板）才能进行迁移。需读取源 / 目标 archive 字节；浏览器无法内置游戏数据。
-        </p>
-      )}
-      <div className="mt-auto flex flex-col gap-1.5 pt-4">
-        <p className={`${metaLineClass} m-0`}>
-          <span className="inline-flex h-[0.3125rem] w-[0.3125rem] bg-hd2-faint" />
-          内置 archive 索引：{props.targetCount} 个条目
-        </p>
-        {props.authority && (
-          <p className={`${metaLineClass} m-0 text-emerald-400`}>
-            <VerifiedIcon sx={{ fontSize: "0.875rem" }} />
-            人工校对映射：{props.authority.armorCount} 件甲
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
 
 interface PatchPanelProps {
   patch: PatchInfo | null;
@@ -94,14 +56,11 @@ export function PatchPanel(props: PatchPanelProps) {
 
 interface TargetPanelProps {
   multiTarget: boolean;
-  noPadding: boolean;
+  onBatchSelect: (hashes: string[]) => void;
   onMultiTargetChange: (enabled: boolean) => void;
   onSourceChange: (hash: string) => void;
   onTargetChange: (hash: string) => void;
-  partialRemap: boolean;
   selectedTargets: string[];
-  setNoPadding: (value: boolean) => void;
-  setPartialRemap: (value: boolean) => void;
   sourceChoices: TargetOption[];
   sourceHash: string;
   targetOptions: TargetOption[];
@@ -123,6 +82,7 @@ export function TargetPanel(props: TargetPanelProps) {
 
       <MappingGrid
         multiTarget={props.multiTarget}
+        onBatchSelect={props.onBatchSelect}
         onSourceChange={props.onSourceChange}
         onTargetChange={props.onTargetChange}
         selectedTargets={props.selectedTargets}
@@ -130,19 +90,13 @@ export function TargetPanel(props: TargetPanelProps) {
         sourceHash={props.sourceHash}
         targetOptions={props.targetOptions}
       />
-
-      <OptionsPanel
-        noPadding={props.noPadding}
-        partialRemap={props.partialRemap}
-        setNoPadding={props.setNoPadding}
-        setPartialRemap={props.setPartialRemap}
-      />
     </div>
   );
 }
 
 interface MappingGridProps {
   multiTarget: boolean;
+  onBatchSelect: (hashes: string[]) => void;
   onSourceChange: (hash: string) => void;
   onTargetChange: (hash: string) => void;
   selectedTargets: string[];
@@ -167,7 +121,7 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
       <div className="flex min-w-0 flex-1 flex-col p-6 min-[51.25rem]:pr-9">
         <MappingSectionLabel>源版本</MappingSectionLabel>
         {props.sourceChoices.length ? (
-          <div className="flex max-h-[22.5rem] flex-1 flex-col overflow-auto">
+          <div className="hd2-scroll flex max-h-[22.5rem] flex-1 flex-col overflow-auto">
             <RadioGroup value={props.sourceHash} onChange={(event) => props.onSourceChange(event.target.value)}>
               {props.sourceChoices.map((target) => (
                 <TargetRadio key={target.hash} target={target} />
@@ -179,9 +133,12 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
         )}
       </div>
       <div className="flex min-w-0 flex-1 flex-col border-t border-hd2-border p-6 min-[51.25rem]:border-t-0 min-[51.25rem]:border-l min-[51.25rem]:pl-4">
-        <div className="mb-3 flex items-center gap-3">
+        {/* Row 1: label */}
+        <div className="mb-2">
           <MappingSectionLabel inline>目标版本</MappingSectionLabel>
-          <div className="flex-1" />
+        </div>
+        {/* Row 2: search + quick-select menu */}
+        <div className="mb-3 flex items-center gap-2">
           <TextField
             className="targetSearchField"
             onChange={(event) => setTargetQuery(event.target.value)}
@@ -191,8 +148,15 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
             value={targetQuery}
             variant="standard"
           />
+          <QuickSelectMenu
+            multiTarget={props.multiTarget}
+            filteredTargets={filteredTargets}
+            onBatchSelect={props.onBatchSelect}
+            selectedTargets={props.selectedTargets}
+          />
+          <HelpHint title="快速选择会排除少数特殊目标（如包含多个Archive的变体护甲），因为对其迁移可能存在覆盖不完全或导致崩溃的风险。如需迁移这些目标，可在列表中手动勾选。" />
         </div>
-        <div className="flex max-h-[22.5rem] flex-1 flex-col overflow-auto">
+        <div className="hd2-scroll flex max-h-[22.5rem] flex-1 flex-col overflow-auto">
           {filteredTargets.length ? (
             filteredTargets.map((target) => (
               <TargetChoice
@@ -289,9 +253,9 @@ interface OptionsPanelProps {
   setPartialRemap: (value: boolean) => void;
 }
 
-const OptionsPanel = memo(function OptionsPanel(props: OptionsPanelProps) {
+export const OptionsPanel = memo(function OptionsPanel(props: OptionsPanelProps) {
   return (
-    <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-hd2-border bg-hd2-pit px-6 py-4">
+    <>
       <FormControlLabel
         className="optionsControl"
         control={<Checkbox checked={props.noPadding} onChange={(event) => props.setNoPadding(event.target.checked)} />}
@@ -304,52 +268,9 @@ const OptionsPanel = memo(function OptionsPanel(props: OptionsPanelProps) {
         label="部分重映射"
       />
       <HelpHint title="实验功能：即使某些 Unit 不完整也输出重映射结果，仅用于调试不完整的元数据，正常使用请勿勾选。" />
-    </div>
+    </>
   );
 });
-
-interface ResultPanelProps {
-  errorText: string;
-  onDownload: () => void;
-  summary: MigrationSummary | null;
-}
-
-export function ResultPanel({ errorText, onDownload, summary }: ResultPanelProps) {
-  if (errorText) {
-    return <Alert severity="error">{errorText}</Alert>;
-  }
-  if (!summary) {
-    return null;
-  }
-  return (
-    <div className={`${panelClass} p-5`}>
-      <div className="flex flex-row items-center gap-4">
-        <div>
-          <p className="m-0 text-base font-bold text-hd2-text">已迁移 {summary.migratedCount} 个目标</p>
-          <p className={`${metaLineClass} m-0 mt-3`}>{summary.warningCount} 条警告</p>
-        </div>
-        <div className="flex-1" />
-        <Button
-          onClick={onDownload}
-          startIcon={<DownloadIcon />}
-          variant="contained"
-        >
-          下载 ZIP
-        </Button>
-      </div>
-      <div className="mt-3 border border-hd2-border bg-hd2-sunken p-3">
-        {summary.reports.map((report) => (
-          <p
-            className="m-0 font-mono text-xs text-hd2-muted [overflow-wrap:anywhere]"
-            key={report.targetHash}
-          >
-            {report.targetName}：文件ID重映射={report.fileIdRemapped} 已填充={report.paddedUnits} 已跳过={report.skippedEntries}
-          </p>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 interface PerformanceDialogProps {
   open: boolean;
@@ -359,18 +280,64 @@ interface PerformanceDialogProps {
 
 export function PerformanceDialog(props: PerformanceDialogProps) {
   return (
-    <Dialog open={props.open} onClose={props.onCancel}>
-      <DialogTitle>多目标</DialogTitle>
-      <DialogContent>
-        <Alert severity="warning">
+    <Hd2Dialog open={props.open} onClose={props.onCancel}>
+      <Hd2DialogTitle>多目标</Hd2DialogTitle>
+      <Hd2DialogContent>
+        <div className="border border-hd2-yellow/30 bg-hd2-yellow-bg px-4 py-3 text-sm text-hd2-muted">
           WASM 在内存中构建输出 ZIP。大量多目标迁移可能占用较多的 CPU 和内存。
-        </Alert>
-      </DialogContent>
-      <DialogActions>
+        </div>
+      </Hd2DialogContent>
+      <Hd2DialogActions>
         <Button onClick={props.onCancel}>取消</Button>
         <Button onClick={props.onConfirm} variant="contained">继续</Button>
-      </DialogActions>
-    </Dialog>
+      </Hd2DialogActions>
+    </Hd2Dialog>
+  );
+}
+
+interface QuickSelectMenuProps {
+  multiTarget: boolean;
+  filteredTargets: TargetOption[];
+  onBatchSelect: (hashes: string[]) => void;
+  selectedTargets: string[];
+}
+
+function QuickSelectMenu({ multiTarget, filteredTargets, onBatchSelect, selectedTargets }: QuickSelectMenuProps) {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const close = () => setAnchor(null);
+
+  const selectFiltered = () => {
+    const eligible = filteredTargets.filter((t) => !t.excluded).map((t) => t.hash);
+    const merged = [...new Set([...selectedTargets, ...eligible])];
+    onBatchSelect(merged);
+    close();
+  };
+
+  const selectAll = () => {
+    onBatchSelect(filteredTargets.filter((t) => !t.excluded).map((t) => t.hash));
+    close();
+  };
+
+  const clearAll = () => {
+    onBatchSelect([]);
+    close();
+  };
+
+  return (
+    <>
+      <IconButton
+        className="quickSelectMenuBtn"
+        onClick={(e) => setAnchor(e.currentTarget)}
+        size="small"
+      >
+        <MenuIcon fontSize="small" />
+      </IconButton>
+      <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={close}>
+        <MenuItem disabled={!multiTarget} onClick={selectFiltered}>快速选择</MenuItem>
+        <MenuItem disabled={!multiTarget} onClick={selectAll}>全选</MenuItem>
+        <MenuItem onClick={clearAll}>取消全选</MenuItem>
+      </Menu>
+    </>
   );
 }
 

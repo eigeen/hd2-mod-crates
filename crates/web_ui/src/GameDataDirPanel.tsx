@@ -1,13 +1,12 @@
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import FolderOffIcon from "@mui/icons-material/FolderOff";
-import { Alert, Button, Chip } from "@mui/material";
+import { Alert, Button } from "@mui/material";
 import { useCallback, useEffect, useState } from "react";
 import {
   ensureReadPermission,
   forgetRememberedDirectory,
   type GameDirStatus,
-  type InstallKind,
   inspectGameDirectory,
   isDirectoryAccessSupported,
   loadRememberedDirectory,
@@ -27,11 +26,9 @@ interface GameDataDirPanelProps {
   onChange: (selection: GameDirSelection | null) => void;
 }
 
-// 状态机：未选择 / 已记住但未授权 / 已就绪 / 不支持。
 type PanelState =
   | { kind: "unsupported" }
   | { kind: "empty" }
-  | { kind: "needs-permission"; handle: FileSystemDirectoryHandle }
   | { kind: "ready"; selection: GameDirSelection };
 
 export function GameDataDirPanel({ selection, onChange }: GameDataDirPanelProps) {
@@ -76,28 +73,6 @@ export function GameDataDirPanel({ selection, onChange }: GameDataDirPanelProps)
     }
   }, [onChange]);
 
-  const handleAuthorize = useCallback(
-    async (handle: FileSystemDirectoryHandle) => {
-      setError("");
-      setBusy(true);
-      try {
-        const granted = await ensureReadPermission(handle);
-        if (!granted) {
-          setError("读取权限被拒绝。");
-          return;
-        }
-        const ready = await activate(handle);
-        setState({ kind: "ready", selection: ready });
-        onChange(ready);
-      } catch (e) {
-        setError(messageOf(e));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [onChange],
-  );
-
   const handleForget = useCallback(async () => {
     setError("");
     await forgetRememberedDirectory();
@@ -121,7 +96,6 @@ export function GameDataDirPanel({ selection, onChange }: GameDataDirPanelProps)
       <Header />
       <Body
         busy={busy}
-        onAuthorize={handleAuthorize}
         onForget={handleForget}
         onPick={handlePick}
         state={state}
@@ -140,9 +114,6 @@ function Header() {
     <div className="flex items-center gap-2 [&_svg]:text-hd2-yellow [&_svg]:text-[1.125rem]">
       <FolderOpenIcon />
       <h2 className="m-0 text-sm font-bold text-hd2-text">游戏 data 目录</h2>
-      <span className="ml-2 border border-hd2-yellow/30 bg-hd2-yellow/10 px-2 py-0.5 text-[0.6875rem] font-bold text-hd2-yellow">
-        跨版本迁移
-      </span>
     </div>
   );
 }
@@ -151,17 +122,16 @@ type ActiveState = Exclude<PanelState, { kind: "unsupported" }>;
 
 interface BodyProps {
   busy: boolean;
-  onAuthorize: (handle: FileSystemDirectoryHandle) => void;
   onForget: () => void;
   onPick: () => void;
   state: ActiveState;
 }
 
-function Body({ busy, onAuthorize, onForget, onPick, state }: BodyProps) {
+function Body({ busy, onForget, onPick, state }: BodyProps) {
   if (state.kind === "empty") {
     return (
       <div className="mt-3 flex flex-col gap-2 text-xs text-hd2-muted">
-        <p className="m-0">选择 Helldivers 2 的 <code className="bg-hd2-ink px-1 py-0.5">data</code> 目录以启用跨版本迁移。仅读取，不修改任何文件。</p>
+        <p className="m-0">Helldivers 2 的 <code className="bg-hd2-ink px-1 py-0.5">data</code> 目录。仅读取，不修改任何文件。</p>
         <div>
           <Button
             disabled={busy}
@@ -175,33 +145,11 @@ function Body({ busy, onAuthorize, onForget, onPick, state }: BodyProps) {
       </div>
     );
   }
-  if (state.kind === "needs-permission") {
-    return (
-      <div className="mt-3 flex flex-col gap-2 text-xs text-hd2-muted">
-        <p className="m-0">
-          上次使用的目录：<span className="font-mono text-hd2-text">{state.handle.name}</span>
-        </p>
-        <p className="m-0">需要重新授权读取权限。</p>
-        <div className="flex flex-wrap gap-2">
-          <Button disabled={busy} onClick={() => onAuthorize(state.handle)} variant="contained">
-            授权访问
-          </Button>
-          <Button disabled={busy} onClick={onPick}>
-            选择其他目录
-          </Button>
-          <Button color="warning" disabled={busy} onClick={onForget} startIcon={<FolderOffIcon />}>
-            清除
-          </Button>
-        </div>
-      </div>
-    );
-  }
   return (
     <div className="mt-3 flex flex-col gap-2 text-xs text-hd2-muted">
       <div className="flex items-center gap-2">
         <CheckCircleIcon sx={{ fontSize: "1rem", color: "rgb(22 163 74)" }} />
         <span className="font-mono text-hd2-text">{state.selection.handle.name}</span>
-        <InstallKindChip kind={state.selection.status.kind} chunkCount={state.selection.status.bundleChunkCount} />
       </div>
       <div className="flex flex-wrap gap-2">
         <Button disabled={busy} onClick={onPick} size="small" variant="outlined">
@@ -215,15 +163,6 @@ function Body({ busy, onAuthorize, onForget, onPick, state }: BodyProps) {
   );
 }
 
-function InstallKindChip({ kind, chunkCount }: { kind: InstallKind; chunkCount: number }) {
-  if (kind === "slim") {
-    return <Chip color="success" label={`Slim install · ${chunkCount} 个 bundle`} size="small" />;
-  }
-  if (kind === "legacy") {
-    return <Chip color="info" label="Legacy install" size="small" />;
-  }
-  return <Chip color="warning" label="未检测到游戏文件" size="small" />;
-}
 
 async function activate(handle: FileSystemDirectoryHandle): Promise<GameDirSelection> {
   const granted = await ensureReadPermission(handle);
@@ -243,19 +182,18 @@ async function restoreRemembered(
     return;
   }
   const permission = await queryReadPermission(handle);
-  if (permission === "granted") {
-    try {
-      const status = await inspectGameDirectory(handle);
-      const ready: GameDirSelection = { handle, status };
-      setState({ kind: "ready", selection: ready });
-      onChange(ready);
-      return;
-    } catch {
-      setState({ kind: "empty" });
-      return;
-    }
+  if (permission !== "granted") {
+    setState({ kind: "empty" });
+    return;
   }
-  setState({ kind: "needs-permission", handle });
+  try {
+    const status = await inspectGameDirectory(handle);
+    const ready: GameDirSelection = { handle, status };
+    setState({ kind: "ready", selection: ready });
+    onChange(ready);
+  } catch {
+    setState({ kind: "empty" });
+  }
 }
 
 function isCancelError(error: unknown): boolean {

@@ -4,6 +4,7 @@ use crate::progress::JsProgress;
 use crate::zip_store::zip_store;
 use hd2_migrator_io::{
     index::ArchiveIndex,
+    target_exclusions::is_default_excluded_target,
     web::{self, PatchBytes, WebMigrateOptions, WebMigrationSummary, WebTargetOption},
 };
 use js_sys::{Object, Reflect, Uint8Array};
@@ -20,6 +21,7 @@ pub fn builtin_target_options(category: Option<String>) -> WasmResult<JsValue> {
     let options = targets
         .iter()
         .map(|target| WebTargetOption {
+            excluded: is_default_excluded_target(&target.hash, &target.name),
             hash: target.hash.clone(),
             name: target.name.clone(),
         })

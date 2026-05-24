@@ -4,6 +4,7 @@ use crate::index::ArchiveIndex;
 use crate::io::DataSource;
 use crate::migrator::mode_a_web::{self, WebProgress};
 use crate::migrator::safe_filename;
+use crate::target_exclusions::is_default_excluded_target;
 use crate::unit::authority::ArmorMappingTable;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -27,6 +28,7 @@ pub struct PatchBytes {
 pub struct WebTargetOption {
     pub hash: String,
     pub name: String,
+    pub excluded: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,6 +88,7 @@ pub fn list_target_options(category: &str) -> crate::Result<Vec<WebTargetOption>
     Ok(entries
         .iter()
         .map(|entry| WebTargetOption {
+            excluded: is_default_excluded_target(&entry.hash, &entry.name),
             hash: entry.hash.clone(),
             name: entry.name.clone(),
         })
@@ -251,6 +254,7 @@ pub(crate) fn detect_source_via_authority(
                 .count();
             (unit_hits > 0).then_some(SourceCandidate {
                 option: WebTargetOption {
+                    excluded: is_default_excluded_target(&entry.hash, &entry.name),
                     hash: entry.hash.clone(),
                     name: entry.name.clone(),
                 },

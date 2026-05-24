@@ -1,6 +1,7 @@
 export interface TargetOption {
   hash: string;
   name: string;
+  excluded: boolean;
 }
 
 export interface PatchFiles {
