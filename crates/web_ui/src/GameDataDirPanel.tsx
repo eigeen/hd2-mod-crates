@@ -15,8 +15,7 @@ import {
   queryReadPermission,
 } from "./directoryAccess";
 
-const panelClass =
-  "border border-hd2-border bg-hd2-surface overflow-hidden p-6";
+const panelClass = "p-6";
 
 export interface GameDirSelection {
   handle: FileSystemDirectoryHandle;

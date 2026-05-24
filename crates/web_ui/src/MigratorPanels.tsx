@@ -28,8 +28,7 @@ import { memo, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { AuthorityMappings, MigrationSummary, PatchInfo, TargetOption } from "./types";
 
-const panelClass =
-  "border border-hd2-border bg-hd2-surface overflow-hidden";
+const panelClass = "overflow-hidden";
 const setupPanelClass = `${panelClass} flex flex-1 flex-col p-6`;
 const metaLineClass =
   "flex items-center gap-[0.4375rem] text-xs text-hd2-muted [overflow-wrap:anywhere]";
@@ -323,7 +322,7 @@ export function ResultPanel({ errorText, onDownload, summary }: ResultPanelProps
     return null;
   }
   return (
-    <div className={`${panelClass} mb-6 p-5`}>
+    <div className={`${panelClass} p-5`}>
       <div className="flex flex-row items-center gap-4">
         <div>
           <p className="m-0 text-base font-bold text-hd2-text">已迁移 {summary.migratedCount} 个目标</p>
