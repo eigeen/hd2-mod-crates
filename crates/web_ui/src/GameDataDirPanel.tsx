@@ -16,7 +16,7 @@ import {
 } from "./directoryAccess";
 
 const panelClass =
-  "rounded-2xl border border-slate-200/85 bg-white shadow-[0_1px_2px_rgb(15_23_42_/_0.04)] overflow-hidden p-6";
+  "border border-hd2-border bg-hd2-surface overflow-hidden p-6";
 
 export interface GameDirSelection {
   handle: FileSystemDirectoryHandle;
@@ -138,10 +138,10 @@ export function GameDataDirPanel({ selection, onChange }: GameDataDirPanelProps)
 
 function Header() {
   return (
-    <div className="flex items-center gap-2 [&_svg]:text-slate-500 [&_svg]:text-[18px]">
+    <div className="flex items-center gap-2 [&_svg]:text-hd2-yellow [&_svg]:text-[1.125rem]">
       <FolderOpenIcon />
-      <h2 className="m-0 text-sm font-bold text-slate-800">游戏 data 目录</h2>
-      <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-700">
+      <h2 className="m-0 text-sm font-bold text-hd2-text">游戏 data 目录</h2>
+      <span className="ml-2 border border-hd2-yellow/30 bg-hd2-yellow/10 px-2 py-0.5 text-[0.6875rem] font-bold text-hd2-yellow">
         跨版本迁移
       </span>
     </div>
@@ -161,8 +161,8 @@ interface BodyProps {
 function Body({ busy, onAuthorize, onForget, onPick, state }: BodyProps) {
   if (state.kind === "empty") {
     return (
-      <div className="mt-3 flex flex-col gap-2 text-xs text-slate-600">
-        <p className="m-0">选择 Helldivers 2 的 <code className="rounded bg-slate-100 px-1 py-0.5">data</code> 目录以启用跨版本迁移。仅读取，不修改任何文件。</p>
+      <div className="mt-3 flex flex-col gap-2 text-xs text-hd2-muted">
+        <p className="m-0">选择 Helldivers 2 的 <code className="bg-hd2-ink px-1 py-0.5">data</code> 目录以启用跨版本迁移。仅读取，不修改任何文件。</p>
         <div>
           <Button
             disabled={busy}
@@ -178,11 +178,11 @@ function Body({ busy, onAuthorize, onForget, onPick, state }: BodyProps) {
   }
   if (state.kind === "needs-permission") {
     return (
-      <div className="mt-3 flex flex-col gap-2 text-xs text-slate-600">
+      <div className="mt-3 flex flex-col gap-2 text-xs text-hd2-muted">
         <p className="m-0">
-          上次使用的目录：<span className="font-mono text-slate-700">{state.handle.name}</span>
+          上次使用的目录：<span className="font-mono text-hd2-text">{state.handle.name}</span>
         </p>
-        <p className="m-0 text-slate-500">需要重新授权读取权限。</p>
+        <p className="m-0">需要重新授权读取权限。</p>
         <div className="flex flex-wrap gap-2">
           <Button disabled={busy} onClick={() => onAuthorize(state.handle)} variant="contained">
             授权访问
@@ -198,10 +198,10 @@ function Body({ busy, onAuthorize, onForget, onPick, state }: BodyProps) {
     );
   }
   return (
-    <div className="mt-3 flex flex-col gap-2 text-xs text-slate-600">
+    <div className="mt-3 flex flex-col gap-2 text-xs text-hd2-muted">
       <div className="flex items-center gap-2">
-        <CheckCircleIcon sx={{ fontSize: 16, color: "rgb(22 163 74)" }} />
-        <span className="font-mono text-slate-700">{state.selection.handle.name}</span>
+        <CheckCircleIcon sx={{ fontSize: "1rem", color: "rgb(22 163 74)" }} />
+        <span className="font-mono text-hd2-text">{state.selection.handle.name}</span>
         <InstallKindChip kind={state.selection.status.kind} chunkCount={state.selection.status.bundleChunkCount} />
       </div>
       <div className="flex flex-wrap gap-2">

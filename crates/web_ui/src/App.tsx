@@ -193,24 +193,24 @@ function App() {
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-[2] flex flex-col items-start gap-4 border-b border-slate-200/85 bg-white/85 px-5 py-4 backdrop-blur-[14px] min-[820px]:flex-row min-[820px]:items-center min-[820px]:px-8">
+      <header className="sticky top-0 z-[2] flex flex-col items-start gap-4 border-b border-hd2-border bg-hd2-surface/95 px-5 py-4 backdrop-blur-[0.875rem] min-[51.25rem]:flex-row min-[51.25rem]:items-center min-[51.25rem]:px-8">
         <div className="flex min-w-0 flex-row items-center gap-3">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600 text-white shadow-[0_8px_18px_rgb(37_99_235_/_0.18)] [&_svg]:text-[18px]">
+          <div className="flex h-7 w-7 items-center justify-center bg-hd2-yellow text-hd2-bg [&_svg]:text-[1.125rem]">
             <ElectricBoltIcon />
           </div>
           <div>
-            <h1 className="m-0 text-base font-bold leading-tight text-slate-900">HD2 外观 Mod 迁移工具</h1>
-            <p className="m-0 text-xs text-slate-500">导入补丁、识别来源、选择目标</p>
+            <h1 className="m-0 text-base font-bold leading-tight text-hd2-text">HD2 外观 Mod 迁移工具</h1>
+            <p className="m-0 text-xs text-hd2-muted">导入补丁、识别来源、选择目标</p>
           </div>
         </div>
-        <div className="hidden flex-1 min-[820px]:block" />
-        <div className="flex flex-row items-center gap-3 max-[819px]:w-full">
-          {busy && <CircularProgress size={22} />}
+        <div className="hidden flex-1 min-[51.25rem]:block" />
+        <div className="flex flex-row items-center gap-3 max-[51.1875rem]:w-full">
+          {busy && <CircularProgress size="1.375rem" />}
           {busy && progressLabel && (
-            <span className="text-xs text-slate-600 max-[819px]:hidden">{progressLabel}</span>
+            <span className="text-xs text-hd2-muted max-[51.1875rem]:hidden">{progressLabel}</span>
           )}
           <Button
-            className="max-[819px]:flex-1!"
+            className="max-[51.1875rem]:flex-1!"
             disabled={!canRun || busy}
             onClick={runMigration}
             startIcon={<PlayArrowIcon />}
@@ -221,8 +221,8 @@ function App() {
         </div>
       </header>
 
-      <main className="mx-auto flex w-full max-w-[896px] flex-col gap-5 px-4 py-6 min-[820px]:px-6 min-[820px]:py-10">
-        <div className="flex flex-col items-stretch gap-5 min-[820px]:flex-row">
+      <main className="mx-auto flex w-full max-w-[56rem] flex-col gap-5 px-4 py-6 min-[51.25rem]:px-6 min-[51.25rem]:py-10">
+        <div className="flex flex-col items-stretch gap-5 min-[51.25rem]:flex-row">
           <AuthorityPanel
             authority={authority}
             crossArchiveReady={crossArchiveReady}
@@ -251,8 +251,8 @@ function App() {
           summary={resultSummary}
         />
         {!errorText && !resultSummary && (
-          <div className="flex items-center gap-2.5 rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-blue-800">
-            <span className="h-2 w-2 rounded-full bg-blue-600 shadow-[0_0_0_5px_rgb(59_130_246_/_0.16)]" />
+          <div className="flex items-center gap-2.5 border border-hd2-border bg-hd2-surface px-4 py-3 text-hd2-text">
+            <span className="h-2 w-2 bg-hd2-yellow shadow-(--hd2-glow-dot)" />
             <p className="m-0 text-xs font-bold">{busy && progressLabel ? progressLabel : blockerHint}</p>
           </div>
         )}

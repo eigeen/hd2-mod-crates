@@ -29,10 +29,10 @@ import type { ReactNode } from "react";
 import type { AuthorityMappings, MigrationSummary, PatchInfo, TargetOption } from "./types";
 
 const panelClass =
-  "rounded-2xl border border-slate-200/85 bg-white shadow-[0_1px_2px_rgb(15_23_42_/_0.04)] overflow-hidden";
+  "border border-hd2-border bg-hd2-surface overflow-hidden";
 const setupPanelClass = `${panelClass} flex flex-1 flex-col p-6`;
 const metaLineClass =
-  "flex items-center gap-[7px] text-xs text-slate-500 [overflow-wrap:anywhere]";
+  "flex items-center gap-[0.4375rem] text-xs text-hd2-muted [overflow-wrap:anywhere]";
 
 interface AuthorityPanelProps {
   authority: AuthorityMappings | null;
@@ -45,22 +45,22 @@ export function AuthorityPanel(props: AuthorityPanelProps) {
     <div className={setupPanelClass}>
       <SectionTitle icon={<InventoryIcon />} title="数据来源" />
       {props.crossArchiveReady ? (
-        <p className="m-0 text-xs leading-[1.55] text-emerald-700">
+        <p className="m-0 text-xs leading-[1.55] text-emerald-400">
           已连接游戏 data 目录，浏览器版可执行完整跨版本迁移（与桌面/命令行版本结果一致）。
         </p>
       ) : (
-        <p className="m-0 text-xs leading-[1.55] text-amber-700">
+        <p className="m-0 text-xs leading-[1.55] text-amber-400">
           必须先选择游戏 data 目录（下方面板）才能进行迁移。需读取源 / 目标 archive 字节；浏览器无法内置游戏数据。
         </p>
       )}
       <div className="mt-auto flex flex-col gap-1.5 pt-4">
         <p className={`${metaLineClass} m-0`}>
-          <span className="inline-flex h-[5px] w-[5px] rounded-full bg-slate-300" />
+          <span className="inline-flex h-[0.3125rem] w-[0.3125rem] bg-hd2-faint" />
           内置 archive 索引：{props.targetCount} 个条目
         </p>
         {props.authority && (
-          <p className={`${metaLineClass} m-0 text-emerald-700`}>
-            <VerifiedIcon sx={{ fontSize: 14 }} />
+          <p className={`${metaLineClass} m-0 text-emerald-400`}>
+            <VerifiedIcon sx={{ fontSize: "0.875rem" }} />
             人工校对映射：{props.authority.armorCount} 件甲
           </p>
         )}
@@ -86,7 +86,7 @@ export function PatchPanel(props: PatchPanelProps) {
         <HelpHint title="同时选择 patch 主文件、.gpu_resources、.stream 三个文件（缺失的辅助文件可省略）。" />
       </div>
       <p className={`${metaLineClass} m-0 mt-auto pt-3`}>
-        <span className="inline-flex h-[5px] w-[5px] rounded-full bg-slate-300" />
+        <span className="inline-flex h-[0.3125rem] w-[0.3125rem] bg-hd2-faint" />
         {props.patch ? props.patch.name : "尚未选择补丁"}
       </p>
     </div>
@@ -111,9 +111,9 @@ interface TargetPanelProps {
 export function TargetPanel(props: TargetPanelProps) {
   return (
     <div className={`${panelClass} flex flex-col`}>
-      <div className="flex flex-col flex-wrap items-center gap-2 border-b border-slate-100/95 bg-slate-50/80 px-6 py-3.5 min-[820px]:flex-row min-[820px]:gap-4">
+      <div className="flex flex-col flex-wrap items-center gap-2 border-b border-hd2-border hd2-stripes-accent px-6 py-3.5 min-[51.25rem]:flex-row min-[51.25rem]:gap-4">
         <SectionTitle icon={<CompareArrowsIcon />} title="迁移映射" inHeader />
-        <div className="hidden flex-1 min-[820px]:block" />
+        <div className="hidden flex-1 min-[51.25rem]:block" />
         <FormControlLabel
           className="multiToggle"
           control={<Switch checked={props.multiTarget} onChange={(event) => props.onMultiTargetChange(event.target.checked)} />}
@@ -162,13 +162,13 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
   );
 
   return (
-    <div className="m-3 flex min-h-[260px] flex-col items-stretch bg-slate-50/30 min-[820px]:flex-row">
+    <div className="m-3 flex min-h-[16.25rem] flex-col items-stretch bg-hd2-sunken min-[51.25rem]:flex-row">
       {/* 注意：故意不用 MUI FormControl 包裹 Radio 列表 —— FormControl 在 dev 模式下 childContext useMemo 每次都会变 ref，
           会导致内部所有 Radio 在每次父级 render 时都重渲染，对几百项列表非常卡。 */}
-      <div className="flex min-w-0 flex-1 flex-col p-6 min-[820px]:pr-9">
+      <div className="flex min-w-0 flex-1 flex-col p-6 min-[51.25rem]:pr-9">
         <MappingSectionLabel>源版本</MappingSectionLabel>
         {props.sourceChoices.length ? (
-          <div className="flex max-h-[360px] flex-1 flex-col overflow-auto">
+          <div className="flex max-h-[22.5rem] flex-1 flex-col overflow-auto">
             <RadioGroup value={props.sourceHash} onChange={(event) => props.onSourceChange(event.target.value)}>
               {props.sourceChoices.map((target) => (
                 <TargetRadio key={target.hash} target={target} />
@@ -179,7 +179,7 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
           <EmptyMapping icon={<DescriptionIcon />} text="请先导入补丁文件" />
         )}
       </div>
-      <div className="flex min-w-0 flex-1 flex-col border-t border-slate-100/95 p-6 min-[820px]:border-t-0 min-[820px]:border-l min-[820px]:pl-4">
+      <div className="flex min-w-0 flex-1 flex-col border-t border-hd2-border p-6 min-[51.25rem]:border-t-0 min-[51.25rem]:border-l min-[51.25rem]:pl-4">
         <div className="mb-3 flex items-center gap-3">
           <MappingSectionLabel inline>目标版本</MappingSectionLabel>
           <div className="flex-1" />
@@ -193,7 +193,7 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
             variant="standard"
           />
         </div>
-        <div className="flex max-h-[360px] flex-1 flex-col overflow-auto">
+        <div className="flex max-h-[22.5rem] flex-1 flex-col overflow-auto">
           {filteredTargets.length ? (
             filteredTargets.map((target) => (
               <TargetChoice
@@ -216,7 +216,7 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
 function MappingSectionLabel({ children, inline }: { children: ReactNode; inline?: boolean }) {
   return (
     <p
-      className={`m-0 text-[12px] font-bold uppercase tracking-[0.08em] leading-none text-slate-400 ${
+      className={`m-0 text-xs font-bold uppercase tracking-[0.08em] leading-none text-hd2-faint ${
         inline ? "" : "mb-3"
       }`}
     >
@@ -245,7 +245,7 @@ interface TargetChoiceProps {
 const TargetChoice = memo(function TargetChoice(props: TargetChoiceProps) {
   return (
     <div
-      className="mb-1.5 flex min-h-[58px] cursor-pointer items-center rounded-xl border border-transparent px-2 py-1.5 transition-colors hover:border-slate-200 hover:bg-white"
+      className="mb-1.5 flex min-h-[3.625rem] cursor-pointer items-center border border-transparent px-2 py-1.5 transition-all hover:border-hd2-yellow hover:bg-hd2-yellow-bg hover:shadow-(--hd2-glow-sm)"
       onClick={() => props.onChange(props.target.hash)}
     >
       {props.multiTarget ? <Checkbox checked={props.selected} /> : <Radio checked={props.selected} />}
@@ -268,15 +268,15 @@ const TargetRadio = memo(function TargetRadio({ target }: { target: TargetOption
 function TargetText({ target }: { target: TargetOption }) {
   return (
     <div className="min-w-0">
-      <p className="m-0 text-[13px] font-bold leading-[1.35] text-slate-700 [overflow-wrap:anywhere]">{target.name}</p>
-      <p className="m-0 font-mono text-[11px] leading-[1.45] text-slate-400 [overflow-wrap:anywhere]">{target.hash}</p>
+      <p className="m-0 text-[0.8125rem] font-bold leading-[1.35] text-hd2-text [overflow-wrap:anywhere]">{target.name}</p>
+      <p className="m-0 font-mono text-[0.6875rem] leading-[1.45] text-hd2-faint [overflow-wrap:anywhere]">{target.hash}</p>
     </div>
   );
 }
 
 function EmptyMapping({ icon, text }: { icon: ReactNode; text: string }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 p-6 text-center text-slate-400 min-h-[178px] [&_svg]:text-slate-300 [&_svg]:text-[32px]">
+    <div className="flex flex-1 flex-col items-center justify-center gap-2 border border-dashed border-hd2-border p-6 text-center text-hd2-muted min-h-[11.125rem] [&_svg]:text-hd2-line [&_svg]:text-[2rem]">
       {icon}
       <p className="m-0 text-xs">{text}</p>
     </div>
@@ -292,7 +292,7 @@ interface OptionsPanelProps {
 
 const OptionsPanel = memo(function OptionsPanel(props: OptionsPanelProps) {
   return (
-    <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-slate-100/95 bg-white px-6 py-4">
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-hd2-border bg-hd2-pit px-6 py-4">
       <FormControlLabel
         className="optionsControl"
         control={<Checkbox checked={props.noPadding} onChange={(event) => props.setNoPadding(event.target.checked)} />}
@@ -326,7 +326,7 @@ export function ResultPanel({ errorText, onDownload, summary }: ResultPanelProps
     <div className={`${panelClass} mb-6 p-5`}>
       <div className="flex flex-row items-center gap-4">
         <div>
-          <p className="m-0 text-base font-bold text-slate-900">已迁移 {summary.migratedCount} 个目标</p>
+          <p className="m-0 text-base font-bold text-hd2-text">已迁移 {summary.migratedCount} 个目标</p>
           <p className={`${metaLineClass} m-0 mt-3`}>{summary.warningCount} 条警告</p>
         </div>
         <div className="flex-1" />
@@ -338,10 +338,10 @@ export function ResultPanel({ errorText, onDownload, summary }: ResultPanelProps
           下载 ZIP
         </Button>
       </div>
-      <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50 p-3">
+      <div className="mt-3 border border-hd2-border bg-hd2-sunken p-3">
         {summary.reports.map((report) => (
           <p
-            className="m-0 font-mono text-xs text-slate-700 [overflow-wrap:anywhere]"
+            className="m-0 font-mono text-xs text-hd2-muted [overflow-wrap:anywhere]"
             key={report.targetHash}
           >
             {report.targetName}：文件ID重映射={report.fileIdRemapped} 已填充={report.paddedUnits} 已跳过={report.skippedEntries}
@@ -378,7 +378,7 @@ export function PerformanceDialog(props: PerformanceDialogProps) {
 function HelpHint({ title }: { title: string }) {
   return (
     <Tooltip arrow title={title} placement="top">
-      <HelpOutlineIcon className="cursor-help text-slate-400 hover:text-slate-600" sx={{ fontSize: 16 }} />
+      <HelpOutlineIcon className="cursor-help text-hd2-faint hover:text-hd2-yellow" sx={{ fontSize: "1rem" }} />
     </Tooltip>
   );
 }
@@ -386,12 +386,12 @@ function HelpHint({ title }: { title: string }) {
 function SectionTitle({ icon, title, inHeader }: { icon: ReactNode; title: string; inHeader?: boolean }) {
   return (
     <div
-      className={`flex flex-row items-center gap-2 [&_svg]:text-slate-500 [&_svg]:text-[18px] ${
+      className={`flex flex-row items-center gap-2 [&_svg]:text-hd2-yellow [&_svg]:text-[1.125rem] ${
         inHeader ? "" : "mb-4"
       }`}
     >
       {icon}
-      <h2 className="m-0 text-sm font-bold text-slate-800">{title}</h2>
+      <h2 className="m-0 text-sm font-bold text-hd2-text">{title}</h2>
     </div>
   );
 }

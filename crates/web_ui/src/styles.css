@@ -2,12 +2,33 @@
 
 @theme {
   --font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+
+  /* HD2 design tokens — Tailwind generates bg-hd2-*, text-hd2-*, border-hd2-* utilities */
+  --color-hd2-yellow:     #fee70f; /* primary accent */
+  --color-hd2-yellow-dim: #a1920b; /* accent dimmed / hover */
+  --color-hd2-yellow-bg:  #211f06; /* accent hover background */
+  --color-hd2-bg:         #111820; /* page background, text-on-accent */
+  --color-hd2-surface:    #0c0c0c; /* panels / cards */
+  --color-hd2-sunken:     #080808; /* inner panels, mapping grid */
+  --color-hd2-pit:        #060606; /* deepest surface (options footer) */
+  --color-hd2-stripe:     #0a0a0a; /* stripes accent background */
+  --color-hd2-border:     #333333; /* standard border */
+  --color-hd2-line:       #444444; /* dialog/tooltip borders, dim icons */
+  --color-hd2-text:       #fdfdfd; /* primary text */
+  --color-hd2-muted:      #aaaaaa; /* secondary/muted text */
+  --color-hd2-faint:      #555555; /* subtle icons, unchecked controls */
+  --color-hd2-ink:        #1a1a1a; /* dark inline code background */
 }
 
 :root {
-  background: #f8fafc;
-  color: #0f172a;
+  background: var(--color-hd2-bg);
+  color: var(--color-hd2-text);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  /* Glow shadow tokens — reference with shadow-(--hd2-glow-*) in Tailwind */
+  --hd2-glow:     0 0 0.9375rem 0.3125rem rgba(254, 231, 15, 0.3);
+  --hd2-glow-sm:  0 0 0.625rem  0.125rem  rgba(254, 231, 15, 0.2);
+  --hd2-glow-dot: 0 0 0         0.3125rem rgba(254, 231, 15, 0.2);
 }
 
 * {
@@ -15,12 +36,12 @@
 }
 
 ::selection {
-  background: rgb(59 130 246 / 20%);
+  background: rgba(254, 231, 15, 0.25);
 }
 
 body {
   margin: 0;
-  min-width: 320px;
+  min-width: 20rem;
 }
 
 button,
@@ -29,48 +50,56 @@ textarea {
   font: inherit;
 }
 
+/* HD2 signature diagonal-stripe header accent */
+.hd2-stripes-accent {
+  background-color: var(--color-hd2-stripe);
+  background-image: url(/stripes_background.svg);
+  background-size: 250%;
+}
+
 /* ---- MUI-targeted overrides ---- */
 
 .statusBanner {
   align-items: flex-start;
-  border-radius: 16px !important;
-  padding: 13px 16px !important;
+  border-radius: 0 !important;
+  padding: 0.8125rem 1rem !important;
 }
 
 .statusBanner.MuiAlert-standardWarning {
-  background: rgb(255 251 235 / 72%);
-  border: 1px solid rgb(251 191 36 / 35%);
-  color: #92400e;
+  background: rgba(162, 100, 10, 0.15) !important;
+  border: 1px solid rgba(254, 181, 15, 0.3);
+  color: var(--color-hd2-yellow);
 }
 
 .statusBanner.MuiAlert-standardInfo {
-  background: rgb(239 246 255 / 70%);
-  border: 1px solid rgb(147 197 253 / 42%);
-  color: #1e40af;
+  background: rgba(0, 80, 150, 0.15) !important;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: #93c5fd;
 }
 
 .multiToggle {
-  color: #475569;
+  color: var(--color-hd2-muted);
   margin: 0 !important;
 }
 
 .multiToggle .MuiFormControlLabel-label {
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 650;
 }
 
 .sourceChoice {
   align-items: flex-start !important;
   border: 1px solid transparent;
-  border-radius: 12px;
-  margin: 0 0 6px !important;
-  padding: 6px 8px;
-  transition: background-color 140ms ease, border-color 140ms ease;
+  border-radius: 0 !important;
+  margin: 0 0 0.375rem !important;
+  padding: 0.375rem 0.5rem;
+  transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
 }
 
 .sourceChoice:hover {
-  background: #ffffff;
-  border-color: #e2e8f0;
+  background: var(--color-hd2-yellow-bg) !important;
+  border-color: var(--color-hd2-yellow) !important;
+  box-shadow: var(--hd2-glow-sm);
 }
 
 .optionsControl.MuiFormControlLabel-root {
@@ -78,89 +107,120 @@ textarea {
 }
 
 .optionsControl .MuiFormControlLabel-label {
-  color: #475569;
-  font-size: 14px;
+  color: var(--color-hd2-muted);
+  font-size: 0.875rem;
 }
 
 .MuiButton-root {
-  border-radius: 12px !important;
+  border-radius: 0 !important;
   box-shadow: none !important;
-  font-size: 13px !important;
+  font-size: 0.8125rem !important;
   font-weight: 700 !important;
-  letter-spacing: 0 !important;
-  min-height: 40px;
-  text-transform: none !important;
+  letter-spacing: 0.06em !important;
+  min-height: 2.25rem;
+  text-transform: uppercase !important;
 }
 
 .MuiButton-containedPrimary {
-  background: #2563eb !important;
-  box-shadow: 0 8px 18px rgb(37 99 235 / 12%) !important;
+  background: var(--color-hd2-yellow) !important;
+  color: var(--color-hd2-bg) !important;
 }
 
 .MuiButton-containedPrimary:hover {
-  background: #1d4ed8 !important;
+  background: var(--color-hd2-yellow-dim) !important;
+  box-shadow: var(--hd2-glow) !important;
 }
 
 .MuiButton-outlined {
-  background: #ffffff;
-  border-color: #e2e8f0 !important;
-  color: #334155 !important;
+  background: transparent !important;
+  border-color: var(--color-hd2-faint) !important;
+  color: var(--color-hd2-text) !important;
 }
 
 .MuiButton-outlined:hover {
-  background: #f8fafc !important;
-  border-color: #cbd5e1 !important;
+  background: rgba(254, 231, 15, 0.06) !important;
+  border-color: var(--color-hd2-yellow) !important;
+  box-shadow: var(--hd2-glow-sm) !important;
 }
 
 .MuiCheckbox-root,
-.MuiRadio-root,
+.MuiRadio-root {
+  color: var(--color-hd2-faint) !important;
+}
+
+.MuiCheckbox-root.Mui-checked,
+.MuiRadio-root.Mui-checked,
 .MuiSwitch-switchBase.Mui-checked {
-  color: #2563eb !important;
+  color: var(--color-hd2-yellow) !important;
 }
 
 .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track {
-  background: #2563eb !important;
+  background: var(--color-hd2-yellow) !important;
 }
 
 .MuiTextField-root .MuiOutlinedInput-root {
-  background: rgb(248 250 252 / 45%);
-  border-radius: 12px;
-  color: #334155;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 0 !important;
+  color: var(--color-hd2-text);
   font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .targetSearchField {
-  min-width: 180px;
-  max-width: 220px;
+  min-width: 11.25rem;
+  max-width: 13.75rem;
 }
 
 .targetSearchField .MuiInput-root {
-  color: #475569;
-  font-size: 12px;
+  color: var(--color-hd2-text);
+  font-size: 0.75rem;
 }
 
 .targetSearchField .MuiInput-root::before {
-  border-bottom-color: #e2e8f0 !important;
+  border-bottom-color: var(--color-hd2-line) !important;
 }
 
 .targetSearchField .MuiInput-root:hover::before {
-  border-bottom-color: #cbd5e1 !important;
+  border-bottom-color: var(--color-hd2-yellow) !important;
 }
 
 .targetSearchField .MuiInputAdornment-root svg {
-  color: #94a3b8;
-  font-size: 16px;
+  color: var(--color-hd2-muted);
+  font-size: 1rem;
 }
 
 .MuiTextField-root .MuiInputLabel-root {
-  color: #94a3b8;
-  font-size: 12px;
+  color: var(--color-hd2-muted);
+  font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .MuiAlert-root {
+  border-radius: 0 !important;
   letter-spacing: 0;
+}
+
+.MuiDialog-paper {
+  border: 1px solid var(--color-hd2-line) !important;
+  border-radius: 0 !important;
+}
+
+.MuiDialogTitle-root {
+  border-bottom: 1px solid var(--color-hd2-border) !important;
+  color: var(--color-hd2-yellow) !important;
+  letter-spacing: 0.0625rem;
+}
+
+.MuiTooltip-tooltip {
+  background: var(--color-hd2-surface) !important;
+  border: 1px solid var(--color-hd2-line) !important;
+  border-radius: 0 !important;
+  color: var(--color-hd2-text) !important;
+  font-size: 0.75rem !important;
+}
+
+.MuiTooltip-arrow {
+  color: var(--color-hd2-surface) !important;
 }
