@@ -288,6 +288,22 @@ textarea {
   background: rgba(254, 231, 15, 0.06) !important;
 }
 
+.languageMenuBtn.MuiIconButton-root {
+  color: var(--color-hd2-faint);
+  border-radius: 0 !important;
+  padding: 0.25rem !important;
+}
+
+.languageMenuBtn.MuiIconButton-root:hover {
+  color: var(--color-hd2-yellow);
+  background: rgba(254, 231, 15, 0.06) !important;
+}
+
+.languageMenuCheck.MuiListItemIcon-root {
+  color: var(--color-hd2-yellow) !important;
+  min-width: 1.75rem !important;
+}
+
 .MuiMenu-paper {
   background: var(--color-hd2-sunken) !important;
   border: 1px solid var(--color-hd2-border) !important;
@@ -306,6 +322,11 @@ textarea {
 
 .MuiMenuItem-root:hover {
   background: var(--color-hd2-yellow-bg) !important;
+  color: var(--color-hd2-yellow) !important;
+}
+
+.MuiMenuItem-root.Mui-selected {
+  background: rgba(254, 231, 15, 0.08) !important;
   color: var(--color-hd2-yellow) !important;
 }
 

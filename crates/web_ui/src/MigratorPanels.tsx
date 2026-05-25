@@ -21,6 +21,7 @@ import {
   Tooltip,
 } from "@mui/material";
 import { Hd2Dialog, Hd2DialogActions, Hd2DialogContent, Hd2DialogTitle } from "./Hd2Dialog";
+import { useI18n } from "./i18n";
 import { memo, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { PatchInfo, TargetOption } from "./types";
@@ -36,19 +37,21 @@ interface PatchPanelProps {
 }
 
 export function PatchPanel(props: PatchPanelProps) {
+  const { t } = useI18n();
+
   return (
     <div className={setupPanelClass}>
-      <SectionTitle icon={<ArchiveIcon />} title="补丁" />
+      <SectionTitle icon={<ArchiveIcon />} title={t("patch.title")} />
       <div className="flex flex-wrap items-center gap-2.5">
         <Button component="label" startIcon={<UploadFileIcon />} variant="contained">
-          选择patch文件
+          {t("patch.pick")}
           <input hidden multiple type="file" onChange={(event) => props.onPatchFiles(event.target.files)} />
         </Button>
-        <HelpHint title="同时选择 patch 主文件、.gpu_resources、.stream 三个文件（缺失的辅助文件可省略）。" />
+        <HelpHint title={t("patch.help")} />
       </div>
       <p className={`${metaLineClass} m-0 mt-auto pt-3`}>
         <span className="inline-flex h-[0.3125rem] w-[0.3125rem] bg-hd2-faint" />
-        {props.patch ? props.patch.name : "尚未选择补丁"}
+        {props.patch ? props.patch.name : t("patch.empty")}
       </p>
     </div>
   );
@@ -67,17 +70,19 @@ interface TargetPanelProps {
 }
 
 export function TargetPanel(props: TargetPanelProps) {
+  const { t } = useI18n();
+
   return (
     <div className={`${panelClass} flex flex-col`}>
       <div className="flex flex-col flex-wrap items-center gap-2 border-b border-hd2-border hd2-stripes-accent px-6 py-3.5 min-[51.25rem]:flex-row min-[51.25rem]:gap-4">
-        <SectionTitle icon={<CompareArrowsIcon />} title="迁移映射" inHeader />
+        <SectionTitle icon={<CompareArrowsIcon />} title={t("mapping.title")} inHeader />
         <div className="hidden flex-1 min-[51.25rem]:block" />
         <FormControlLabel
           className="multiToggle"
           control={<Switch checked={props.multiTarget} onChange={(event) => props.onMultiTargetChange(event.target.checked)} />}
-          label="多目标"
+          label={t("mapping.multiTarget")}
         />
-        <HelpHint title="一次性向多个目标版本生成迁移补丁。注意：大量目标会显著增加 CPU 和内存占用。" />
+        <HelpHint title={t("mapping.multiTargetHelp")} />
       </div>
 
       <MappingGrid
@@ -106,6 +111,7 @@ interface MappingGridProps {
 }
 
 const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
+  const { t } = useI18n();
   const selectedTargetSet = useMemo(() => new Set(props.selectedTargets), [props.selectedTargets]);
   const [targetQuery, setTargetQuery] = useState("");
 
@@ -119,7 +125,7 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
       {/* 注意：故意不用 MUI FormControl 包裹 Radio 列表 —— FormControl 在 dev 模式下 childContext useMemo 每次都会变 ref，
           会导致内部所有 Radio 在每次父级 render 时都重渲染，对几百项列表非常卡。 */}
       <div className="flex min-w-0 flex-1 flex-col p-6 min-[51.25rem]:pr-9">
-        <MappingSectionLabel>源版本</MappingSectionLabel>
+        <MappingSectionLabel>{t("mapping.source")}</MappingSectionLabel>
         {props.sourceChoices.length ? (
           <div className="hd2-scroll flex max-h-[22.5rem] flex-1 flex-col overflow-auto">
             <RadioGroup value={props.sourceHash} onChange={(event) => props.onSourceChange(event.target.value)}>
@@ -129,20 +135,20 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
             </RadioGroup>
           </div>
         ) : (
-          <EmptyMapping icon={<DescriptionIcon />} text="请先导入补丁文件" />
+          <EmptyMapping icon={<DescriptionIcon />} text={t("mapping.importPatchFirst")} />
         )}
       </div>
       <div className="flex min-w-0 flex-1 flex-col border-t border-hd2-border p-6 min-[51.25rem]:border-t-0 min-[51.25rem]:border-l min-[51.25rem]:pl-4">
         {/* Row 1: label */}
         <div className="mb-2">
-          <MappingSectionLabel inline>目标版本</MappingSectionLabel>
+          <MappingSectionLabel inline>{t("mapping.target")}</MappingSectionLabel>
         </div>
         {/* Row 2: search + quick-select menu */}
         <div className="mb-3 flex items-center gap-2">
           <TextField
             className="targetSearchField"
             onChange={(event) => setTargetQuery(event.target.value)}
-            placeholder="搜索名称或 ID"
+            placeholder={t("mapping.search")}
             size="small"
             slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> } }}
             value={targetQuery}
@@ -154,7 +160,7 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
             onBatchSelect={props.onBatchSelect}
             selectedTargets={props.selectedTargets}
           />
-          <HelpHint title="快速选择会排除少数特殊目标（如包含多个Archive的变体护甲），因为对其迁移可能存在覆盖不完全或导致崩溃的风险。如需迁移这些目标，可在列表中手动勾选。" />
+          <HelpHint title={t("mapping.quickSelectHelp")} />
         </div>
         <div className="hd2-scroll flex max-h-[22.5rem] flex-1 flex-col overflow-auto">
           {filteredTargets.length ? (
@@ -168,7 +174,7 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
               />
             ))
           ) : (
-            <EmptyMapping icon={<TaskAltIcon />} text={targetQuery ? "没有匹配的目标版本" : "目标版本输出"} />
+            <EmptyMapping icon={<TaskAltIcon />} text={targetQuery ? t("mapping.noMatches") : t("mapping.output")} />
           )}
         </div>
       </div>
@@ -254,20 +260,22 @@ interface OptionsPanelProps {
 }
 
 export const OptionsPanel = memo(function OptionsPanel(props: OptionsPanelProps) {
+  const { t } = useI18n();
+
   return (
     <>
       <FormControlLabel
         className="optionsControl"
         control={<Checkbox checked={props.noPadding} onChange={(event) => props.setNoPadding(event.target.checked)} />}
-        label="禁用填充"
+        label={t("options.noPadding")}
       />
-      <HelpHint title="不在仅目标版本存在的 Unit 槽位中填充空网格模板。可能导致目标缺失部件出现异常，仅在调试时建议启用。" />
+      <HelpHint title={t("options.noPaddingHelp")} />
       <FormControlLabel
         className="optionsControl"
         control={<Checkbox checked={props.partialRemap} onChange={(event) => props.setPartialRemap(event.target.checked)} />}
-        label="部分重映射"
+        label={t("options.partialRemap")}
       />
-      <HelpHint title="实验功能：即使某些 Unit 不完整也输出重映射结果，仅用于调试不完整的元数据，正常使用请勿勾选。" />
+      <HelpHint title={t("options.partialRemapHelp")} />
     </>
   );
 });
@@ -279,17 +287,19 @@ interface PerformanceDialogProps {
 }
 
 export function PerformanceDialog(props: PerformanceDialogProps) {
+  const { t } = useI18n();
+
   return (
     <Hd2Dialog open={props.open} onClose={props.onCancel}>
-      <Hd2DialogTitle>多目标</Hd2DialogTitle>
+      <Hd2DialogTitle>{t("performance.title")}</Hd2DialogTitle>
       <Hd2DialogContent>
         <div className="border border-hd2-yellow/30 bg-hd2-yellow-bg px-4 py-3 text-sm text-hd2-muted">
-          WASM 在内存中构建输出 ZIP。大量多目标迁移可能占用较多的 CPU 和内存。
+          {t("performance.body")}
         </div>
       </Hd2DialogContent>
       <Hd2DialogActions>
-        <Button onClick={props.onCancel}>取消</Button>
-        <Button onClick={props.onConfirm} variant="contained">继续</Button>
+        <Button onClick={props.onCancel}>{t("dialog.cancel")}</Button>
+        <Button onClick={props.onConfirm} variant="contained">{t("dialog.continue")}</Button>
       </Hd2DialogActions>
     </Hd2Dialog>
   );
@@ -303,6 +313,7 @@ interface QuickSelectMenuProps {
 }
 
 function QuickSelectMenu({ multiTarget, filteredTargets, onBatchSelect, selectedTargets }: QuickSelectMenuProps) {
+  const { t } = useI18n();
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const close = () => setAnchor(null);
 
@@ -333,9 +344,9 @@ function QuickSelectMenu({ multiTarget, filteredTargets, onBatchSelect, selected
         <MenuIcon fontSize="small" />
       </IconButton>
       <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={close}>
-        <MenuItem disabled={!multiTarget} onClick={selectFiltered}>快速选择</MenuItem>
-        <MenuItem disabled={!multiTarget} onClick={selectAll}>全选</MenuItem>
-        <MenuItem onClick={clearAll}>取消全选</MenuItem>
+        <MenuItem disabled={!multiTarget} onClick={selectFiltered}>{t("mapping.quickSelect")}</MenuItem>
+        <MenuItem disabled={!multiTarget} onClick={selectAll}>{t("mapping.selectAll")}</MenuItem>
+        <MenuItem onClick={clearAll}>{t("mapping.clearAll")}</MenuItem>
       </Menu>
     </>
   );

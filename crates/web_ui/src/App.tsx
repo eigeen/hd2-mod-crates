@@ -5,6 +5,8 @@ import { toast, Toaster } from "sonner";
 import { downloadZip, patchFilesFromList } from "./fileInputs";
 import { GameDataDirPanel, type GameDirSelection } from "./GameDataDirPanel";
 import { GameDataSource } from "./gameDataSource";
+import { useI18n, type Translate } from "./i18n";
+import { LanguageMenu } from "./LanguageMenu";
 import {
   OptionsPanel,
   PatchPanel,
@@ -23,6 +25,7 @@ import { builtinTargetOptions, detectSource, migrate, migrateCrossArchive } from
 const PATCH_SUFFIX = "9ba626afa44a3aa3.patch_0";
 
 function App() {
+  const { t } = useI18n();
   const [targets, setTargets] = useState<TargetOption[]>([]);
   // patch 的 Uint8Array 可能上百 MB，放在 React state 里会被 React DevTools 扩展枚举/序列化导致 CPU 拉满 + 堆 OOM。
   // 因此把字节存到 ref，state 只留小元数据用于驱动 UI。
@@ -51,7 +54,8 @@ function App() {
   const canRun = Boolean(
     targets.length && patchInfo && sourceHash && selectedTargetCount && crossArchiveReady,
   );
-  const blockerHint = canRun ? "" : nextBlockerHint({ crossArchiveReady, patchInfo, selectedTargetCount });
+  const blockerHint = canRun ? "" : nextBlockerHint({ crossArchiveReady, patchInfo, selectedTargetCount }, t);
+  const patchMessages = useMemo(() => patchFileMessages(t), [t]);
 
   const sourceChoices = useMemo(
     () => (patchInfo ? sourceChoicesForSelection(targets, sourceHash, showAllSources) : []),
@@ -80,11 +84,11 @@ function App() {
     async (files: FileList | null) => {
       if (!files) return;
       await runTask(setBusy, async () => {
-        const nextPatch = await patchFilesFromList(files);
+        const nextPatch = await patchFilesFromList(files, patchMessages);
         await applyPatch(nextPatch);
       });
     },
-    [applyPatch],
+    [applyPatch, patchMessages],
   );
 
   const toggleMultiTarget = useCallback((enabled: boolean) => {
@@ -133,13 +137,13 @@ function App() {
     await runTask(setBusy, async () => {
       const output = useCrossArchive && gameDir
         ? await migrateCrossArchive(patch, options, new GameDataSource(gameDir.handle), {
-            onTargetStart: (name) => setProgressLabel(`正在迁移 ${name}`),
-            onStage: (name, stage) => setProgressLabel(`${name} · ${stage}`),
+            onTargetStart: (name) => setProgressLabel(t("app.progressMigrating", { name })),
+            onStage: (name, stage) => setProgressLabel(t("app.progressStage", { name, stage })),
             onTargetFinish: () => setProgressLabel(""),
           })
         : await migrate(patch, options);
       downloadZip(output.zipBytes, buildZipFilename(targetHashes, targets));
-      showMigrationReport(output.summary);
+      showMigrationReport(output.summary, t);
     });
     setProgressLabel("");
   }, [
@@ -151,6 +155,7 @@ function App() {
     sourceHash,
     targetHashes,
     targets,
+    t,
   ]);
 
   return (
@@ -168,10 +173,14 @@ function App() {
 
           {/* Panel title bar */}
           <div className="flex flex-col items-center border-b border-hd2-border bg-hd2-surface/70 px-4 py-5">
-            <div className="flex items-center gap-3">
+            <div className="flex w-full items-center gap-3">
+              <div className="w-8 shrink-0" />
+              <div className="flex min-w-0 flex-1 items-center justify-center gap-3">
               <img alt="" draggable={false} src="/title.svg" style={{ height: "2rem", transform: "scaleX(-1)" }} />
-              <h1 className="m-0 text-2xl font-bold text-hd2-yellow">HD2 外观 Mod 迁移工具</h1>
+              <h1 className="m-0 text-center text-xl font-bold text-hd2-yellow min-[51.25rem]:text-2xl">{t("app.title")}</h1>
               <img alt="" draggable={false} src="/title.svg" style={{ height: "2rem" }} />
+              </div>
+              <LanguageMenu />
             </div>
           </div>
 
@@ -220,7 +229,7 @@ function App() {
               startIcon={<PlayArrowIcon />}
               variant="contained"
             >
-              执行
+              {t("app.run")}
             </Button>
           </div>
         </div>
@@ -248,10 +257,10 @@ interface BlockerHintInput {
   selectedTargetCount: number;
 }
 
-function nextBlockerHint(input: BlockerHintInput): string {
-  if (!input.crossArchiveReady) return "请先选择游戏 data 目录";
-  if (!input.patchInfo) return "请选择补丁文件";
-  if (!input.selectedTargetCount) return "请选择目标版本";
+function nextBlockerHint(input: BlockerHintInput, t: Translate): string {
+  if (!input.crossArchiveReady) return t("app.blockerGameData");
+  if (!input.patchInfo) return t("app.blockerPatch");
+  if (!input.selectedTargetCount) return t("app.blockerTarget");
   return "";
 }
 
@@ -267,20 +276,20 @@ function buildZipFilename(targetHashes: string[], targets: TargetOption[]): stri
   return "hd2-migrated-patch.zip";
 }
 
-function showMigrationReport(summary: MigrationSummary): void {
+function showMigrationReport(summary: MigrationSummary, t: Translate): void {
   const details = summary.reports
     .map((r) => {
       const parts: string[] = [r.targetName];
-      if (r.fileIdRemapped) parts.push(`重映射 ${r.fileIdRemapped}`);
-      if (r.paddedUnits) parts.push(`填充 ${r.paddedUnits}`);
-      if (r.skippedEntries) parts.push(`跳过 ${r.skippedEntries}`);
-      if (r.warnings.length) parts.push(`⚠ ${r.warnings.length} 警告`);
+      if (r.fileIdRemapped) parts.push(t("report.remapped", { count: r.fileIdRemapped }));
+      if (r.paddedUnits) parts.push(t("report.padded", { count: r.paddedUnits }));
+      if (r.skippedEntries) parts.push(t("report.skipped", { count: r.skippedEntries }));
+      if (r.warnings.length) parts.push(t("report.warnings", { count: r.warnings.length }));
       return parts.join(" · ");
     })
     .join("\n");
 
   const description = <span style={{ whiteSpace: "pre-line" }}>{details}</span>;
-  const title = `已迁移 ${summary.migratedCount} 个目标`;
+  const title = t("report.title", { count: summary.migratedCount });
   if (summary.warningCount > 0) {
     toast.warning(title, { description, duration: 8000 });
   } else {
@@ -339,6 +348,19 @@ function errorMessage(error: unknown) {
     return String((error as { message: unknown }).message);
   }
   return String(error);
+}
+
+function patchFileMessages(t: Translate) {
+  return {
+    noToc: t("patch.noToc"),
+    missingIntro: t("patch.missingIntro"),
+    missingAction: (toc: string, gpu: string, stream: string) =>
+      t("patch.missingAction", { toc, gpu, stream }),
+    missingSidecar: (filename: string, expected: number) =>
+      t("patch.missingSidecar", { filename, expected }),
+    shortSidecar: (filename: string, expected: number, actual: number) =>
+      t("patch.shortSidecar", { filename, expected, actual }),
+  };
 }
 
 export default App;

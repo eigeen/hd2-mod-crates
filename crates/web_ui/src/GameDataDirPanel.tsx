@@ -3,6 +3,7 @@ import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import FolderOffIcon from "@mui/icons-material/FolderOff";
 import { Alert, Button } from "@mui/material";
 import { useCallback, useEffect, useState } from "react";
+import { useI18n } from "./i18n";
 import {
   ensureReadPermission,
   forgetRememberedDirectory,
@@ -32,6 +33,7 @@ type PanelState =
   | { kind: "ready"; selection: GameDirSelection };
 
 export function GameDataDirPanel({ selection, onChange }: GameDataDirPanelProps) {
+  const { t } = useI18n();
   const [state, setState] = useState<PanelState>(() =>
     isDirectoryAccessSupported() ? { kind: "empty" } : { kind: "unsupported" },
   );
@@ -61,7 +63,7 @@ export function GameDataDirPanel({ selection, onChange }: GameDataDirPanelProps)
     setBusy(true);
     try {
       const handle = await pickGameDirectory();
-      const ready = await activate(handle);
+      const ready = await activate(handle, t("gameData.permissionDenied"));
       setState({ kind: "ready", selection: ready });
       onChange(ready);
     } catch (e) {
@@ -71,7 +73,7 @@ export function GameDataDirPanel({ selection, onChange }: GameDataDirPanelProps)
     } finally {
       setBusy(false);
     }
-  }, [onChange]);
+  }, [onChange, t]);
 
   const handleForget = useCallback(async () => {
     setError("");
@@ -85,7 +87,7 @@ export function GameDataDirPanel({ selection, onChange }: GameDataDirPanelProps)
       <div className={panelClass}>
         <Header />
         <Alert severity="info" sx={{ mt: 2 }}>
-          当前浏览器不支持目录访问 API（仅 Chrome / Edge / 其他 Chromium 浏览器可用）。可继续使用同源版本输出。
+          {t("gameData.unsupported")}
         </Alert>
       </div>
     );
@@ -110,10 +112,12 @@ export function GameDataDirPanel({ selection, onChange }: GameDataDirPanelProps)
 }
 
 function Header() {
+  const { t } = useI18n();
+
   return (
     <div className="flex items-center gap-2 [&_svg]:text-hd2-yellow [&_svg]:text-[1.125rem]">
       <FolderOpenIcon />
-      <h2 className="m-0 text-sm font-bold text-hd2-text">游戏 data 目录</h2>
+      <h2 className="m-0 text-sm font-bold text-hd2-text">{t("gameData.title")}</h2>
     </div>
   );
 }
@@ -128,18 +132,24 @@ interface BodyProps {
 }
 
 function Body({ busy, onForget, onPick, state }: BodyProps) {
+  const { t } = useI18n();
+
   if (state.kind === "empty") {
     return (
       <div className="mt-3 flex flex-col gap-2 text-xs text-hd2-muted">
-        <p className="m-0">Helldivers 2 的 <code className="bg-hd2-ink px-1 py-0.5">data</code> 目录。仅读取，不修改任何文件。</p>
+        <p className="m-0">
+          {t("gameData.descriptionPrefix")}{" "}
+          <code className="bg-hd2-ink px-1 py-0.5">data</code>{" "}
+          {t("gameData.descriptionSuffix")}
+        </p>
         <div>
           <Button
             disabled={busy}
             onClick={onPick}
             startIcon={<FolderOpenIcon />}
-            variant="contained"
-          >
-            选择目录
+          variant="contained"
+        >
+            {t("gameData.pick")}
           </Button>
         </div>
       </div>
@@ -153,10 +163,10 @@ function Body({ busy, onForget, onPick, state }: BodyProps) {
       </div>
       <div className="flex flex-wrap gap-2">
         <Button disabled={busy} onClick={onPick} size="small" variant="outlined">
-          更换
+          {t("gameData.change")}
         </Button>
         <Button color="warning" disabled={busy} onClick={onForget} size="small" startIcon={<FolderOffIcon />}>
-          清除
+          {t("gameData.clear")}
         </Button>
       </div>
     </div>
@@ -164,10 +174,13 @@ function Body({ busy, onForget, onPick, state }: BodyProps) {
 }
 
 
-async function activate(handle: FileSystemDirectoryHandle): Promise<GameDirSelection> {
+async function activate(
+  handle: FileSystemDirectoryHandle,
+  permissionDeniedMessage: string,
+): Promise<GameDirSelection> {
   const granted = await ensureReadPermission(handle);
   if (!granted) {
-    throw new Error("读取权限被拒绝。");
+    throw new Error(permissionDeniedMessage);
   }
   const status = await inspectGameDirectory(handle);
   return { handle, status };
