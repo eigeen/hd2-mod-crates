@@ -75,7 +75,7 @@ export const en = {
   "options.partialRemap": "Partial Remap",
   "options.partialRemapHelp": "Experimental: output remap results even when some units are incomplete. Use only to debug incomplete metadata.",
   "performance.title": "Multi-target",
-  "performance.body": "WASM builds the output ZIP in memory. Large multi-target migrations can use substantial CPU and memory.",
+  "performance.body": "Targets are migrated one at a time into independently numbered ZIP downloads to limit WASM memory use. Your browser may ask you to allow multiple downloads.",
   "dialog.cancel": "Cancel",
   "dialog.continue": "Continue",
 } satisfies TranslationResources;

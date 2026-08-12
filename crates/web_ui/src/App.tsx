@@ -8,6 +8,7 @@ import { GameDataDirPanel, type GameDirSelection } from "./GameDataDirPanel";
 import { GameDataSource } from "./gameDataSource";
 import { useI18n, type Translate } from "./i18n";
 import { LanguageMenu } from "./LanguageMenu";
+import { migrateTargetsToNumberedDownloads } from "./migrationDownloads";
 import {
   OptionsPanel,
   PatchPanel,
@@ -32,6 +33,7 @@ import {
   migrate,
   migrateCrossArchive,
   repatchUnits,
+  type MigrationProgressSink,
 } from "./wasmClient";
 
 const PATCH_SUFFIX = "9ba626afa44a3aa3.patch_0";
@@ -177,18 +179,23 @@ function App() {
       noPadding,
       experimentalPartialRemap: partialRemap,
     };
-    const useCrossArchive = gameDir !== null && targetHashes.some((hash) => hash !== sourceHash);
+    const dataSource = gameDir ? new GameDataSource(gameDir.handle) : null;
     setProgressLabel("");
     await runTask(setBusy, async () => {
-      const output = useCrossArchive && gameDir
-        ? await migrateCrossArchive(patch, options, new GameDataSource(gameDir.handle), {
-            onTargetStart: (name) => setProgressLabel(t("app.progressMigrating", { name })),
-            onStage: (name, stage) => setProgressLabel(t("app.progressStage", { name, stage })),
-            onTargetFinish: () => setProgressLabel(""),
-          }, migrationCategory)
-        : await migrate(patch, options, migrationCategory);
-      downloadZip(output.zipBytes, buildZipFilename(targetHashes, targets));
-      showMigrationReport(output.summary, t);
+      const summary = await migrateTargetsToNumberedDownloads({
+        targetHashes,
+        targets,
+        migrateTarget: (targetHash, targetIndex, targetCount) => migrateSelectedTarget({
+          category: migrationCategory,
+          dataSource,
+          options,
+          patch,
+          progress: migrationProgress(targetIndex, targetCount, setProgressLabel, t),
+          targetHash,
+        }),
+        download: downloadZip,
+      });
+      showMigrationReport(summary, t);
     });
     setProgressLabel("");
   }, [
@@ -359,16 +366,47 @@ function nextBlockerHint(input: BlockerHintInput, t: Translate): string {
   return "";
 }
 
-/** Build a zip filename, including the target name when there is only one target. */
-function buildZipFilename(targetHashes: string[], targets: TargetOption[]): string {
-  if (targetHashes.length === 1) {
-    const target = targets.find((t) => t.hash === targetHashes[0]);
-    if (target) {
-      const safe = target.name.replace(/[\\/:*?"<>|]/g, "_").trim();
-      return `hd2-patch-${safe}.zip`;
-    }
+interface SelectedTargetMigrationRequest {
+  category: MigrationCategory;
+  dataSource: GameDataSource | null;
+  options: MigrateOptions;
+  patch: PatchFiles;
+  progress: MigrationProgressSink;
+  targetHash: string;
+}
+
+/** Route one target through the smallest applicable WASM migration entry point. */
+async function migrateSelectedTarget(request: SelectedTargetMigrationRequest) {
+  const options = { ...request.options, targetHashes: [request.targetHash] };
+  if (!request.dataSource || request.targetHash === options.sourceHash) {
+    return migrate(request.patch, options, request.category);
   }
-  return "hd2-migrated-patch.zip";
+  return migrateCrossArchive(
+    request.patch,
+    options,
+    request.dataSource,
+    request.progress,
+    request.category,
+  );
+}
+
+function migrationProgress(
+  targetIndex: number,
+  targetCount: number,
+  setProgressLabel: (label: string) => void,
+  t: Translate,
+): MigrationProgressSink {
+  const label = (name: string) => numberedTargetLabel(name, targetIndex, targetCount);
+  return {
+    onTargetStart: (name) => setProgressLabel(t("app.progressMigrating", { name: label(name) })),
+    onStage: (name, stage) => setProgressLabel(t("app.progressStage", { name: label(name), stage })),
+    onTargetFinish: () => setProgressLabel(""),
+  };
+}
+
+function numberedTargetLabel(name: string, targetIndex: number, targetCount: number): string {
+  if (targetCount === 1) return name;
+  return `${targetIndex + 1}/${targetCount} ${name}`;
 }
 
 function showMigrationReport(summary: MigrationSummary, t: Translate): void {

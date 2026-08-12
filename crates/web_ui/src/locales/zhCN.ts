@@ -75,7 +75,7 @@ export const zhCN = {
   "options.partialRemap": "部分重映射",
   "options.partialRemapHelp": "实验功能：即使某些 Unit 不完整也输出重映射结果，仅用于调试不完整的元数据，正常使用请勿勾选。",
   "performance.title": "多目标",
-  "performance.body": "WASM 在内存中构建输出 ZIP。大量多目标迁移可能占用较多的 CPU 和内存。",
+  "performance.body": "多目标会逐个迁移并下载带编号的独立 ZIP，以限制 WASM 内存占用。浏览器可能会询问是否允许此站点下载多个文件。",
   "dialog.cancel": "取消",
   "dialog.continue": "继续",
 } satisfies TranslationResources;
