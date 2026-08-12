@@ -1,5 +1,12 @@
 import type { GameDataSource } from "./gameDataSource";
-import type { MigrateOptions, MigrationResult, PatchFiles, TargetOption } from "./types";
+import type {
+  MigrateOptions,
+  MigrationResult,
+  PatchFiles,
+  TargetOption,
+  UnitRepatchOptions,
+  UnitRepatchResult,
+} from "./types";
 
 export interface MigrationProgressSink {
   onTargetStart?: (targetName: string, targetHash: string) => void;
@@ -61,6 +68,18 @@ export async function migrateCrossArchive(
       category,
     ),
   ) as Promise<MigrationResult>;
+}
+
+export async function repatchUnits(
+  patch: PatchFiles,
+  options: UnitRepatchOptions,
+  dataSource: GameDataSource,
+): Promise<UnitRepatchResult> {
+  const wasm = await loadWasm();
+  // Sidecars stay in JS and are reused verbatim in the output ZIP.
+  return callWasm("repatch_units", () =>
+    wasm.repatch_units(patch.name, patch.toc, options, dataSource),
+  ) as Promise<UnitRepatchResult>;
 }
 
 async function callWasm<T>(label: string, fn: () => T | Promise<T>): Promise<T> {

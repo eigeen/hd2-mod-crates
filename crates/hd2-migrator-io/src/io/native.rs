@@ -31,11 +31,12 @@ impl DataSource for NativeDataSource {
     fn read_range<'a>(&'a self, path: &'a str, offset: u64, len: u64) -> IoFuture<'a, Vec<u8>> {
         Box::pin(async move {
             let full = self.base.join(path);
-            let mut file = File::open(&full)
-                .wrap_err_with(|| format!("open {}", full.display()))?;
+            let mut file =
+                File::open(&full).wrap_err_with(|| format!("open {}", full.display()))?;
             file.seek(SeekFrom::Start(offset))
                 .wrap_err_with(|| format!("seek {} @ {offset}", full.display()))?;
-            let mut buf = vec![0u8; usize::try_from(len).map_err(|_| eyre::eyre!("range len overflow"))?];
+            let mut buf =
+                vec![0u8; usize::try_from(len).map_err(|_| eyre::eyre!("range len overflow"))?];
             file.read_exact(&mut buf)
                 .wrap_err_with(|| format!("read range {} +{len}", full.display()))?;
             Ok(buf)
@@ -64,6 +65,25 @@ impl DataSource for NativeDataSource {
             Ok(out)
         })
     }
+
+    fn list_packages<'a>(&'a self) -> IoFuture<'a, Vec<String>> {
+        Box::pin(async move {
+            let entries = std::fs::read_dir(&self.base)
+                .wrap_err_with(|| format!("read_dir {}", self.base.display()))?;
+            let mut out = Vec::new();
+            for entry in entries {
+                let entry = entry?;
+                let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                    continue;
+                };
+                if entry.file_type()?.is_file() && is_package_name(&name) {
+                    out.push(name);
+                }
+            }
+            out.sort();
+            Ok(out)
+        })
+    }
 }
 
 // Matches `bundles.NN.nxa` where NN is exactly two ASCII digits.
@@ -75,6 +95,10 @@ fn is_bundle_chunk(name: &str) -> bool {
         return false;
     };
     stripped.len() == 2 && stripped.chars().all(|c| c.is_ascii_digit())
+}
+
+fn is_package_name(name: &str) -> bool {
+    name.len() == 16 && name.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 #[cfg(test)]
@@ -90,5 +114,13 @@ mod tests {
         assert!(!is_bundle_chunk("bundles.001.nxa"));
         assert!(!is_bundle_chunk("bundles.AB.nxa"));
         assert!(!is_bundle_chunk("notbundles.00.nxa"));
+    }
+
+    #[test]
+    fn package_name_matcher() {
+        assert!(is_package_name("9ba626afa44a3aa3"));
+        assert!(is_package_name("ABCDEF0123456789"));
+        assert!(!is_package_name("9ba626afa44a3aa3.stream"));
+        assert!(!is_package_name("bundles.00.nxa"));
     }
 }

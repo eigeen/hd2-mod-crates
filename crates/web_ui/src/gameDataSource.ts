@@ -2,6 +2,7 @@
 // 方法对应 Rust 端 JsDataSource 中通过 Reflect::get 提取的四个 JS 函数。
 
 const BUNDLE_CHUNK_PATTERN = /^bundles\.\d\d\.nxa$/;
+const PACKAGE_PATTERN = /^[0-9a-f]{16}$/i;
 
 export class GameDataSource {
   constructor(private readonly dir: FileSystemDirectoryHandle) {}
@@ -34,9 +35,17 @@ export class GameDataSource {
   }
 
   async listBundleChunks(): Promise<string[]> {
+    return this.listMatchingFiles(BUNDLE_CHUNK_PATTERN);
+  }
+
+  async listPackages(): Promise<string[]> {
+    return this.listMatchingFiles(PACKAGE_PATTERN);
+  }
+
+  private async listMatchingFiles(pattern: RegExp): Promise<string[]> {
     const result: string[] = [];
     for await (const [name, handle] of this.dir.entries()) {
-      if (handle.kind === "file" && BUNDLE_CHUNK_PATTERN.test(name)) {
+      if (handle.kind === "file" && pattern.test(name)) {
         result.push(name);
       }
     }

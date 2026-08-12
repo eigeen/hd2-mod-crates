@@ -19,7 +19,7 @@ export function LanguageMenu() {
       <Tooltip arrow placement="top" title={t("language.menu")}>
         <IconButton
           aria-label={t("language.menu")}
-          className="languageMenuBtn"
+          className="headerIconBtn"
           onClick={(event) => setAnchor(event.currentTarget)}
           size="small"
         >

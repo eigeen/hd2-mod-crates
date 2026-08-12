@@ -59,4 +59,10 @@ declare module "./wasm/hd2_migrator_wasm/hd2_migrator_wasm.js" {
     progress: unknown,
     category?: string,
   ): Promise<unknown>;
+  export function repatch_units(
+    patchName: string,
+    toc: Uint8Array,
+    options: unknown,
+    dataSource: unknown,
+  ): Promise<unknown>;
 }

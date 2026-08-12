@@ -19,6 +19,7 @@
 pub mod bundle;
 pub mod dsar;
 pub mod reassembly;
+pub mod toc_only;
 
 pub use bundle::BundleIndex;
 

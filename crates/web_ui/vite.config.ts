@@ -10,6 +10,7 @@ const workspaceRoot = resolve(here, "../..");
 
 const sharedAssets: Array<[string, string]> = [
   ["assets/armor_mappings.merged.json", "public/assets/armor_mappings.merged.json"],
+  ["assets/helmet_mappings.json", "public/assets/helmet_mappings.json"],
 ];
 
 function syncSharedAssets(): Plugin {

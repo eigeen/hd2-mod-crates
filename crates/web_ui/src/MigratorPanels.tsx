@@ -19,12 +19,14 @@ import {
   Switch,
   TextField,
   Tooltip,
+  ToggleButton,
+  ToggleButtonGroup,
 } from "@mui/material";
 import { Hd2Dialog, Hd2DialogActions, Hd2DialogContent, Hd2DialogTitle } from "./Hd2Dialog";
 import { useI18n } from "./i18n";
 import { memo, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import type { PatchInfo, TargetOption } from "./types";
+import type { MigrationCategory, PatchInfo, TargetOption } from "./types";
 
 const panelClass = "overflow-hidden";
 const setupPanelClass = `${panelClass} flex flex-1 flex-col p-6`;
@@ -58,8 +60,10 @@ export function PatchPanel(props: PatchPanelProps) {
 }
 
 interface TargetPanelProps {
+  category: MigrationCategory;
   multiTarget: boolean;
   onBatchSelect: (hashes: string[]) => void;
+  onCategoryChange: (category: MigrationCategory) => void;
   onMultiTargetChange: (enabled: boolean) => void;
   onSourceChange: (hash: string) => void;
   onTargetChange: (hash: string) => void;
@@ -76,6 +80,17 @@ export function TargetPanel(props: TargetPanelProps) {
     <div className={`${panelClass} flex flex-col`}>
       <div className="flex flex-col flex-wrap items-center gap-2 border-b border-hd2-border hd2-stripes-accent px-6 py-3.5 min-[51.25rem]:flex-row min-[51.25rem]:gap-4">
         <SectionTitle icon={<CompareArrowsIcon />} title={t("mapping.title")} inHeader />
+        <ToggleButtonGroup
+          exclusive
+          onChange={(_, value: MigrationCategory | null) => {
+            if (value) props.onCategoryChange(value);
+          }}
+          size="small"
+          value={props.category}
+        >
+          <ToggleButton value="Armor">{t("mapping.armor")}</ToggleButton>
+          <ToggleButton value="Helmet">{t("mapping.helmet")}</ToggleButton>
+        </ToggleButtonGroup>
         <div className="hidden flex-1 min-[51.25rem]:block" />
         <FormControlLabel
           className="multiToggle"
@@ -257,6 +272,7 @@ interface OptionsPanelProps {
   partialRemap: boolean;
   setNoPadding: (value: boolean) => void;
   setPartialRemap: (value: boolean) => void;
+  showPartialRemap: boolean;
 }
 
 export const OptionsPanel = memo(function OptionsPanel(props: OptionsPanelProps) {
@@ -270,12 +286,14 @@ export const OptionsPanel = memo(function OptionsPanel(props: OptionsPanelProps)
         label={t("options.noPadding")}
       />
       <HelpHint title={t("options.noPaddingHelp")} />
-      <FormControlLabel
-        className="optionsControl"
-        control={<Checkbox checked={props.partialRemap} onChange={(event) => props.setPartialRemap(event.target.checked)} />}
-        label={t("options.partialRemap")}
-      />
-      <HelpHint title={t("options.partialRemapHelp")} />
+      {props.showPartialRemap && <>
+        <FormControlLabel
+          className="optionsControl"
+          control={<Checkbox checked={props.partialRemap} onChange={(event) => props.setPartialRemap(event.target.checked)} />}
+          label={t("options.partialRemap")}
+        />
+        <HelpHint title={t("options.partialRemapHelp")} />
+      </>}
     </>
   );
 });

@@ -10,6 +10,58 @@ fn lists_targets_from_builtin_index() {
 }
 
 #[test]
+fn lists_unexcluded_helmet_targets() {
+    let targets = list_target_options("Helmet").unwrap();
+
+    assert_eq!(targets.len(), 106);
+    assert!(targets.iter().all(|target| !target.excluded));
+    assert!(
+        targets
+            .iter()
+            .any(|target| target.name == "TG-8 Sharpshooter")
+    );
+    assert!(
+        targets
+            .iter()
+            .any(|target| target.name == "TG-122 Demo-Trooper")
+    );
+    assert!(
+        targets
+            .iter()
+            .all(|target| target.name != "UF-84 Doubt Killer")
+    );
+    assert!(
+        targets
+            .iter()
+            .all(|target| target.name != "O-44 Bonded Pilot")
+    );
+}
+
+#[test]
+fn detects_helmet_source_from_authoritative_unit() {
+    let table = HelmetMappingTable::bundled().unwrap();
+    let unit_id = table.unit_id("TG-8 Sharpshooter").unwrap();
+    let patch = patch_bytes("patch", &[unit_id]);
+
+    let detected = detect_source_archive("Helmet", &patch).unwrap().unwrap();
+
+    assert_eq!(detected.name, "TG-8 Sharpshooter");
+}
+
+#[test]
+fn detected_multi_archive_helmet_uses_its_logical_option() {
+    let table = HelmetMappingTable::bundled().unwrap();
+    let unit_id = table.unit_id("AF-91 Field Chemist").unwrap();
+    let patch = patch_bytes("patch", &[unit_id]);
+
+    let detected = detect_source_archive("Helmet", &patch).unwrap().unwrap();
+    let targets = list_target_options("Helmet").unwrap();
+
+    assert_eq!(detected.name, "AF-91 Field Chemist");
+    assert!(targets.iter().any(|target| target.hash == detected.hash));
+}
+
+#[test]
 fn detect_source_returns_none_when_patch_has_no_known_units() {
     let patch = patch_bytes("patch", &[0xDEADBEEF]);
 
@@ -57,7 +109,10 @@ fn migrate_cross_archive_is_unavailable_in_browser() {
     )
     .unwrap_err();
 
-    assert!(err.to_string().contains("cross-archive migration is not available"));
+    assert!(
+        err.to_string()
+            .contains("cross-archive migration is not available")
+    );
 }
 
 fn pick_two_authoritative_armors(

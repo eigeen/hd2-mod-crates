@@ -1,8 +1,9 @@
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
-import { Button, CircularProgress } from "@mui/material";
+import GitHubIcon from "@mui/icons-material/GitHub";
+import { Button, CircularProgress, IconButton, Tab, Tabs, Tooltip } from "@mui/material";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast, Toaster } from "sonner";
-import { downloadZip, patchFilesFromList } from "./fileInputs";
+import { downloadRepatchedPatch, downloadZip, patchFilesFromList } from "./fileInputs";
 import { GameDataDirPanel, type GameDirSelection } from "./GameDataDirPanel";
 import { GameDataSource } from "./gameDataSource";
 import { useI18n, type Translate } from "./i18n";
@@ -13,19 +14,33 @@ import {
   PerformanceDialog,
   TargetPanel,
 } from "./MigratorPanels";
+import { UnitUpdaterPanel } from "./UnitUpdaterPanel";
+import { ToolIntro } from "./ToolIntro";
 import type {
+  MissingUnitPolicy,
   MigrateOptions,
+  MigrationCategory,
   MigrationSummary,
   PatchFiles,
   PatchInfo,
   TargetOption,
+  UnitRepatchSummary,
 } from "./types";
-import { builtinTargetOptions, detectSource, migrate, migrateCrossArchive } from "./wasmClient";
+import {
+  builtinTargetOptions,
+  detectSource,
+  migrate,
+  migrateCrossArchive,
+  repatchUnits,
+} from "./wasmClient";
 
 const PATCH_SUFFIX = "9ba626afa44a3aa3.patch_0";
+type ToolMode = "migrate" | "repatch";
 
 function App() {
   const { t } = useI18n();
+  const [toolMode, setToolMode] = useState<ToolMode>("migrate");
+  const [migrationCategory, setMigrationCategory] = useState<MigrationCategory>("Armor");
   const [targets, setTargets] = useState<TargetOption[]>([]);
   // patch 的 Uint8Array 可能上百 MB，放在 React state 里会被 React DevTools 扩展枚举/序列化导致 CPU 拉满 + 堆 OOM。
   // 因此把字节存到 ref，state 只留小元数据用于驱动 UI。
@@ -42,19 +57,33 @@ function App() {
   const [multiConfirmed, setMultiConfirmed] = useState(false);
   const [showAllSources, setShowAllSources] = useState(false);
   const [gameDir, setGameDir] = useState<GameDirSelection | null>(null);
+  const [missingUnitPolicy, setMissingUnitPolicy] = useState<MissingUnitPolicy>("drop");
 
   useEffect(() => {
-    builtinTargetOptions()
-      .then(setTargets)
+    let cancelled = false;
+    setTargets([]);
+    builtinTargetOptions(migrationCategory)
+      .then((options) => {
+        if (!cancelled) setTargets(options);
+      })
       .catch((error) => console.error("[hd2-migrator] load builtin targets failed:", error));
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [migrationCategory]);
 
   const selectedTargetCount = targetHashes.length;
   const crossArchiveReady = gameDir !== null && gameDir.status.kind !== "empty";
-  const canRun = Boolean(
+  const canMigrate = Boolean(
     targets.length && patchInfo && sourceHash && selectedTargetCount && crossArchiveReady,
   );
-  const blockerHint = canRun ? "" : nextBlockerHint({ crossArchiveReady, patchInfo, selectedTargetCount }, t);
+  const canRepatch = Boolean(patchInfo && crossArchiveReady);
+  const canRun = toolMode === "migrate" ? canMigrate : canRepatch;
+  const blockerHint = canRun ? "" : nextBlockerHint({
+    crossArchiveReady,
+    patchInfo,
+    selectedTargetCount: toolMode === "migrate" ? selectedTargetCount : 1,
+  }, t);
   const patchMessages = useMemo(() => patchFileMessages(t), [t]);
 
   const sourceChoices = useMemo(
@@ -74,10 +103,26 @@ function App() {
     setTargetHashes([]);
     setShowAllSources(false);
     await detectPatchSource({
+      category: migrationCategory,
       patch: nextPatch,
       setSourceHash,
       setShowAllSources,
     });
+  }, [migrationCategory]);
+
+  const chooseMigrationCategory = useCallback((category: MigrationCategory) => {
+    setMigrationCategory(category);
+    setSourceHash("");
+    setTargetHashes([]);
+    setShowAllSources(false);
+    const patch = patchRef.current;
+    if (!patch) return;
+    void runTask(setBusy, () => detectPatchSource({
+      category,
+      patch,
+      setSourceHash,
+      setShowAllSources,
+    }));
   }, []);
 
   const importPatchFiles = useCallback(
@@ -140,14 +185,15 @@ function App() {
             onTargetStart: (name) => setProgressLabel(t("app.progressMigrating", { name })),
             onStage: (name, stage) => setProgressLabel(t("app.progressStage", { name, stage })),
             onTargetFinish: () => setProgressLabel(""),
-          })
-        : await migrate(patch, options);
+          }, migrationCategory)
+        : await migrate(patch, options, migrationCategory);
       downloadZip(output.zipBytes, buildZipFilename(targetHashes, targets));
       showMigrationReport(output.summary, t);
     });
     setProgressLabel("");
   }, [
     gameDir,
+    migrationCategory,
     multiConfirmed,
     multiTarget,
     noPadding,
@@ -157,6 +203,24 @@ function App() {
     targets,
     t,
   ]);
+
+  const runUnitRepatch = useCallback(async () => {
+    const patch = patchRef.current;
+    if (!patch || !gameDir) return;
+    setProgressLabel(t("repatch.progress"));
+    await runTask(setBusy, async () => {
+      const output = await repatchUnits(
+        patch,
+        { missingUnitPolicy },
+        new GameDataSource(gameDir.handle),
+      );
+      downloadRepatchedPatch(patch, output.tocBytes, "hd2-repatched-mod.zip");
+      showUnitRepatchReport(output.summary, t);
+    });
+    setProgressLabel("");
+  }, [gameDir, missingUnitPolicy, t]);
+
+  const runSelectedTool = toolMode === "migrate" ? runMigration : runUnitRepatch;
 
   return (
     <div className="min-h-screen">
@@ -174,15 +238,41 @@ function App() {
           {/* Panel title bar */}
           <div className="flex flex-col items-center border-b border-hd2-border bg-hd2-surface/70 px-4 py-5">
             <div className="flex w-full items-center gap-3">
-              <div className="w-8 shrink-0" />
+              <div className="w-[4.75rem] shrink-0 min-[35rem]:w-24" />
               <div className="flex min-w-0 flex-1 items-center justify-center gap-3">
-              <img alt="" draggable={false} src="/title.svg" style={{ height: "2rem", transform: "scaleX(-1)" }} />
-              <h1 className="m-0 text-center text-xl font-bold text-hd2-yellow min-[51.25rem]:text-2xl">{t("app.title")}</h1>
-              <img alt="" draggable={false} src="/title.svg" style={{ height: "2rem" }} />
+              <img alt="" className="hidden min-[40rem]:block" draggable={false} src="/title.svg" style={{ height: "2rem", transform: "scaleX(-1)" }} />
+              <h1 className="m-0 text-center text-lg font-bold text-hd2-yellow min-[35rem]:text-xl min-[51.25rem]:text-2xl">{t("app.title")}</h1>
+              <img alt="" className="hidden min-[40rem]:block" draggable={false} src="/title.svg" style={{ height: "2rem" }} />
               </div>
-              <LanguageMenu />
+              <div className="flex w-[4.75rem] shrink-0 items-center justify-end min-[35rem]:w-24">
+                <Tooltip title={t("github.openRepository")}>
+                  <IconButton
+                    aria-label={t("github.openRepository")}
+                    className="headerIconBtn"
+                    component="a"
+                    href="https://github.com/eigeen/hd2-mod-crates"
+                    rel="noreferrer"
+                    size="small"
+                    target="_blank"
+                  >
+                    <GitHubIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <LanguageMenu />
+              </div>
             </div>
           </div>
+
+          <Tabs
+            centered
+            onChange={(_, value: ToolMode) => setToolMode(value)}
+            value={toolMode}
+          >
+            <Tab label={t("mode.migrate")} value="migrate" />
+            <Tab label={t("mode.repatch")} value="repatch" />
+          </Tabs>
+
+          <ToolIntro mode={toolMode} />
 
           {/* Row 1: game data dir + patch */}
           <div className="flex flex-col min-[51.25rem]:flex-row">
@@ -194,11 +284,12 @@ function App() {
             </div>
           </div>
 
-          {/* Row 2: migration mapping */}
           <div className="border-t border-hd2-border">
-            <TargetPanel
+            {toolMode === "migrate" ? <TargetPanel
+              category={migrationCategory}
               multiTarget={multiTarget}
               onBatchSelect={setTargetHashes}
+              onCategoryChange={chooseMigrationCategory}
               onMultiTargetChange={toggleMultiTarget}
               onSourceChange={chooseSource}
               onTargetChange={chooseTarget}
@@ -206,17 +297,21 @@ function App() {
               sourceHash={sourceHash}
               sourceChoices={sourceChoices}
               targetOptions={targetOptions}
-            />
+            /> : <UnitUpdaterPanel
+              missingUnitPolicy={missingUnitPolicy}
+              onMissingUnitPolicyChange={setMissingUnitPolicy}
+            />}
           </div>
 
           {/* Action row: options + blocker hint + execute */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-hd2-border bg-hd2-pit px-5 py-3">
-            <OptionsPanel
+            {toolMode === "migrate" && <OptionsPanel
               noPadding={noPadding}
               partialRemap={partialRemap}
               setNoPadding={setNoPadding}
               setPartialRemap={setPartialRemap}
-            />
+              showPartialRemap={migrationCategory === "Armor"}
+            />}
             <div className="flex-1" />
             {busy && <CircularProgress size="1.25rem" />}
             {busy && progressLabel
@@ -225,11 +320,11 @@ function App() {
             }
             <Button
               disabled={!canRun || busy}
-              onClick={runMigration}
+              onClick={runSelectedTool}
               startIcon={<PlayArrowIcon />}
               variant="contained"
             >
-              {t("app.run")}
+              {toolMode === "migrate" ? t("app.run") : t("repatch.run")}
             </Button>
           </div>
         </div>
@@ -297,6 +392,22 @@ function showMigrationReport(summary: MigrationSummary, t: Translate): void {
   }
 }
 
+function showUnitRepatchReport(summary: UnitRepatchSummary, t: Translate): void {
+  const description = t("repatch.reportDetails", {
+    updated: summary.updatedUnits,
+    current: summary.alreadyCurrentUnits,
+    removed: summary.removedUnits,
+    failed: summary.failedUnits,
+    archives: summary.scannedArchives,
+  });
+  const options = { description, duration: summary.warnings.length ? 8000 : 6000 };
+  if (summary.warnings.length || summary.failedUnits) {
+    toast.warning(t("repatch.reportTitle"), options);
+    return;
+  }
+  toast.success(t("repatch.reportTitle"), options);
+}
+
 function sourceChoicesForSelection(
   targets: TargetOption[],
   sourceHash: string,
@@ -308,14 +419,15 @@ function sourceChoicesForSelection(
 }
 
 interface DetectPatchSourceRequest {
+  category: MigrationCategory;
   patch: PatchFiles;
   setSourceHash: (hash: string) => void;
   setShowAllSources: (show: boolean) => void;
 }
 
 async function detectPatchSource(request: DetectPatchSourceRequest) {
-  const { patch, setSourceHash, setShowAllSources } = request;
-  const source = await detectSource(patch);
+  const { category, patch, setSourceHash, setShowAllSources } = request;
+  const source = await detectSource(patch, category);
   if (source) {
     setSourceHash(source.hash);
     return;

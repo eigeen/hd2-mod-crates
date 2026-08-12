@@ -109,6 +109,34 @@ pub async fn migrate_cross_archive(
     migration_result(zip_store(&bundle.files), bundle.summary)
 }
 
+/// Repatch Unit resources using the latest Unit structures from game data.
+///
+/// Only the patch TOC crosses the WASM boundary. The caller keeps the original
+/// GPU/stream sidecars and packages them with the returned TOC.
+#[wasm_bindgen]
+pub async fn repatch_units(
+    patch_name: String,
+    toc: Vec<u8>,
+    options: JsValue,
+    data_source: JsValue,
+) -> WasmResult<JsValue> {
+    let options: web::UnitRepatchOptions =
+        serde_wasm_bindgen::from_value(options).map_err(js_error)?;
+    let source = JsDataSource::from_js(data_source)?;
+    let output = web::repatch_units(&patch_name, &toc, options, &source)
+        .await
+        .map_err(js_error)?;
+    let result = Object::new();
+    let toc = Uint8Array::from(output.toc.as_slice());
+    Reflect::set(&result, &JsValue::from_str("tocBytes"), &toc)?;
+    Reflect::set(
+        &result,
+        &JsValue::from_str("summary"),
+        &serde_wasm_bindgen::to_value(&output.summary).map_err(js_error)?,
+    )?;
+    Ok(result.into())
+}
+
 fn run_migration(
     patch_name: String,
     toc: Vec<u8>,

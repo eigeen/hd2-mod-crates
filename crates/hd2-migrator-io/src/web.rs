@@ -9,10 +9,14 @@
 //!   System Access API; native callers can use [`crate::io::NativeDataSource`]).
 
 pub mod migration;
+pub mod repatch;
 
 pub use crate::migrator::mode_a_web::WebProgress;
 pub use migration::{
     PatchBytes, WebMigrateOptions, WebMigrationBundle, WebMigrationReportRow, WebMigrationSummary,
     WebOutputFile, WebTargetOption, detect_source_archive, list_target_options, migrate_many,
     migrate_many_with_source, migrate_one,
+};
+pub use repatch::{
+    MissingUnitPolicy, UnitRepatchOptions, UnitRepatchResult, UnitRepatchSummary, repatch_units,
 };

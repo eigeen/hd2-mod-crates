@@ -1,11 +1,12 @@
 use crate::archive::StreamToc;
 use crate::constants::UNIT_ID;
-use crate::index::ArchiveIndex;
+use crate::index::{ArchiveIndex, ArmorEntry};
 use crate::io::DataSource;
 use crate::migrator::mode_a_web::{self, WebProgress};
 use crate::migrator::safe_filename;
 use crate::target_exclusions::is_default_excluded_target;
 use crate::unit::authority::ArmorMappingTable;
+use crate::unit::helmet_authority::HelmetMappingTable;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -82,13 +83,10 @@ struct TargetBuild {
 }
 
 pub fn list_target_options(category: &str) -> crate::Result<Vec<WebTargetOption>> {
-    let entries = ArchiveIndex::builtin()
-        .category(category)
-        .ok_or_else(|| eyre::eyre!("category {:?} not found in builtin index", category))?;
-    Ok(entries
-        .iter()
+    Ok(selectable_archive_entries(category)?
+        .into_iter()
         .map(|entry| WebTargetOption {
-            excluded: is_default_excluded_target(&entry.hash, &entry.name),
+            excluded: category == "Armor" && is_default_excluded_target(&entry.hash, &entry.name),
             hash: entry.hash.clone(),
             name: entry.name.clone(),
         })
@@ -122,7 +120,8 @@ pub fn migrate_many(
     validate_targets(&options)?;
     let by_hash = archive_name_lookup(category)?;
     let patch = patch_from_bytes(&patch_bytes)?;
-    let source_hash = resolve_source_hash(category, &by_hash, &patch, options.source_hash.as_deref())?;
+    let source_hash =
+        resolve_source_hash(category, &by_hash, &patch, options.source_hash.as_deref())?;
     let patch_suffix = options
         .patch_suffix
         .as_deref()
@@ -166,8 +165,7 @@ pub async fn migrate_many_with_source<S: DataSource + ?Sized>(
         .patch_suffix
         .clone()
         .unwrap_or_else(|| DEFAULT_PATCH_SUFFIX.to_string());
-    let results =
-        mode_a_web::run(&patch_bytes, &options, source, category, progress).await?;
+    let results = mode_a_web::run(&patch_bytes, &options, source, category, progress).await?;
 
     let mut files = Vec::new();
     let mut reports = Vec::new();
@@ -181,7 +179,11 @@ pub async fn migrate_many_with_source<S: DataSource + ?Sized>(
             skipped_entries: result.report.skipped_entries,
             warnings: result.report.warnings.clone(),
         };
-        files.extend(output_files(result.patch, &result.target_name, &patch_suffix));
+        files.extend(output_files(
+            result.patch,
+            &result.target_name,
+            &patch_suffix,
+        ));
         reports.push(report_row);
     }
     Ok(WebMigrationBundle {
@@ -198,12 +200,30 @@ fn validate_targets(options: &WebMigrateOptions) -> crate::Result<()> {
 }
 
 fn archive_name_lookup(category: &str) -> crate::Result<Vec<(String, String)>> {
+    Ok(selectable_archive_entries(category)?
+        .into_iter()
+        .map(|entry| (entry.hash.clone(), entry.name.clone()))
+        .collect())
+}
+
+/// Return only actionable logical helmet options while preserving all Armor archives.
+pub(crate) fn selectable_archive_entries(
+    category: &str,
+) -> crate::Result<Vec<&'static ArmorEntry>> {
     let entries = ArchiveIndex::builtin()
         .category(category)
         .ok_or_else(|| eyre::eyre!("category {:?} not found in builtin index", category))?;
+    if category != "Helmet" {
+        return Ok(entries.iter().collect());
+    }
+
+    let mapping = HelmetMappingTable::bundled()?;
+    let mut seen_names = HashSet::new();
     Ok(entries
         .iter()
-        .map(|entry| (entry.hash.clone(), entry.name.clone()))
+        .filter(|entry| {
+            mapping.unit_id(&entry.name).is_some() && seen_names.insert(entry.name.as_str())
+        })
         .collect())
 }
 
@@ -224,7 +244,9 @@ fn resolve_source_hash(
     let patch_unit_ids = unit_file_ids(patch);
     detect_source_via_authority(category, &patch_unit_ids)
         .map(|option| option.hash)
-        .ok_or_else(|| eyre::eyre!("could not auto-detect source archive from authoritative mapping"))
+        .ok_or_else(|| {
+            eyre::eyre!("could not auto-detect source archive from authoritative mapping")
+        })
 }
 
 fn ensure_archive(by_hash: &[(String, String)], hash: &str) -> crate::Result<()> {
@@ -241,10 +263,18 @@ pub(crate) fn detect_source_via_authority(
     if patch_unit_ids.is_empty() {
         return None;
     }
+    match category {
+        "Armor" => detect_armor_source(patch_unit_ids),
+        "Helmet" => detect_helmet_source(patch_unit_ids),
+        _ => None,
+    }
+}
+
+fn detect_armor_source(patch_unit_ids: &HashSet<u64>) -> Option<WebTargetOption> {
     let table = ArmorMappingTable::bundled().ok()?;
-    let by_hash = ArchiveIndex::builtin().category(category)?;
-    let mut candidates: Vec<SourceCandidate> = by_hash
-        .iter()
+    let mut candidates: Vec<SourceCandidate> = selectable_archive_entries("Armor")
+        .ok()?
+        .into_iter()
         .filter_map(|entry| {
             let parts = table.armor(&entry.name)?;
             let unit_hits = parts
@@ -260,6 +290,29 @@ pub(crate) fn detect_source_via_authority(
                 },
                 unit_hits,
             })
+        })
+        .collect();
+    candidates.sort_by(compare_source_candidates);
+    candidates.pop().map(|candidate| candidate.option)
+}
+
+fn detect_helmet_source(patch_unit_ids: &HashSet<u64>) -> Option<WebTargetOption> {
+    let table = HelmetMappingTable::bundled().ok()?;
+    let mut candidates: Vec<SourceCandidate> = selectable_archive_entries("Helmet")
+        .ok()?
+        .into_iter()
+        .filter_map(|entry| {
+            let unit_id = table.unit_id(&entry.name)?;
+            patch_unit_ids
+                .contains(&unit_id)
+                .then_some(SourceCandidate {
+                    option: WebTargetOption {
+                        excluded: false,
+                        hash: entry.hash.clone(),
+                        name: entry.name.clone(),
+                    },
+                    unit_hits: 1,
+                })
         })
         .collect();
     candidates.sort_by(compare_source_candidates);
@@ -297,11 +350,7 @@ fn build_target(
     build_migrated_target(target_hash, target_name)
 }
 
-fn build_source_target(
-    patch: &StreamToc,
-    target_hash: &str,
-    target_name: &str,
-) -> TargetBuild {
+fn build_source_target(patch: &StreamToc, target_hash: &str, target_name: &str) -> TargetBuild {
     TargetBuild {
         patch: patch.clone(),
         report: WebMigrationReportRow {

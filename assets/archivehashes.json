@@ -115,7 +115,9 @@
         "19b5a68e61d7a9d7": "UF-16 Inspector",
         "871290e9d5703851": "UF-50 Bloodhound",
         "91033cfaaad4ad18": "UF-84 Doubt Killer",
-        "0fecb336be1d287b": "UF-84 Doubt Killer"
+        "0fecb336be1d287b": "UF-84 Doubt Killer",
+        "1434ec7cf0edf1bc": "TG-8 Sharpshooter",
+        "bbbb8499544b83ef": "TG-122 Demo-Trooper"
     },
 
     "Helmet": {
@@ -194,7 +196,6 @@
         "37882724fe5a136e": "IE-57 Hell-Bent",
         "5e40404d846b2b00": "O-2 Heavy Operator",
         "a2999407862595df": "O-3 Free Spirit",
-        "3cf26a29a0012282": "O-44 Bonded Pilot",
         "f0daae91a2027fd7": "PH-9 Predator",
         "5c82005edd85558c": "PH-56 Jaguar",
         "0c7ecd8156d49fe9": "PH-202 Twigsnapper",
@@ -227,7 +228,9 @@
         "fb025c06b0408e5f": "UF-16 Inspector",
         "15dcd137ebe874ed": "UF-50 Bloodhound",
         "292b09dac80ce1de": "UF-84 Doubt Killer",
-        "88b7d737b6e62cc0": "UF-84 Doubt Killer"
+        "88b7d737b6e62cc0": "UF-84 Doubt Killer",
+        "8517a93d6e19a56e": "TG-8 Sharpshooter",
+        "bf06d78a228c3904": "TG-122 Demo-Trooper"
     },
 
     "Cape": {
@@ -583,7 +586,7 @@
     "Energy-Based": {
         "55938279f6ef8664": "ARC-12 Blitzer",
         "3a49b4448eaa94fe": "LAS-5 Scythe",
-        "f79b65e482594bef": "LAS-13 Trident",
+        "f79b65e482594bef": "LAS-16 Trident",
         "6db0c562c2bc10b3": "LAS-16 Sickle",
         "7f927f50fa6c50e8": "LAS-17 Double-Edge Sickle",
         "c51f160470b34ae3": "PLAS-1 Scorcher & PLAS-101 Purifier",

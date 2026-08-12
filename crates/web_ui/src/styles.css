@@ -288,13 +288,13 @@ textarea {
   background: rgba(254, 231, 15, 0.06) !important;
 }
 
-.languageMenuBtn.MuiIconButton-root {
-  color: var(--color-hd2-faint);
+.headerIconBtn.MuiIconButton-root {
+  color: var(--color-hd2-text);
   border-radius: 0 !important;
   padding: 0.25rem !important;
 }
 
-.languageMenuBtn.MuiIconButton-root:hover {
+.headerIconBtn.MuiIconButton-root:hover {
   color: var(--color-hd2-yellow);
   background: rgba(254, 231, 15, 0.06) !important;
 }

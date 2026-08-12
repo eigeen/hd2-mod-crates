@@ -4,6 +4,8 @@ export interface TargetOption {
   excluded: boolean;
 }
 
+export type MigrationCategory = "Armor" | "Helmet";
+
 export interface PatchFiles {
   name: string;
   toc: Uint8Array;
@@ -50,3 +52,23 @@ export interface MigrationReportRow {
   warnings: string[];
 }
 
+export type MissingUnitPolicy = "drop" | "keep" | "fail";
+
+export interface UnitRepatchOptions {
+  missingUnitPolicy: MissingUnitPolicy;
+}
+
+export interface UnitRepatchResult {
+  tocBytes: Uint8Array;
+  summary: UnitRepatchSummary;
+}
+
+export interface UnitRepatchSummary {
+  unitCount: number;
+  updatedUnits: number;
+  alreadyCurrentUnits: number;
+  removedUnits: number;
+  failedUnits: number;
+  scannedArchives: number;
+  warnings: string[];
+}

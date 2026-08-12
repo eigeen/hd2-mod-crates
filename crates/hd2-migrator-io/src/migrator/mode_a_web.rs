@@ -15,16 +15,21 @@
 //! threads without COOP/COEP, and per-target latency in the browser is
 //! dominated by I/O, not CPU.
 
-use super::mode_a_common::{self, CommonInputs};
+use super::helmet::{self, HelmetMigrationInputs};
+use super::mode_a_common::{self, CommonInputs, TargetBuildArtifact};
 use super::source_selection;
-use crate::archive::StreamToc;
-use crate::index::ArchiveIndex;
+use crate::archive::{self, StreamToc, TocEntry};
+use crate::constants::UNIT_ID;
+use crate::index::{ArchiveIndex, ArmorEntry};
 use crate::io::{BundleSlicer, DataSource};
 use crate::migrator::report::MigrationReport;
 use crate::padding::{self, EmptyUnitTemplate, PaddingMode};
 use crate::unit::authority::ArmorMappingTable;
-use crate::web::migration::{detect_source_via_authority, unit_file_ids};
-use crate::web::migration::{PatchBytes, WebMigrateOptions};
+use crate::unit::helmet_authority::HelmetMappingTable;
+use crate::web::migration::{
+    PatchBytes, WebMigrateOptions, detect_source_via_authority, selectable_archive_entries,
+    unit_file_ids,
+};
 use std::collections::HashMap;
 
 /// Async progress callback. Mirrors `migrator::ProgressSink` but does not
@@ -56,8 +61,8 @@ pub async fn run<S: DataSource + ?Sized>(
     let archives = ArchiveIndex::builtin()
         .category(category)
         .ok_or_else(|| eyre::eyre!("category {category:?} not found in builtin index"))?;
-    let by_hash: HashMap<String, String> = archives
-        .iter()
+    let by_hash: HashMap<String, String> = selectable_archive_entries(category)?
+        .into_iter()
         .map(|a| (a.hash.clone(), a.name.clone()))
         .collect();
 
@@ -75,17 +80,17 @@ pub async fn run<S: DataSource + ?Sized>(
         None
     };
 
+    let mapping = CategoryMapping::load(category)?;
     let source_hash = resolve_source_hash(&patch, options, category, &by_hash)?;
     let source_name = by_hash
         .get(&source_hash)
         .cloned()
         .ok_or_else(|| eyre::eyre!("source {source_hash} not in builtin index"))?;
 
-    let source_archive = load_archive_async(source, bundle.as_ref(), &source_hash).await?;
-    let filter = source_selection::filter_patch_to_source_archive_units(&patch, &source_archive);
-    let patch = filter.patch;
+    let source_archive =
+        load_armor_source_archive(source, bundle.as_ref(), &source_hash, &mapping).await?;
+    let patch = filter_armor_patch(patch, source_archive.as_ref(), &mapping);
 
-    let armor_mapping_table = ArmorMappingTable::bundled()?;
     let empty_unit_template: Option<EmptyUnitTemplate> = if options.no_padding {
         None
     } else {
@@ -97,11 +102,11 @@ pub async fn run<S: DataSource + ?Sized>(
         PaddingMode::Sanitized
     };
 
-    let common = CommonInputs {
+    let compute_context = MigrationComputeContext {
         patch: &patch,
-        source: &source_archive,
+        source: source_archive.as_ref(),
         source_name: &source_name,
-        armor_mapping_table: &armor_mapping_table,
+        mapping: &mapping,
         empty_unit_template: empty_unit_template.as_ref(),
         padding_mode,
         experimental_partial_remap: options.experimental_partial_remap,
@@ -126,21 +131,26 @@ pub async fn run<S: DataSource + ?Sized>(
                 report: artifact.report,
             }
         } else {
-            let target = load_archive_async(source, bundle.as_ref(), target_hash).await?;
+            let load_context = ArchiveLoadContext {
+                source,
+                bundle: bundle.as_ref(),
+                archives,
+            };
+            let loaded =
+                load_migration_target(&load_context, target_hash, &target_name, &mapping).await?;
             let stage_callback = |stage: &str| {
                 if let Some(p) = progress {
                     p.stage(&target_name, stage);
                 }
             };
-            let artifact = mode_a_common::compute_migrated_target(
-                &common,
-                &target,
-                target_hash,
-                &target_name,
-                stage_callback,
-            )?;
+            let identity = TargetIdentity {
+                hash: &loaded.hash,
+                name: &target_name,
+            };
+            let artifact =
+                compute_cross_target(&compute_context, &loaded.archive, &identity, stage_callback)?;
             WebTargetResult {
-                target_hash: target_hash.clone(),
+                target_hash: loaded.hash,
                 target_name: target_name.clone(),
                 patch: artifact.patch,
                 report: artifact.report,
@@ -152,6 +162,197 @@ pub async fn run<S: DataSource + ?Sized>(
         results.push(result);
     }
     Ok(results)
+}
+
+async fn load_armor_source_archive<S: DataSource + ?Sized>(
+    source: &S,
+    bundle: Option<&BundleSlicer>,
+    archive_name: &str,
+    mapping: &CategoryMapping,
+) -> crate::Result<Option<StreamToc>> {
+    match mapping {
+        CategoryMapping::Armor(_) => Ok(Some(
+            load_archive_async(source, bundle, archive_name).await?,
+        )),
+        CategoryMapping::Helmet(_) => Ok(None),
+    }
+}
+
+fn filter_armor_patch(
+    patch: StreamToc,
+    source: Option<&StreamToc>,
+    mapping: &CategoryMapping,
+) -> StreamToc {
+    match (mapping, source) {
+        (CategoryMapping::Armor(_), Some(source)) => {
+            source_selection::filter_patch_to_source_archive_units(&patch, source).patch
+        }
+        _ => patch,
+    }
+}
+
+struct ArchiveLoadContext<'a, S: DataSource + ?Sized> {
+    source: &'a S,
+    bundle: Option<&'a BundleSlicer>,
+    archives: &'a [ArmorEntry],
+}
+
+struct LoadedTarget {
+    hash: String,
+    archive: StreamToc,
+}
+
+async fn load_migration_target<S: DataSource + ?Sized>(
+    context: &ArchiveLoadContext<'_, S>,
+    requested_hash: &str,
+    target_name: &str,
+    mapping: &CategoryMapping,
+) -> crate::Result<LoadedTarget> {
+    match mapping {
+        CategoryMapping::Armor(_) => Ok(LoadedTarget {
+            hash: requested_hash.to_string(),
+            archive: load_archive_async(context.source, context.bundle, requested_hash).await?,
+        }),
+        CategoryMapping::Helmet(table) => {
+            load_helmet_target_candidate(context, target_name, table).await
+        }
+    }
+}
+
+/// Select the current-game archive candidate that actually owns the mapped Helmet Unit.
+async fn load_helmet_target_candidate<S: DataSource + ?Sized>(
+    context: &ArchiveLoadContext<'_, S>,
+    target_name: &str,
+    table: &HelmetMappingTable,
+) -> crate::Result<LoadedTarget> {
+    let target_unit_id = table
+        .unit_id(target_name)
+        .ok_or_else(|| eyre::eyre!("helmet {target_name:?} is missing from the bundled mapping"))?;
+    for candidate in context
+        .archives
+        .iter()
+        .filter(|archive| archive.name == target_name)
+    {
+        let archive =
+            load_unit_index_async(context.source, context.bundle, &candidate.hash).await?;
+        if unit_file_ids(&archive).contains(&target_unit_id) {
+            return Ok(LoadedTarget {
+                hash: candidate.hash.clone(),
+                archive,
+            });
+        }
+    }
+    eyre::bail!("no archive candidate for {target_name:?} contains Helmet Unit {target_unit_id}")
+}
+
+/// Helmet migration only needs Unit IDs, so avoid loading large GPU/stream sidecars.
+async fn load_unit_index_async<S: DataSource + ?Sized>(
+    source: &S,
+    bundle: Option<&BundleSlicer>,
+    archive_name: &str,
+) -> crate::Result<StreamToc> {
+    let toc = load_toc_bytes_async(source, bundle, archive_name).await?;
+    let unit_ids = archive::list_file_ids_from_bytes(&toc)?
+        .remove(&UNIT_ID)
+        .unwrap_or_default();
+    Ok(StreamToc {
+        name: archive_name.to_string(),
+        entries: unit_ids
+            .into_iter()
+            .map(|file_id| TocEntry::new(file_id, UNIT_ID))
+            .collect(),
+        ..Default::default()
+    })
+}
+
+async fn load_toc_bytes_async<S: DataSource + ?Sized>(
+    source: &S,
+    bundle: Option<&BundleSlicer>,
+    archive_name: &str,
+) -> crate::Result<Vec<u8>> {
+    if !source.exists(archive_name).await?
+        && let Some(bundle) = bundle
+        && bundle.has_package(archive_name)
+    {
+        return bundle.load_package(source, archive_name).await;
+    }
+    source.read_full(archive_name).await
+}
+
+enum CategoryMapping {
+    Armor(ArmorMappingTable),
+    Helmet(HelmetMappingTable),
+}
+
+impl CategoryMapping {
+    fn load(category: &str) -> crate::Result<Self> {
+        match category {
+            "Armor" => Ok(Self::Armor(ArmorMappingTable::bundled()?)),
+            "Helmet" => Ok(Self::Helmet(HelmetMappingTable::bundled()?)),
+            _ => eyre::bail!("unsupported migration category {category:?}"),
+        }
+    }
+}
+
+struct MigrationComputeContext<'a> {
+    patch: &'a StreamToc,
+    source: Option<&'a StreamToc>,
+    source_name: &'a str,
+    mapping: &'a CategoryMapping,
+    empty_unit_template: Option<&'a EmptyUnitTemplate>,
+    padding_mode: PaddingMode,
+    experimental_partial_remap: bool,
+}
+
+struct TargetIdentity<'a> {
+    hash: &'a str,
+    name: &'a str,
+}
+
+fn compute_cross_target<F: Fn(&str)>(
+    context: &MigrationComputeContext<'_>,
+    target: &StreamToc,
+    identity: &TargetIdentity<'_>,
+    on_stage: F,
+) -> crate::Result<TargetBuildArtifact> {
+    match context.mapping {
+        CategoryMapping::Armor(_) => compute_armor_target(context, target, identity, on_stage),
+        CategoryMapping::Helmet(table) => {
+            on_stage("rewriting helmet Unit");
+            let inputs = HelmetMigrationInputs {
+                patch: context.patch,
+                source_name: context.source_name,
+                mapping_table: table,
+                empty_unit_template: context.empty_unit_template,
+                padding_mode: context.padding_mode,
+            };
+            helmet::compute_migrated_target(&inputs, target, identity.hash, identity.name)
+        }
+    }
+}
+
+fn compute_armor_target<F: Fn(&str)>(
+    context: &MigrationComputeContext<'_>,
+    target: &StreamToc,
+    identity: &TargetIdentity<'_>,
+    on_stage: F,
+) -> crate::Result<TargetBuildArtifact> {
+    let CategoryMapping::Armor(table) = context.mapping else {
+        eyre::bail!("armor migration received a non-armor mapping")
+    };
+    let source = context
+        .source
+        .ok_or_else(|| eyre::eyre!("armor migration is missing its source archive"))?;
+    let common = CommonInputs {
+        patch: context.patch,
+        source,
+        source_name: context.source_name,
+        armor_mapping_table: table,
+        empty_unit_template: context.empty_unit_template,
+        padding_mode: context.padding_mode,
+        experimental_partial_remap: context.experimental_partial_remap,
+    };
+    mode_a_common::compute_migrated_target(&common, target, identity.hash, identity.name, on_stage)
 }
 
 /// Load one archive's three files (`<name>`, `.gpu_resources`, `.stream`)
@@ -178,10 +379,7 @@ async fn load_archive_async<S: DataSource + ?Sized>(
     StreamToc::from_buffers(&toc, &gpu, &stream, archive_name.to_string())
 }
 
-async fn read_sidecar<S: DataSource + ?Sized>(
-    source: &S,
-    path: &str,
-) -> crate::Result<Vec<u8>> {
+async fn read_sidecar<S: DataSource + ?Sized>(source: &S, path: &str) -> crate::Result<Vec<u8>> {
     if source.exists(path).await? {
         source.read_full(path).await
     } else {

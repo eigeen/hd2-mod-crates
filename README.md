@@ -15,11 +15,27 @@ armor archive, producing one ready-to-drop variant per target.
 | Empty-mesh padding (sanitized + verbatim) | ✅ |
 | Interactive CLI fill-in (no-args UX) | ✅ |
 | Parallelism (rayon, per-target) | ✅ |
+| Web/WASM appearance migration (armor + helmet) | ✅ |
+| Web/WASM Unit version repatching | ✅ |
 
 The migrator derives FileID remaps directly from game archives. Major Unit
 parts are matched first through the bundled manually verified
 `armor_mappings.merged.json`; geometry and customization-name matching only
 fill gaps that the authoritative table cannot cover.
+
+The Web/WASM UI supports separate armor and helmet appearance migration. Armor
+uses the multi-part table and geometry fallback; helmet migration uses its
+dedicated one-Unit mapping and only reads archive TOCs for lower I/O and memory
+use. The UI can also refresh a mod patch's Unit version-dependent layout data
+from the currently installed game without modifying the game files.
+
+## Credits
+
+Unit repatching behavior was inspired by hd2-repatcher, created by Evie / RaidingForPants. This project provides an independent Rust/WASM implementation.
+
+See [RaidingForPants/hd2-repatcher](https://github.com/RaidingForPants/hd2-repatcher).
+
+Armor and helmet mapping tables provided by [@大紫](https://space.bilibili.com/263230957).
 
 ## Build
 
@@ -78,13 +94,14 @@ See `--help` for the full list.
 
 ## Embedded assets
 
-Four assets are embedded into the binary at build time via `include_bytes!` /
+Five assets are embedded into the binary at build time via `include_bytes!` /
 `include_str!`:
 
 - `assets/archivehashes.json` — armor hash → name index (copied verbatim from
   the Python package).
 - `assets/armor_mappings.merged.json` — manually verified armor name →
   major Unit part → FileID table.
+- `assets/helmet_mappings.json` — helmet name → Helmet Unit FileID table.
 - `assets/empty_mesh/{toc,gpu,stream}.bin` — single-vertex empty mesh used as
   the default padding template.
 - `../hashlists/bonehash.txt` — mesh group name hashes used for Unit

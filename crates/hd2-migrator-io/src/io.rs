@@ -25,4 +25,5 @@ pub trait DataSource {
     fn read_range<'a>(&'a self, path: &'a str, offset: u64, len: u64) -> IoFuture<'a, Vec<u8>>;
     fn exists<'a>(&'a self, path: &'a str) -> IoFuture<'a, bool>;
     fn list_bundle_chunks<'a>(&'a self) -> IoFuture<'a, Vec<String>>;
+    fn list_packages<'a>(&'a self) -> IoFuture<'a, Vec<String>>;
 }

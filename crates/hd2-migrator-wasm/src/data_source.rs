@@ -1,18 +1,19 @@
 //! JS-callback-backed [`DataSource`] for browser cross-archive migration.
 //!
-//! Constructed from a JS object with four methods:
+//! Constructed from a JS object with five methods:
 //! - `readFull(path: string) -> Promise<Uint8Array>`
 //! - `readRange(path: string, offset: number, len: number) -> Promise<Uint8Array>`
 //! - `exists(path: string) -> Promise<boolean>`
 //! - `listBundleChunks() -> Promise<string[]>`
+//! - `listPackages() -> Promise<string[]>`
 //!
 //! Function refs are extracted once via `Reflect::get` at construction; per-call
 //! cost is one `Function::call*` + one `JsFuture` await.
 
 use hd2_migrator_io::io::{DataSource, IoFuture};
 use js_sys::{Array, Function, Promise, Uint8Array};
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 pub struct JsDataSource {
@@ -21,6 +22,7 @@ pub struct JsDataSource {
     read_range: Function,
     exists: Function,
     list_bundle_chunks: Function,
+    list_packages: Function,
 }
 
 impl JsDataSource {
@@ -32,12 +34,14 @@ impl JsDataSource {
         let read_range = get_function(&value, "readRange")?;
         let exists = get_function(&value, "exists")?;
         let list_bundle_chunks = get_function(&value, "listBundleChunks")?;
+        let list_packages = get_function(&value, "listPackages")?;
         Ok(Self {
             target: value,
             read_full,
             read_range,
             exists,
             list_bundle_chunks,
+            list_packages,
         })
     }
 }
@@ -87,18 +91,18 @@ impl DataSource for JsDataSource {
                 .call0(&self.target)
                 .map_err(|e| eyre::eyre!("listBundleChunks threw: {}", js_err_string(&e)))?;
             let value = await_promise(raw, "listBundleChunks").await?;
-            let array: Array = value.dyn_into().map_err(|_| {
-                eyre::eyre!("listBundleChunks must resolve to a string array")
-            })?;
-            let mut out = Vec::with_capacity(array.length() as usize);
-            for i in 0..array.length() {
-                let s = array
-                    .get(i)
-                    .as_string()
-                    .ok_or_else(|| eyre::eyre!("listBundleChunks entry must be string"))?;
-                out.push(s);
-            }
-            Ok(out)
+            string_array_to_vec(value, "listBundleChunks")
+        })
+    }
+
+    fn list_packages<'a>(&'a self) -> IoFuture<'a, Vec<String>> {
+        Box::pin(async move {
+            let raw = self
+                .list_packages
+                .call0(&self.target)
+                .map_err(|e| eyre::eyre!("listPackages threw: {}", js_err_string(&e)))?;
+            let value = await_promise(raw, "listPackages").await?;
+            string_array_to_vec(value, "listPackages")
         })
     }
 }
@@ -115,6 +119,20 @@ fn uint8_array_to_vec(value: JsValue, label: &str) -> hd2_migrator_io::Result<Ve
         .dyn_into()
         .map_err(|_| eyre::eyre!("{label} must resolve to a Uint8Array"))?;
     Ok(array.to_vec())
+}
+
+fn string_array_to_vec(value: JsValue, label: &str) -> hd2_migrator_io::Result<Vec<String>> {
+    let array: Array = value
+        .dyn_into()
+        .map_err(|_| eyre::eyre!("{label} must resolve to a string array"))?;
+    (0..array.length())
+        .map(|index| {
+            array
+                .get(index)
+                .as_string()
+                .ok_or_else(|| eyre::eyre!("{label} entry must be string"))
+        })
+        .collect()
 }
 
 fn get_function(obj: &JsValue, key: &str) -> Result<Function, JsValue> {

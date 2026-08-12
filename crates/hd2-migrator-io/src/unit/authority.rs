@@ -5,6 +5,8 @@
 
 use crate::archive::StreamToc;
 use crate::constants::UNIT_ID;
+pub use crate::unit::direct_mapping::UnitPartMatch as UnitAuthorityMatch;
+use crate::unit::direct_mapping::match_unit_parts;
 use eyre::WrapErr;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -35,13 +37,6 @@ pub struct ArmorMappingTable {
 pub struct ArmorPartMap {
     #[serde(flatten)]
     parts: HashMap<String, u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnitAuthorityMatch {
-    pub source_file_id: u64,
-    pub target_file_id: u64,
-    pub part_label: String,
 }
 
 impl ArmorMappingTable {
@@ -92,6 +87,10 @@ impl ArmorPartMap {
         self.parts.values().copied().collect()
     }
 
+    pub(crate) fn parts(&self) -> &HashMap<String, u64> {
+        &self.parts
+    }
+
     fn validate(&self, armor_name: &str) -> crate::Result<()> {
         for label in EXPECTED_PART_LABELS {
             if !self.parts.contains_key(label) {
@@ -109,12 +108,6 @@ impl ArmorPartMap {
         }
         Ok(())
     }
-
-    fn part_for_source(&self, source_file_id: u64) -> Option<&str> {
-        self.parts
-            .iter()
-            .find_map(|(part, file_id)| (*file_id == source_file_id).then_some(part.as_str()))
-    }
 }
 
 pub fn build_authority_matches(
@@ -131,22 +124,11 @@ pub fn build_authority_matches(
         return Vec::new();
     };
     let target_unit_ids = unit_file_ids(target);
-    patch
-        .entries
-        .iter()
-        .filter(|entry| entry.type_id == UNIT_ID)
-        .filter_map(|entry| {
-            let part_label = source_parts.part_for_source(entry.file_id)?;
-            let target_file_id = target_parts.get(part_label)?;
-            if !target_unit_ids.contains(&target_file_id) {
-                return None;
-            }
-            Some(UnitAuthorityMatch {
-                source_file_id: entry.file_id,
-                target_file_id,
-                part_label: part_label.to_string(),
-            })
-        })
+    let patch_unit_ids = unit_file_ids(patch);
+    match_unit_parts(source_parts.parts(), target_parts.parts())
+        .into_iter()
+        .filter(|matched| patch_unit_ids.contains(&matched.source_file_id))
+        .filter(|matched| target_unit_ids.contains(&matched.target_file_id))
         .collect()
 }
 

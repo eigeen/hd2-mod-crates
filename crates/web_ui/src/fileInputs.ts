@@ -71,6 +71,132 @@ export function downloadZip(bytes: Uint8Array, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+export function downloadRepatchedPatch(
+  patch: PatchFiles,
+  tocBytes: Uint8Array,
+  filename: string,
+) {
+  const entries = [
+    { name: patch.name, bytes: tocBytes },
+    { name: `${patch.name}${GPU_SUFFIX}`, bytes: patch.gpu },
+    { name: `${patch.name}${STREAM_SUFFIX}`, bytes: patch.stream },
+  ].filter((entry) => entry.bytes.length > 0 || entry.name === patch.name);
+  const blob = storeZip(entries);
+  downloadBlob(blob, filename);
+}
+
+interface StoreZipEntry {
+  name: string;
+  bytes: Uint8Array;
+}
+
+function storeZip(entries: StoreZipEntry[]): Blob {
+  const parts: BlobPart[] = [];
+  const centralParts: BlobPart[] = [];
+  let offset = 0;
+  let centralSize = 0;
+  for (const entry of entries) {
+    const encodedName = new TextEncoder().encode(entry.name);
+    const crc = crc32(entry.bytes);
+    const local = localZipHeader(encodedName, entry.bytes.length, crc);
+    const central = centralZipHeader(encodedName, entry.bytes.length, crc, offset);
+    parts.push(exactBuffer(local), exactBuffer(entry.bytes));
+    centralParts.push(exactBuffer(central));
+    offset += local.length + entry.bytes.length;
+    centralSize += central.length;
+  }
+  parts.push(...centralParts, exactBuffer(endOfCentralDirectory(entries.length, centralSize, offset)));
+  return new Blob(parts, { type: "application/zip" });
+}
+
+function localZipHeader(name: Uint8Array, size: number, crc: number): Uint8Array {
+  ensureZip32(size);
+  const header = new Uint8Array(30 + name.length);
+  const view = new DataView(header.buffer);
+  view.setUint32(0, 0x04034b50, true);
+  view.setUint16(4, 20, true);
+  view.setUint32(14, crc, true);
+  view.setUint32(18, size, true);
+  view.setUint32(22, size, true);
+  view.setUint16(26, name.length, true);
+  header.set(name, 30);
+  return header;
+}
+
+function centralZipHeader(name: Uint8Array, size: number, crc: number, offset: number): Uint8Array {
+  ensureZip32(offset);
+  const header = new Uint8Array(46 + name.length);
+  const view = new DataView(header.buffer);
+  view.setUint32(0, 0x02014b50, true);
+  view.setUint16(4, 20, true);
+  view.setUint16(6, 20, true);
+  view.setUint32(16, crc, true);
+  view.setUint32(20, size, true);
+  view.setUint32(24, size, true);
+  view.setUint16(28, name.length, true);
+  view.setUint32(42, offset, true);
+  header.set(name, 46);
+  return header;
+}
+
+function endOfCentralDirectory(count: number, size: number, offset: number): Uint8Array {
+  ensureZip32(size);
+  ensureZip32(offset);
+  if (count > 0xffff) throw new Error("ZIP entry count exceeds the ZIP32 limit.");
+  const header = new Uint8Array(22);
+  const view = new DataView(header.buffer);
+  view.setUint32(0, 0x06054b50, true);
+  view.setUint16(8, count, true);
+  view.setUint16(10, count, true);
+  view.setUint32(12, size, true);
+  view.setUint32(16, offset, true);
+  return header;
+}
+
+const CRC32_TABLE = buildCrc32Table();
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (let index = 0; index < bytes.length; index += 1) {
+    crc = CRC32_TABLE[(crc ^ bytes[index]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function buildCrc32Table(): Uint32Array {
+  const table = new Uint32Array(256);
+  for (let index = 0; index < table.length; index += 1) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = (value & 1) ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+    table[index] = value >>> 0;
+  }
+  return table;
+}
+
+function exactBuffer(bytes: Uint8Array): ArrayBuffer {
+  if (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength) {
+    return bytes.buffer as ArrayBuffer;
+  }
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+function ensureZip32(value: number): void {
+  if (!Number.isSafeInteger(value) || value < 0 || value > 0xffffffff) {
+    throw new Error("Patch is too large for ZIP32 output.");
+  }
+}
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 interface PatchSidecarCheck {
   name: string;
   toc: Uint8Array;

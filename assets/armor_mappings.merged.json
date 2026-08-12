@@ -696,14 +696,14 @@
         "right leg": 13691073924984152503
     },
     "FS-05 Marksman": {
-        "slim left arm": 2567690365343907235,
-        "slim right arm": 3467853974557819730,
-        "stocky right arm": 4262785967333127230,
+        "slim left arm": 3625311965526418679,
+        "slim right arm": 14988118798303025752,
+        "stocky right arm": 16432126480090405510,
         "slim waist": 4722956283875269548,
-        "stocky body": 5551109002845302756,
-        "slim body": 14423847952159829203,
+        "stocky body": 17469845694982311307,
+        "slim body": 13719630089268766332,
         "stocky waist": 15104254822610342517,
-        "stocky left arm": 17786515856343915068,
+        "stocky left arm": 15801019593095613893,
         "left leg": 10385241106577611474,
         "right leg": 9102075908423990810
     },
@@ -790,18 +790,6 @@
         "stocky waist": 12382596804664090199,
         "left leg": 7066004653337270514,
         "right leg": 4417259456152340845
-    },
-    "SA-7 Headfirst": {
-        "slim body": 12039493585941905527,
-        "stocky body": 15177942992609984033,
-        "slim left arm": 12658584394597277772,
-        "stocky left arm": 11921325719132729160,
-        "slim right arm": 3603794890856956263,
-        "stocky right arm": 7663034490356204431,
-        "slim waist": 15928465099816491458,
-        "stocky waist": 12036277105147818162,
-        "left leg": 16244525337210498259,
-        "right leg": 9705927373705771496
     },
     "SC-30 Trailblazer Scout": {
         "slim body": 11992412193946898291,
@@ -1268,7 +1256,31 @@
         "stocky right arm": 11241744322899425437,
         "stocky left arm": 12846233826531041922,
         "slim body": 15646317861958763103,
-        "left leg": 7066004653337270514,
-        "right leg": 14584676054580543486
+        "left leg": 1347053514951449630,
+        "right leg": 7247049507608625561
+    },
+    "TG-8 Sharpshooter": {
+        "slim right arm": 15233084244981170636,
+        "slim waist": 5341307667237699250,
+        "stocky waist": 16623246257176732916,
+        "stocky body": 15446493234515020177,
+        "slim left arm": 16400176252312300263,
+        "stocky right arm": 1351490561581179506,
+        "stocky left arm": 14924674731225178633,
+        "slim body": 285421056847968571,
+        "left leg": 4907421993283126910,
+        "right leg": 18114312563866414154
+    },
+    "TG-122 Demo-Trooper": {
+        "slim right arm": 10009120076700577125,
+        "slim waist": 10008462549229144849,
+        "stocky waist": 13011889425861948717,
+        "stocky body": 6853407792783222775,
+        "slim left arm": 8496271894067034235,
+        "stocky right arm": 4442001046174003452,
+        "stocky left arm": 13035193244862981642,
+        "slim body": 2239741931709779562,
+        "left leg": 16676223379954676899,
+        "right leg": 11215144245244721988
     }
 }

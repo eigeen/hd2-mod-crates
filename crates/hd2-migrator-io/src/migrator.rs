@@ -3,6 +3,7 @@
 //! Ports `mod_armor_migrator/migrator.py`'s `migrate_all` and `migrate_one`.
 //! Parallelism: per-target via rayon `par_iter` inside Mode A.
 
+pub mod helmet;
 pub mod mode_a;
 pub mod mode_a_common;
 pub mod mode_a_web;
