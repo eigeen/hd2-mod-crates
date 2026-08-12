@@ -73,6 +73,26 @@ pub(crate) fn filter_patch_to_source_archive_units(
     }
 }
 
+/// Clone selected Unit entries and their in-patch Material/Texture dependency closure.
+pub(crate) fn unit_dependency_entries(
+    patch: &StreamToc,
+    unit_ids: &HashSet<u64>,
+) -> Vec<crate::archive::TocEntry> {
+    let material_ids = referenced_patch_material_ids(patch, unit_ids);
+    let texture_ids = referenced_patch_texture_ids(patch, &material_ids);
+    patch
+        .entries
+        .iter()
+        .filter(|entry| match entry.type_id {
+            UNIT_ID => unit_ids.contains(&entry.file_id),
+            MATERIAL_ID => material_ids.contains(&entry.file_id),
+            TEX_ID => texture_ids.contains(&entry.file_id),
+            _ => false,
+        })
+        .cloned()
+        .collect()
+}
+
 fn source_archive_candidates(
     patch_units: &HashSet<u64>,
     data_dir: &Path,
@@ -296,6 +316,30 @@ mod tests {
             ]
         );
         assert_eq!(filtered.dropped_units, 1);
+    }
+
+    #[test]
+    fn dependency_entries_exclude_unrelated_units_and_other_types() {
+        let patch = StreamToc {
+            entries: vec![
+                unit_entry(1, &[10]),
+                unit_entry(2, &[20]),
+                material_entry(10, &[100]),
+                material_entry(20, &[200]),
+                texture_entry(100),
+                texture_entry(200),
+                TocEntry::new(7, OTHER_ID),
+            ],
+            ..Default::default()
+        };
+
+        let entries = unit_dependency_entries(&patch, &HashSet::from([2]));
+        let keys = entries
+            .iter()
+            .map(|entry| (entry.file_id, entry.type_id))
+            .collect::<Vec<_>>();
+
+        assert_eq!(keys, vec![(2, UNIT_ID), (20, MATERIAL_ID), (200, TEX_ID)]);
     }
 
     fn entry_keys(patch: &StreamToc) -> Vec<(u64, u64)> {

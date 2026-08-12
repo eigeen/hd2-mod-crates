@@ -3,6 +3,7 @@ import type {
   MigrateOptions,
   MigrationResult,
   PatchFiles,
+  PatchInspection,
   TargetOption,
   UnitRepatchOptions,
   UnitRepatchResult,
@@ -37,6 +38,13 @@ export async function detectSource(patch: PatchFiles, category = "Armor") {
   return callWasm("detect_source", () =>
     wasm.detect_source(patch.name, patch.toc, category),
   ) as Promise<TargetOption | null>;
+}
+
+export async function inspectPatchContents(patch: PatchFiles, category = "Armor") {
+  const wasm = await loadWasm();
+  return callWasm("inspect_patch", () =>
+    wasm.inspect_patch(patch.name, patch.toc, category),
+  ) as Promise<PatchInspection>;
 }
 
 export async function migrate(patch: PatchFiles, options: MigrateOptions, category = "Armor") {

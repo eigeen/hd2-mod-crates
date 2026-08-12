@@ -164,7 +164,7 @@ fn run_web(
         target_hashes: target_hashes.to_vec(),
         patch_suffix: Some(PATCH_SUFFIX.to_string()),
         no_padding: false,
-        experimental_partial_remap: false,
+        unmatched_unit_policy: hd2_migrator_io::web::UnmatchedUnitPolicy::Drop,
     };
 
     let data_source = NativeDataSource::new(data_dir);

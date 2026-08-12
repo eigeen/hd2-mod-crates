@@ -139,4 +139,29 @@ mod tests {
                 .any(|entry| entry.file_id == 30)
         );
     }
+
+    #[test]
+    fn keep_policy_preserves_unmapped_units() {
+        let patch = StreamToc {
+            entries: vec![TocEntry::new(1, UNIT_ID), TocEntry::new(2, UNIT_ID)],
+            ..Default::default()
+        };
+        let matches = vec![UnitPartMatch {
+            source_file_id: 1,
+            target_file_id: 11,
+            part_label: "body".to_string(),
+        }];
+
+        let rewritten = rewrite_mapped_units(&patch, &matches, UnmappedUnitPolicy::Keep);
+
+        assert_eq!(rewritten.remapped_units, 1);
+        assert_eq!(rewritten.skipped_units, 0);
+        assert!(
+            rewritten
+                .patch
+                .entries
+                .iter()
+                .any(|entry| entry.file_id == 2)
+        );
+    }
 }

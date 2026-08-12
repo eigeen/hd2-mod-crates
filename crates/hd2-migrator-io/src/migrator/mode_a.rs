@@ -12,7 +12,7 @@
 
 mod write;
 
-use super::mode_a_common::{self, CommonInputs};
+use super::mode_a_common::{self, CommonInputs, IncompleteUnitPolicy};
 use super::{MigrateAllOpts, MigrationReport};
 use crate::archive::{BundleIndex, StreamToc};
 use crate::unit::authority::ArmorMappingTable;
@@ -227,7 +227,11 @@ fn build_migrated_target(
         armor_mapping_table,
         empty_unit_template,
         padding_mode,
-        experimental_partial_remap,
+        incomplete_unit_policy: if experimental_partial_remap {
+            IncompleteUnitPolicy::Drop
+        } else {
+            IncompleteUnitPolicy::Fail
+        },
     };
     let artifact = mode_a_common::compute_migrated_target(
         &common,

@@ -9,9 +9,9 @@ use crate::constants::{MATERIAL_ID, TEX_ID, UNIT_ID};
 use crate::migrator::report::MigrationReport;
 use crate::padding::{EmptyUnitTemplate, PaddingMode};
 use crate::refs;
-use crate::unit::authority::{build_authority_matches, ArmorMappingTable};
+use crate::unit::authority::{ArmorMappingTable, build_authority_matches};
 use crate::unit::geometry::{
-    build_unit_geometry_remap, format_unit_geometry_issues, UnitGeometryRemap,
+    UnitGeometryRemap, build_unit_geometry_remap, format_unit_geometry_issues,
 };
 use byteorder::{ByteOrder, LittleEndian as LE};
 use eyre::WrapErr;
@@ -32,7 +32,14 @@ pub struct CommonInputs<'a> {
     pub armor_mapping_table: &'a ArmorMappingTable,
     pub empty_unit_template: Option<&'a EmptyUnitTemplate>,
     pub padding_mode: PaddingMode,
-    pub experimental_partial_remap: bool,
+    pub incomplete_unit_policy: IncompleteUnitPolicy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncompleteUnitPolicy {
+    Fail,
+    Drop,
+    Keep,
 }
 
 /// Compute a migrated patch for one target archive.
@@ -69,21 +76,37 @@ pub fn compute_migrated_target<F: Fn(&str)>(
     }
 
     let settings = crate::unit::geometry::GeometryMatchSettings::default();
-    let unit_remap =
-        build_unit_geometry_remap(common.patch, common.source, target, &settings, &authority_matches)
-            .wrap_err_with(|| format!("Unit geometry remap for {target_name}"))?;
+    let unit_remap = build_unit_geometry_remap(
+        common.patch,
+        common.source,
+        target,
+        &settings,
+        &authority_matches,
+    )
+    .wrap_err_with(|| format!("Unit geometry remap for {target_name}"))?;
 
+    let mut preserved_entries = Vec::new();
+    let mut preserved_unit_ids = HashSet::new();
     if !unit_remap.is_complete() {
-        if !common.experimental_partial_remap {
-            eyre::bail!(
-                "[{}] incomplete Unit geometry remap. Unit slots are matched by the \
-                 authoritative armor-part table first, then mesh geometry. {}",
-                target_name,
-                format_unit_geometry_issues(&unit_remap, 6)
-            );
+        let issue_ids = unit_issue_file_ids(&unit_remap);
+        match common.incomplete_unit_policy {
+            IncompleteUnitPolicy::Fail => {
+                eyre::bail!(
+                    "[{}] incomplete Unit geometry remap. Unit slots are matched by the \
+                     authoritative armor-part table first, then mesh geometry. {}",
+                    target_name,
+                    format_unit_geometry_issues(&unit_remap, 6)
+                );
+            }
+            IncompleteUnitPolicy::Drop => log_incomplete_unit_remap(target_name, &unit_remap),
+            IncompleteUnitPolicy::Keep => {
+                log_incomplete_unit_remap(target_name, &unit_remap);
+                preserved_entries =
+                    super::source_selection::unit_dependency_entries(common.patch, &issue_ids);
+                preserved_unit_ids = issue_ids.clone();
+            }
         }
-        log_experimental_unit_remap(target_name, &unit_remap);
-        skipped_file_ids.extend(unit_issue_file_ids(&unit_remap));
+        skipped_file_ids.extend(issue_ids);
     }
 
     for (sid, tid) in &unit_remap.remap {
@@ -139,7 +162,9 @@ pub fn compute_migrated_target<F: Fn(&str)>(
     for e in &common.patch.entries {
         if skipped_file_ids.contains(&e.file_id) {
             log_dropped_patch_entry(target_name, e);
-            skipped_entries += 1;
+            if !preserved_unit_ids.contains(&e.file_id) {
+                skipped_entries += 1;
+            }
             continue;
         }
         for new_file_id in entry_target_file_ids(e, &remap, &unit_targets) {
@@ -177,6 +202,7 @@ pub fn compute_migrated_target<F: Fn(&str)>(
     } else {
         0
     };
+    merge_preserved_entries(&mut new_patch, &preserved_entries);
 
     tracing::info!(
         target = %target_name,
@@ -187,6 +213,15 @@ pub fn compute_migrated_target<F: Fn(&str)>(
         "migrated"
     );
 
+    let warnings = (!preserved_unit_ids.is_empty())
+        .then(|| {
+            format!(
+                "kept {} unrecognized parts in the result without converting them",
+                preserved_unit_ids.len()
+            )
+        })
+        .into_iter()
+        .collect();
     let report = MigrationReport {
         target_hash: target_hash.to_string(),
         target_name: target_name.to_string(),
@@ -197,7 +232,7 @@ pub fn compute_migrated_target<F: Fn(&str)>(
         skipped_entries,
         skipped_types: plan.skipped_types.clone(),
         type_counts: plan.type_counts.clone(),
-        warnings: Vec::new(),
+        warnings,
     };
     Ok(TargetBuildArtifact {
         patch: new_patch,
@@ -373,15 +408,34 @@ fn log_unit_geometry_remap(target_name: &str, unit_remap: &UnitGeometryRemap) {
     }
 }
 
-fn log_experimental_unit_remap(target_name: &str, unit_remap: &UnitGeometryRemap) {
+fn log_incomplete_unit_remap(target_name: &str, unit_remap: &UnitGeometryRemap) {
     let details = format_unit_geometry_issues(unit_remap, 12);
     tracing::warn!(
         target = %target_name,
         mapped = unit_remap.remap.len(),
         skipped = unit_issue_file_ids(unit_remap).len(),
         details = %details,
-        "experimental partial Unit geometry remap"
+        "continuing with incomplete Unit geometry remap"
     );
+}
+
+/// Merge exact passthrough resources, preferring their original bytes on key collisions.
+pub(crate) fn merge_preserved_entries(patch: &mut StreamToc, entries: &[TocEntry]) {
+    let mut positions = patch
+        .entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| ((entry.type_id, entry.file_id), index))
+        .collect::<HashMap<_, _>>();
+    for entry in entries {
+        let key = (entry.type_id, entry.file_id);
+        if let Some(index) = positions.get(&key).copied() {
+            patch.entries[index] = entry.clone();
+            continue;
+        }
+        positions.insert(key, patch.entries.len());
+        patch.entries.push(entry.clone());
+    }
 }
 
 fn unit_issue_file_ids(unit_remap: &UnitGeometryRemap) -> HashSet<u64> {

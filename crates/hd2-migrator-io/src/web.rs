@@ -13,8 +13,9 @@ pub mod repatch;
 
 pub use crate::migrator::mode_a_web::WebProgress;
 pub use migration::{
-    PatchBytes, WebMigrateOptions, WebMigrationBundle, WebMigrationReportRow, WebMigrationSummary,
-    WebOutputFile, WebTargetOption, detect_source_archive, list_target_options, migrate_many,
+    PatchBytes, UnmatchedUnitPolicy, WebDetectedModel, WebMigrateOptions, WebMigrationBundle,
+    WebMigrationReportRow, WebMigrationSummary, WebOutputFile, WebPatchInspection, WebTargetOption,
+    detect_patch_models, detect_source_archive, inspect_patch, list_target_options, migrate_many,
     migrate_many_with_source, migrate_one,
 };
 pub use repatch::{

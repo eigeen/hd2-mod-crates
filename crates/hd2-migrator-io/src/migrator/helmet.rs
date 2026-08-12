@@ -9,6 +9,7 @@ use crate::unit::direct_mapping::{
     UnitPartMatch, UnmappedUnitPolicy, match_unit_parts, rewrite_mapped_units,
 };
 use crate::unit::helmet_authority::HelmetMappingTable;
+use crate::web::migration::UnmatchedUnitPolicy;
 use std::collections::HashMap;
 
 pub struct HelmetMigrationInputs<'a> {
@@ -17,6 +18,7 @@ pub struct HelmetMigrationInputs<'a> {
     pub mapping_table: &'a HelmetMappingTable,
     pub empty_unit_template: Option<&'a EmptyUnitTemplate>,
     pub padding_mode: PaddingMode,
+    pub unmatched_unit_policy: UnmatchedUnitPolicy,
 }
 
 /// Rename the mapped helmet Unit, keep non-Unit resources, and hide target-only Units.
@@ -31,7 +33,10 @@ pub fn compute_migrated_target(
     let rewritten = rewrite_mapped_units(
         inputs.patch,
         std::slice::from_ref(&matched),
-        UnmappedUnitPolicy::Drop,
+        match inputs.unmatched_unit_policy {
+            UnmatchedUnitPolicy::Drop => UnmappedUnitPolicy::Drop,
+            UnmatchedUnitPolicy::Keep => UnmappedUnitPolicy::Keep,
+        },
     );
     let mut patch = rewritten.patch;
     let target_unit_ids = unit_file_ids(target);
@@ -180,6 +185,21 @@ mod tests {
         assert_eq!(artifact.report.padded_units, 1);
     }
 
+    #[test]
+    fn keeps_non_helmet_units_when_requested() {
+        let table = TABLE.parse::<HelmetMappingTable>().unwrap();
+        let patch = archive("patch", &[(10, UNIT_ID), (11, UNIT_ID)]);
+        let target = archive("target", &[(20, UNIT_ID)]);
+        let mut inputs = inputs(&patch, &table, None);
+        inputs.unmatched_unit_policy = UnmatchedUnitPolicy::Keep;
+
+        let artifact = compute_migrated_target(&inputs, &target, "target-hash", "Target").unwrap();
+
+        assert!(has_unit(&artifact.patch, 20));
+        assert!(has_unit(&artifact.patch, 11));
+        assert_eq!(artifact.report.skipped_entries, 0);
+    }
+
     fn inputs<'a>(
         patch: &'a StreamToc,
         table: &'a HelmetMappingTable,
@@ -195,6 +215,7 @@ mod tests {
             } else {
                 PaddingMode::Sanitized
             },
+            unmatched_unit_policy: UnmatchedUnitPolicy::Drop,
         }
     }
 

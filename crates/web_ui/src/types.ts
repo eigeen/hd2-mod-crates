@@ -6,6 +6,17 @@ export interface TargetOption {
 
 export type MigrationCategory = "Armor" | "Helmet";
 
+export interface DetectedModel {
+  category: MigrationCategory;
+  name: string;
+  unitHits: number;
+}
+
+export interface PatchInspection {
+  source: TargetOption | null;
+  models: DetectedModel[];
+}
+
 export interface PatchFiles {
   name: string;
   toc: Uint8Array;
@@ -28,8 +39,10 @@ export interface MigrateOptions {
   targetHashes: string[];
   patchSuffix: string | null;
   noPadding: boolean;
-  experimentalPartialRemap: boolean;
+  unmatchedUnitPolicy: UnmatchedUnitPolicy;
 }
+
+export type UnmatchedUnitPolicy = "drop" | "keep";
 
 export interface MigrationResult {
   zipBytes: Uint8Array;

@@ -48,6 +48,24 @@ pub fn detect_source(
 }
 
 #[wasm_bindgen]
+pub fn inspect_patch(
+    patch_name: String,
+    toc: Vec<u8>,
+    category: Option<String>,
+) -> WasmResult<JsValue> {
+    let category = category.unwrap_or_else(|| DEFAULT_CATEGORY.to_string());
+    // Inspection only needs the TOC. One combined call avoids copying a large TOC twice.
+    let patch = PatchBytes {
+        name: patch_name,
+        toc,
+        gpu: Vec::new(),
+        stream: Vec::new(),
+    };
+    let inspection = web::inspect_patch(&category, &patch).map_err(js_error)?;
+    serde_wasm_bindgen::to_value(&inspection).map_err(js_error)
+}
+
+#[wasm_bindgen]
 pub fn migrate_one(
     patch_name: String,
     toc: Vec<u8>,

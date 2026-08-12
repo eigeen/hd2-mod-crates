@@ -26,7 +26,7 @@ import { Hd2Dialog, Hd2DialogActions, Hd2DialogContent, Hd2DialogTitle } from ".
 import { useI18n } from "./i18n";
 import { memo, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import type { MigrationCategory, PatchInfo, TargetOption } from "./types";
+import type { MigrationCategory, PatchInfo, TargetOption, UnmatchedUnitPolicy } from "./types";
 
 const panelClass = "overflow-hidden";
 const setupPanelClass = `${panelClass} flex flex-1 flex-col p-6`;
@@ -269,10 +269,9 @@ function EmptyMapping({ icon, text }: { icon: ReactNode; text: string }) {
 
 interface OptionsPanelProps {
   noPadding: boolean;
-  partialRemap: boolean;
   setNoPadding: (value: boolean) => void;
-  setPartialRemap: (value: boolean) => void;
-  showPartialRemap: boolean;
+  setUnmatchedUnitPolicy: (value: UnmatchedUnitPolicy) => void;
+  unmatchedUnitPolicy: UnmatchedUnitPolicy;
 }
 
 export const OptionsPanel = memo(function OptionsPanel(props: OptionsPanelProps) {
@@ -286,14 +285,19 @@ export const OptionsPanel = memo(function OptionsPanel(props: OptionsPanelProps)
         label={t("options.noPadding")}
       />
       <HelpHint title={t("options.noPaddingHelp")} />
-      {props.showPartialRemap && <>
-        <FormControlLabel
-          className="optionsControl"
-          control={<Checkbox checked={props.partialRemap} onChange={(event) => props.setPartialRemap(event.target.checked)} />}
-          label={t("options.partialRemap")}
-        />
-        <HelpHint title={t("options.partialRemapHelp")} />
-      </>}
+      <span className="text-xs text-hd2-muted">{t("options.unmatchedUnits")}</span>
+      <ToggleButtonGroup
+        exclusive
+        onChange={(_, value: UnmatchedUnitPolicy | null) => {
+          if (value) props.setUnmatchedUnitPolicy(value);
+        }}
+        size="small"
+        value={props.unmatchedUnitPolicy}
+      >
+        <ToggleButton value="drop">{t("options.unmatchedDrop")}</ToggleButton>
+        <ToggleButton value="keep">{t("options.unmatchedKeep")}</ToggleButton>
+      </ToggleButtonGroup>
+      <HelpHint title={t("options.unmatchedUnitsHelp")} />
     </>
   );
 });

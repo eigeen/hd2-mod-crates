@@ -71,6 +71,54 @@ fn detect_source_returns_none_when_patch_has_no_known_units() {
 }
 
 #[test]
+fn detects_unique_models_across_armor_and_helmet_tables() {
+    let armor = ArmorMappingTable::bundled().unwrap();
+    let helmet = HelmetMappingTable::bundled().unwrap();
+    let armor_unit = first_authoritative_file_id(&armor, "I-102 Draconaught");
+    let helmet_unit = helmet.unit_id("A-9 Helljumper").unwrap();
+    let patch = patch_bytes("patch", &[armor_unit, helmet_unit]);
+
+    let models = detect_patch_models(&patch).unwrap();
+
+    assert!(
+        models
+            .iter()
+            .any(|model| { model.category == "Armor" && model.name == "I-102 Draconaught" })
+    );
+    assert!(
+        models
+            .iter()
+            .any(|model| { model.category == "Helmet" && model.name == "A-9 Helljumper" })
+    );
+}
+
+#[test]
+fn ignores_units_reused_by_multiple_model_objects() {
+    let shared = ModelKey {
+        category: "Armor".to_string(),
+        name: "Shared Armor".to_string(),
+    };
+    let other_shared = ModelKey {
+        category: "Helmet".to_string(),
+        name: "Shared Helmet".to_string(),
+    };
+    let unique = ModelKey {
+        category: "Armor".to_string(),
+        name: "Unique Armor".to_string(),
+    };
+    let owners = HashMap::from([
+        (1, HashSet::from([shared, other_shared])),
+        (2, HashSet::from([unique])),
+    ]);
+
+    let models = unique_model_hits(&owners, &HashSet::from([1, 2]));
+
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].name, "Unique Armor");
+    assert_eq!(models[0].unit_hits, 1);
+}
+
+#[test]
 fn migrate_one_requires_one_target() {
     let err = migrate_one(
         "Armor",
@@ -80,7 +128,7 @@ fn migrate_one_requires_one_target() {
             target_hashes: Vec::new(),
             patch_suffix: None,
             no_padding: true,
-            experimental_partial_remap: false,
+            unmatched_unit_policy: UnmatchedUnitPolicy::Drop,
         },
     )
     .unwrap_err();
@@ -104,7 +152,7 @@ fn migrate_cross_archive_is_unavailable_in_browser() {
             target_hashes: vec![target_entry.0.clone()],
             patch_suffix: None,
             no_padding: true,
-            experimental_partial_remap: false,
+            unmatched_unit_policy: UnmatchedUnitPolicy::Drop,
         },
     )
     .unwrap_err();

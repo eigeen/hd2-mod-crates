@@ -16,7 +16,9 @@
 //! dominated by I/O, not CPU.
 
 use super::helmet::{self, HelmetMigrationInputs};
-use super::mode_a_common::{self, CommonInputs, TargetBuildArtifact};
+use super::mode_a_common::{
+    self, CommonInputs, IncompleteUnitPolicy, TargetBuildArtifact, merge_preserved_entries,
+};
 use super::source_selection;
 use crate::archive::{self, StreamToc, TocEntry};
 use crate::constants::UNIT_ID;
@@ -27,10 +29,10 @@ use crate::padding::{self, EmptyUnitTemplate, PaddingMode};
 use crate::unit::authority::ArmorMappingTable;
 use crate::unit::helmet_authority::HelmetMappingTable;
 use crate::web::migration::{
-    PatchBytes, WebMigrateOptions, detect_source_via_authority, selectable_archive_entries,
-    unit_file_ids,
+    PatchBytes, UnmatchedUnitPolicy, WebMigrateOptions, detect_models_via_authority,
+    detect_source_via_authority, selectable_archive_entries, unit_file_ids,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Async progress callback. Mirrors `migrator::ProgressSink` but does not
 /// require `Sync` (the wasm impl wraps `js_sys::Function` which is `!Send`).
@@ -89,7 +91,14 @@ pub async fn run<S: DataSource + ?Sized>(
 
     let source_archive =
         load_armor_source_archive(source, bundle.as_ref(), &source_hash, &mapping).await?;
-    let patch = filter_armor_patch(patch, source_archive.as_ref(), &mapping);
+    let model_detection_warning = detect_unclaimed_model_warning(category, &source_name, &patch)?;
+    let mut prepared = prepare_patch(
+        patch,
+        source_archive.as_ref(),
+        &mapping,
+        options.unmatched_unit_policy,
+    );
+    prepared.model_detection_warning = model_detection_warning;
 
     let empty_unit_template: Option<EmptyUnitTemplate> = if options.no_padding {
         None
@@ -103,13 +112,13 @@ pub async fn run<S: DataSource + ?Sized>(
     };
 
     let compute_context = MigrationComputeContext {
-        patch: &patch,
+        patch: &prepared.migration,
         source: source_archive.as_ref(),
         source_name: &source_name,
         mapping: &mapping,
         empty_unit_template: empty_unit_template.as_ref(),
         padding_mode,
-        experimental_partial_remap: options.experimental_partial_remap,
+        unmatched_unit_policy: options.unmatched_unit_policy,
     };
 
     let mut results = Vec::with_capacity(options.target_hashes.len());
@@ -122,14 +131,13 @@ pub async fn run<S: DataSource + ?Sized>(
             p.target_started(&target_name, target_hash);
             p.stage(&target_name, "loading target");
         }
-        let result = if target_hash == &source_hash {
-            let artifact = mode_a_common::compute_source_target(&patch, target_hash, &target_name);
-            WebTargetResult {
-                target_hash: target_hash.clone(),
-                target_name: target_name.clone(),
-                patch: artifact.patch,
-                report: artifact.report,
-            }
+        let (resolved_hash, artifact) = if target_hash == &source_hash {
+            let artifact = mode_a_common::compute_source_target(
+                &prepared.migration,
+                target_hash,
+                &target_name,
+            );
+            (target_hash.clone(), artifact)
         } else {
             let load_context = ArchiveLoadContext {
                 source,
@@ -149,13 +157,9 @@ pub async fn run<S: DataSource + ?Sized>(
             };
             let artifact =
                 compute_cross_target(&compute_context, &loaded.archive, &identity, stage_callback)?;
-            WebTargetResult {
-                target_hash: loaded.hash,
-                target_name: target_name.clone(),
-                patch: artifact.patch,
-                report: artifact.report,
-            }
+            (loaded.hash, artifact)
         };
+        let result = finish_target_result(resolved_hash, target_name, artifact, &prepared);
         if let Some(p) = progress {
             p.target_finished(&result.target_name);
         }
@@ -178,16 +182,110 @@ async fn load_armor_source_archive<S: DataSource + ?Sized>(
     }
 }
 
-fn filter_armor_patch(
+struct PreparedPatch {
+    migration: StreamToc,
+    preserved_entries: Vec<TocEntry>,
+    dropped_entries: usize,
+    preserved_units: usize,
+    model_detection_warning: Option<String>,
+}
+
+fn prepare_patch(
     patch: StreamToc,
     source: Option<&StreamToc>,
     mapping: &CategoryMapping,
-) -> StreamToc {
+    policy: UnmatchedUnitPolicy,
+) -> PreparedPatch {
     match (mapping, source) {
-        (CategoryMapping::Armor(_), Some(source)) => {
-            source_selection::filter_patch_to_source_archive_units(&patch, source).patch
-        }
-        _ => patch,
+        (CategoryMapping::Armor(_), Some(source)) => prepare_armor_patch(patch, source, policy),
+        _ => PreparedPatch {
+            migration: patch,
+            preserved_entries: Vec::new(),
+            dropped_entries: 0,
+            preserved_units: 0,
+            model_detection_warning: None,
+        },
+    }
+}
+
+fn prepare_armor_patch(
+    patch: StreamToc,
+    source: &StreamToc,
+    policy: UnmatchedUnitPolicy,
+) -> PreparedPatch {
+    let filter = source_selection::filter_patch_to_source_archive_units(&patch, source);
+    if policy == UnmatchedUnitPolicy::Drop {
+        return PreparedPatch {
+            migration: filter.patch,
+            preserved_entries: Vec::new(),
+            dropped_entries: filter.dropped_entries,
+            preserved_units: 0,
+            model_detection_warning: None,
+        };
+    }
+
+    let selected_units = unit_file_ids(&filter.patch);
+    let foreign_units = unit_file_ids(&patch)
+        .difference(&selected_units)
+        .copied()
+        .collect::<HashSet<_>>();
+    PreparedPatch {
+        migration: filter.patch,
+        preserved_entries: source_selection::unit_dependency_entries(&patch, &foreign_units),
+        dropped_entries: 0,
+        preserved_units: foreign_units.len(),
+        model_detection_warning: None,
+    }
+}
+
+/// Reports uniquely identifiable model objects left after the selected source.
+fn detect_unclaimed_model_warning(
+    category: &str,
+    source_name: &str,
+    patch: &StreamToc,
+) -> crate::Result<Option<String>> {
+    let mut models = detect_models_via_authority(&unit_file_ids(patch))?;
+    models.retain(|model| model.category != category || model.name != source_name);
+    if models.is_empty() {
+        return Ok(None);
+    }
+    let candidates = models
+        .iter()
+        .map(|model| {
+            format!(
+                "{} {} ({} parts found)",
+                model.category, model.name, model.unit_hits
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok(Some(format!(
+        "this patch may also contain: {candidates}. This run only converts {category} {source_name}. Import the original patch again to convert each additional item"
+    )))
+}
+
+fn finish_target_result(
+    target_hash: String,
+    target_name: String,
+    mut artifact: TargetBuildArtifact,
+    prepared: &PreparedPatch,
+) -> WebTargetResult {
+    merge_preserved_entries(&mut artifact.patch, &prepared.preserved_entries);
+    artifact.report.skipped_entries += prepared.dropped_entries;
+    if prepared.preserved_units > 0 {
+        artifact.report.warnings.push(format!(
+            "kept {} parts from other equipment in the result without converting them",
+            prepared.preserved_units
+        ));
+    }
+    if let Some(warning) = &prepared.model_detection_warning {
+        artifact.report.warnings.push(warning.clone());
+    }
+    WebTargetResult {
+        target_hash,
+        target_name,
+        patch: artifact.patch,
+        report: artifact.report,
     }
 }
 
@@ -301,7 +399,7 @@ struct MigrationComputeContext<'a> {
     mapping: &'a CategoryMapping,
     empty_unit_template: Option<&'a EmptyUnitTemplate>,
     padding_mode: PaddingMode,
-    experimental_partial_remap: bool,
+    unmatched_unit_policy: UnmatchedUnitPolicy,
 }
 
 struct TargetIdentity<'a> {
@@ -325,6 +423,7 @@ fn compute_cross_target<F: Fn(&str)>(
                 mapping_table: table,
                 empty_unit_template: context.empty_unit_template,
                 padding_mode: context.padding_mode,
+                unmatched_unit_policy: context.unmatched_unit_policy,
             };
             helmet::compute_migrated_target(&inputs, target, identity.hash, identity.name)
         }
@@ -350,7 +449,10 @@ fn compute_armor_target<F: Fn(&str)>(
         armor_mapping_table: table,
         empty_unit_template: context.empty_unit_template,
         padding_mode: context.padding_mode,
-        experimental_partial_remap: context.experimental_partial_remap,
+        incomplete_unit_policy: match context.unmatched_unit_policy {
+            UnmatchedUnitPolicy::Drop => IncompleteUnitPolicy::Drop,
+            UnmatchedUnitPolicy::Keep => IncompleteUnitPolicy::Keep,
+        },
     };
     mode_a_common::compute_migrated_target(&common, target, identity.hash, identity.name, on_stage)
 }

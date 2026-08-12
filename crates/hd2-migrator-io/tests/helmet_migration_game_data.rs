@@ -30,7 +30,7 @@ fn migrates_synthetic_helmet_patch_against_real_game_data() {
         target_hashes: vec![TARGET_HASH.to_string()],
         patch_suffix: None,
         no_padding: false,
-        experimental_partial_remap: false,
+        unmatched_unit_policy: hd2_migrator_io::web::UnmatchedUnitPolicy::Drop,
     };
 
     let source = NativeDataSource::new(&data_dir);
@@ -67,7 +67,7 @@ fn resolves_every_helmet_name_to_a_current_game_archive() {
         target_hashes: helmets.iter().map(|helmet| helmet.hash.clone()).collect(),
         patch_suffix: None,
         no_padding: true,
-        experimental_partial_remap: false,
+        unmatched_unit_policy: hd2_migrator_io::web::UnmatchedUnitPolicy::Drop,
     };
 
     let source = NativeDataSource::new(&data_dir);

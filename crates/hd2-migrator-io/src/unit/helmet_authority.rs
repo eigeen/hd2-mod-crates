@@ -44,6 +44,15 @@ impl HelmetMappingTable {
             .copied()
     }
 
+    pub(crate) fn entries(&self) -> impl Iterator<Item = (&str, u64)> {
+        self.helmets.iter().filter_map(|(name, mapping)| {
+            mapping
+                .parts
+                .get(HELMET_PART_LABEL)
+                .map(|unit_id| (name.as_str(), *unit_id))
+        })
+    }
+
     pub(crate) fn parts(&self, helmet_name: &str) -> Option<&HashMap<String, u64>> {
         self.helmets.get(helmet_name).map(|mapping| &mapping.parts)
     }

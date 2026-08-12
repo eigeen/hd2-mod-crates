@@ -9,12 +9,20 @@ use crate::unit::authority::ArmorMappingTable;
 use crate::unit::helmet_authority::HelmetMappingTable;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[cfg(test)]
 mod tests;
 
 pub const DEFAULT_PATCH_SUFFIX: &str = "9ba626afa44a3aa3.patch_0";
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum UnmatchedUnitPolicy {
+    #[default]
+    Drop,
+    Keep,
+}
 
 #[derive(Debug, Clone)]
 pub struct PatchBytes {
@@ -32,6 +40,22 @@ pub struct WebTargetOption {
     pub excluded: bool,
 }
 
+/// A logical armor or helmet object uniquely referenced by Units in a patch.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WebDetectedModel {
+    pub category: String,
+    pub name: String,
+    pub unit_hits: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebPatchInspection {
+    pub source: Option<WebTargetOption>,
+    pub models: Vec<WebDetectedModel>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WebMigrateOptions {
@@ -39,7 +63,8 @@ pub struct WebMigrateOptions {
     pub target_hashes: Vec<String>,
     pub patch_suffix: Option<String>,
     pub no_padding: bool,
-    pub experimental_partial_remap: bool,
+    #[serde(default)]
+    pub unmatched_unit_policy: UnmatchedUnitPolicy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +124,27 @@ pub fn detect_source_archive(
 ) -> crate::Result<Option<WebTargetOption>> {
     let patch_unit_ids = unit_file_ids_from_toc(&patch_bytes.toc)?;
     Ok(detect_source_via_authority(category, &patch_unit_ids))
+}
+
+/// Reverse-look up patch Units across every authoritative model table.
+///
+/// A Unit shared by multiple logical models is deliberately ignored because
+/// it cannot identify one model without guessing.
+pub fn detect_patch_models(patch_bytes: &PatchBytes) -> crate::Result<Vec<WebDetectedModel>> {
+    let patch_unit_ids = unit_file_ids_from_toc(&patch_bytes.toc)?;
+    detect_models_via_authority(&patch_unit_ids)
+}
+
+/// Detects the selected source and every uniquely identifiable model with one TOC scan.
+pub fn inspect_patch(
+    category: &str,
+    patch_bytes: &PatchBytes,
+) -> crate::Result<WebPatchInspection> {
+    let patch_unit_ids = unit_file_ids_from_toc(&patch_bytes.toc)?;
+    Ok(WebPatchInspection {
+        source: detect_source_via_authority(category, &patch_unit_ids),
+        models: detect_models_via_authority(&patch_unit_ids)?,
+    })
 }
 
 pub fn migrate_one(
@@ -268,6 +314,78 @@ pub(crate) fn detect_source_via_authority(
         "Helmet" => detect_helmet_source(patch_unit_ids),
         _ => None,
     }
+}
+
+pub(crate) fn detect_models_via_authority(
+    patch_unit_ids: &HashSet<u64>,
+) -> crate::Result<Vec<WebDetectedModel>> {
+    let armor = ArmorMappingTable::bundled()?;
+    let helmet = HelmetMappingTable::bundled()?;
+    let mut owners_by_unit = HashMap::<u64, HashSet<ModelKey>>::new();
+    for (name, parts) in armor.entries() {
+        add_model_units(&mut owners_by_unit, "Armor", name, parts.all_file_ids());
+    }
+    for (name, unit_id) in helmet.entries() {
+        add_model_units(&mut owners_by_unit, "Helmet", name, [unit_id]);
+    }
+    Ok(unique_model_hits(&owners_by_unit, patch_unit_ids))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ModelKey {
+    category: String,
+    name: String,
+}
+
+fn add_model_units(
+    owners_by_unit: &mut HashMap<u64, HashSet<ModelKey>>,
+    category: &str,
+    name: &str,
+    unit_ids: impl IntoIterator<Item = u64>,
+) {
+    let model = ModelKey {
+        category: category.to_string(),
+        name: name.to_string(),
+    };
+    for unit_id in unit_ids {
+        owners_by_unit
+            .entry(unit_id)
+            .or_default()
+            .insert(model.clone());
+    }
+}
+
+fn unique_model_hits(
+    owners_by_unit: &HashMap<u64, HashSet<ModelKey>>,
+    patch_unit_ids: &HashSet<u64>,
+) -> Vec<WebDetectedModel> {
+    let mut hit_counts = HashMap::<ModelKey, usize>::new();
+    for unit_id in patch_unit_ids {
+        let Some(owners) = owners_by_unit.get(unit_id) else {
+            continue;
+        };
+        if owners.len() != 1 {
+            continue;
+        }
+        let owner = owners.iter().next().expect("one owner after length check");
+        *hit_counts.entry(owner.clone()).or_default() += 1;
+    }
+    let mut models = hit_counts
+        .into_iter()
+        .map(|(model, unit_hits)| WebDetectedModel {
+            category: model.category,
+            name: model.name,
+            unit_hits,
+        })
+        .collect::<Vec<_>>();
+    models.sort_by(|left, right| {
+        right
+            .unit_hits
+            .cmp(&left.unit_hits)
+            .then_with(|| left.category.cmp(&right.category))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    models
 }
 
 fn detect_armor_source(patch_unit_ids: &HashSet<u64>) -> Option<WebTargetOption> {

@@ -17,7 +17,9 @@ import {
 } from "./MigratorPanels";
 import { UnitUpdaterPanel } from "./UnitUpdaterPanel";
 import { ToolIntro } from "./ToolIntro";
+import { UnclaimedModelAlert } from "./UnclaimedModelAlert";
 import type {
+  DetectedModel,
   MissingUnitPolicy,
   MigrateOptions,
   MigrationCategory,
@@ -25,11 +27,13 @@ import type {
   PatchFiles,
   PatchInfo,
   TargetOption,
+  UnmatchedUnitPolicy,
   UnitRepatchSummary,
 } from "./types";
 import {
   builtinTargetOptions,
   detectSource,
+  inspectPatchContents,
   migrate,
   migrateCrossArchive,
   repatchUnits,
@@ -52,12 +56,13 @@ function App() {
   const [targetHashes, setTargetHashes] = useState<string[]>([]);
   const [multiTarget, setMultiTarget] = useState(false);
   const [noPadding, setNoPadding] = useState(false);
-  const [partialRemap, setPartialRemap] = useState(false);
+  const [unmatchedUnitPolicy, setUnmatchedUnitPolicy] = useState<UnmatchedUnitPolicy>("drop");
   const [busy, setBusy] = useState(false);
   const [progressLabel, setProgressLabel] = useState("");
   const [warningOpen, setWarningOpen] = useState(false);
   const [multiConfirmed, setMultiConfirmed] = useState(false);
   const [showAllSources, setShowAllSources] = useState(false);
+  const [detectedModels, setDetectedModels] = useState<DetectedModel[]>([]);
   const [gameDir, setGameDir] = useState<GameDirSelection | null>(null);
   const [missingUnitPolicy, setMissingUnitPolicy] = useState<MissingUnitPolicy>("drop");
 
@@ -97,6 +102,10 @@ function App() {
     () => targets.filter((target) => target.hash !== sourceHash),
     [sourceHash, targets],
   );
+  const currentSourceName = useMemo(
+    () => targets.find((target) => target.hash === sourceHash)?.name ?? null,
+    [sourceHash, targets],
+  );
 
   const applyPatch = useCallback(async (nextPatch: PatchFiles) => {
     patchRef.current = nextPatch;
@@ -104,9 +113,11 @@ function App() {
     setSourceHash("");
     setTargetHashes([]);
     setShowAllSources(false);
-    await detectPatchSource({
+    setDetectedModels([]);
+    await inspectPatch({
       category: migrationCategory,
       patch: nextPatch,
+      setDetectedModels,
       setSourceHash,
       setShowAllSources,
     });
@@ -177,7 +188,7 @@ function App() {
       targetHashes,
       patchSuffix: PATCH_SUFFIX,
       noPadding,
-      experimentalPartialRemap: partialRemap,
+      unmatchedUnitPolicy,
     };
     const dataSource = gameDir ? new GameDataSource(gameDir.handle) : null;
     setProgressLabel("");
@@ -204,11 +215,11 @@ function App() {
     multiConfirmed,
     multiTarget,
     noPadding,
-    partialRemap,
     sourceHash,
     targetHashes,
     targets,
     t,
+    unmatchedUnitPolicy,
   ]);
 
   const runUnitRepatch = useCallback(async () => {
@@ -310,14 +321,21 @@ function App() {
             />}
           </div>
 
+          {toolMode === "migrate" && (
+            <UnclaimedModelAlert
+              currentCategory={migrationCategory}
+              currentSourceName={currentSourceName}
+              detectedModels={detectedModels}
+            />
+          )}
+
           {/* Action row: options + blocker hint + execute */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-hd2-border bg-hd2-pit px-5 py-3">
             {toolMode === "migrate" && <OptionsPanel
               noPadding={noPadding}
-              partialRemap={partialRemap}
               setNoPadding={setNoPadding}
-              setPartialRemap={setPartialRemap}
-              showPartialRemap={migrationCategory === "Armor"}
+              setUnmatchedUnitPolicy={setUnmatchedUnitPolicy}
+              unmatchedUnitPolicy={unmatchedUnitPolicy}
             />}
             <div className="flex-1" />
             {busy && <CircularProgress size="1.25rem" />}
@@ -471,6 +489,20 @@ async function detectPatchSource(request: DetectPatchSourceRequest) {
     return;
   }
   setShowAllSources(true);
+}
+
+interface InspectPatchRequest extends DetectPatchSourceRequest {
+  setDetectedModels: (models: DetectedModel[]) => void;
+}
+
+async function inspectPatch(request: InspectPatchRequest) {
+  const inspection = await inspectPatchContents(request.patch, request.category);
+  request.setDetectedModels(inspection.models);
+  if (inspection.source) {
+    request.setSourceHash(inspection.source.hash);
+    return;
+  }
+  request.setShowAllSources(true);
 }
 
 function toggleHash(values: string[], hash: string) {

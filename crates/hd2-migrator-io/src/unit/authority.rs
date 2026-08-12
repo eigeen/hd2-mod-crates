@@ -60,6 +60,12 @@ impl ArmorMappingTable {
         self.armors.get(name)
     }
 
+    pub(crate) fn entries(&self) -> impl Iterator<Item = (&str, &ArmorPartMap)> {
+        self.armors
+            .iter()
+            .map(|(name, parts)| (name.as_str(), parts))
+    }
+
     fn validate(&self) -> crate::Result<()> {
         for (name, parts) in &self.armors {
             parts.validate(name)?;
