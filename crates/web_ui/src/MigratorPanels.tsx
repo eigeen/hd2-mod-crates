@@ -88,10 +88,13 @@ interface TargetPanelProps {
   multiTargetEligible: boolean;
   onBatchSelect: (hashes: string[]) => void;
   onMultiTargetChange: (enabled: boolean) => void;
+  onSinglePatchChange: (enabled: boolean) => void;
   onResolveSource: (sourceId: string, hash: string) => void;
   onSourceChange: (sourceId: string) => void;
   onTargetChange: (hash: string) => void;
   selectedTargets: string[];
+  singlePatch: boolean;
+  singlePatchRequired: boolean;
   sources: DetectedSource[];
   targetOptions: EquipmentOption[];
   targetSelectionEnabled: boolean;
@@ -113,6 +116,22 @@ export function TargetPanel(props: TargetPanelProps) {
             label={t("mapping.multiTarget")}
           />
           <HelpHint title={t("mapping.multiTargetHelp")} />
+          <FormControlLabel
+            className="multiToggle"
+            control={(
+              <Switch
+                checked={props.singlePatch}
+                disabled={props.singlePatchRequired}
+                onChange={(event) => props.onSinglePatchChange(event.target.checked)}
+              />
+            )}
+            label={t("mapping.singlePatch")}
+          />
+          <HelpHint title={t(
+            props.singlePatchRequired
+              ? "mapping.singlePatchForcedHelp"
+              : "mapping.singlePatchHelp",
+          )} />
         </>}
       </div>
 

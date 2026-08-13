@@ -19,6 +19,7 @@ import {
   configuredMappings as collectConfiguredMappings,
   multiTargetEligible as canUseMultiTarget,
   selectTarget,
+  singlePatchRequired as mustUseSinglePatch,
   targetsForSource,
 } from "./migrationMappings";
 import {
@@ -64,6 +65,7 @@ function App() {
   const [activeSourceId, setActiveSourceId] = useState("");
   const [targetsBySource, setTargetsBySource] = useState<Record<string, string[]>>({});
   const [multiTarget, setMultiTarget] = useState(false);
+  const [singlePatch, setSinglePatch] = useState(false);
   const [noPadding, setNoPadding] = useState(false);
   const [unmatchedUnitPolicy, setUnmatchedUnitPolicy] = useState<UnmatchedUnitPolicy>("keep");
   const [busy, setBusy] = useState(false);
@@ -94,6 +96,8 @@ function App() {
     [sources, targetsBySource],
   );
   const selectedTargetCount = configuredMappings.length;
+  const singlePatchRequired = mustUseSinglePatch(configuredMappings);
+  const outputAsSinglePatch = singlePatch || singlePatchRequired;
   const multiTargetEligible = canUseMultiTarget(sources);
   const crossArchiveReady = gameDir !== null && gameDir.status.kind !== "empty";
   const canMigrate = Boolean(
@@ -118,6 +122,7 @@ function App() {
     setPatchInfo({ name: nextPatch.name });
     setTargetsBySource({});
     setMultiTarget(false);
+    setSinglePatch(false);
     const dataSource = gameDir ? new GameDataSource(gameDir.handle) : undefined;
     const inspection = await inspectEquipmentContents(nextPatch, dataSource);
     setSources(inspection.sources);
@@ -137,6 +142,7 @@ function App() {
       setActiveSourceId(inspection.sources[0]?.id ?? "");
       setTargetsBySource({});
       setMultiTarget(canUseMultiTarget(inspection.sources));
+      setSinglePatch(false);
     });
   }, [gameDir]);
 
@@ -197,7 +203,7 @@ function App() {
   const runMigration = useCallback(async () => {
     const patch = patchRef.current;
     if (!patch) return;
-    const variants = buildMigrationVariants(configuredMappings);
+    const variants = buildMigrationVariants(configuredMappings, outputAsSinglePatch);
     if (!gameDir) return;
     const dataSource = new GameDataSource(gameDir.handle);
     setProgressLabel("");
@@ -231,6 +237,7 @@ function App() {
     configuredMappings,
     equipmentOptions,
     noPadding,
+    outputAsSinglePatch,
     t,
     unmatchedUnitPolicy,
   ]);
@@ -331,9 +338,12 @@ function App() {
               onBatchSelect={chooseTargetBatch}
               onResolveSource={resolveSource}
               onMultiTargetChange={toggleMultiTarget}
+              onSinglePatchChange={setSinglePatch}
               onSourceChange={chooseSource}
               onTargetChange={chooseTarget}
               selectedTargets={activeTargets}
+              singlePatch={outputAsSinglePatch}
+              singlePatchRequired={singlePatchRequired}
               sources={sources}
               targetOptions={targetOptions}
               targetSelectionEnabled={Boolean(activeSource?.resolvedHash)}

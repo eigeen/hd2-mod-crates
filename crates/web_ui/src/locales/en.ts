@@ -82,6 +82,9 @@ export const en = {
   "mapping.helmet": "Helmet",
   "mapping.multiTarget": "Multi-target",
   "mapping.multiTargetHelp": "Generate migrated patches for multiple target versions at once. Many targets can significantly increase CPU and memory use.",
+  "mapping.singlePatch": "Bundle as one Patch",
+  "mapping.singlePatchHelp": "Merge every selected target mapping into one Patch instead of generating a separate Patch for each target combination.",
+  "mapping.singlePatchForcedHelp": "Multiple sources have target mappings, so one-Patch output is required to avoid generating every Cartesian-product combination.",
   "mapping.source": "Source Version",
   "mapping.target": "Target Version",
   "mapping.importPatchFirst": "Import patch files first",
@@ -102,7 +105,7 @@ export const en = {
   "options.unmatchedKeep": "Keep unknown Units",
   "options.unmatchedUnitsHelp": "Sources without a target and unrecognized content follow this option. “Discard unknown Units” keeps only successfully converted equipment. “Keep unknown Units” copies everything else unchanged without converting it.",
   "performance.title": "Multi-target",
-  "performance.body": "Targets are automatically batched by patch size. Each ZIP contains one or more target versions while keeping WASM memory bounded. Multi-source patches generate every selected target combination separately. Large jobs may make your browser ask you to allow multiple downloads.",
+  "performance.body": "Targets are automatically batched by patch size when separate outputs are enabled. Enable one-Patch output to merge all selected mappings. It is required when multiple sources have mappings, avoiding Cartesian-product outputs. Large separate-output jobs may make your browser ask you to allow multiple downloads.",
   "dialog.cancel": "Cancel",
   "dialog.continue": "Continue",
 } satisfies TranslationResources;

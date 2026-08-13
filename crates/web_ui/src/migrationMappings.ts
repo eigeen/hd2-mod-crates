@@ -21,7 +21,11 @@ export function configuredMappings(
 
 export function buildMigrationVariants(
   mappings: MigrationMapping[],
+  singlePatch = false,
 ): MigrationVariant[] {
+  if (singlePatch) {
+    return mappings.length ? [{ mappings }] : [];
+  }
   const mappingGroups = mappingsBySource(mappings);
   const combinations = mappingGroups.reduce<MigrationMapping[][]>(
     (variants, group) => variants.flatMap((variant) => (
@@ -32,6 +36,11 @@ export function buildMigrationVariants(
   return combinations
     .filter((variant) => variant.length > 0)
     .map((variant) => ({ mappings: variant }));
+}
+
+/** Multiple configured sources must share one output to avoid Cartesian expansion. */
+export function singlePatchRequired(mappings: MigrationMapping[]): boolean {
+  return mappingsBySource(mappings).length > 1;
 }
 
 export function targetsForSource(

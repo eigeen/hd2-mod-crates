@@ -203,13 +203,17 @@ fn validate_variants(variants: &[WebMigrationVariant]) -> crate::Result<()> {
         if variant.mappings.is_empty() {
             eyre::bail!("each migration variant requires at least one mapping");
         }
-        let mut sources = HashSet::new();
+        let mut mappings = HashSet::new();
         for mapping in &variant.mappings {
             if mapping.source_hash == mapping.target_hash {
                 eyre::bail!("source archive cannot also be a migration target");
             }
-            if !sources.insert((mapping.category, mapping.source_hash.as_str())) {
-                eyre::bail!("a migration variant cannot map the same source more than once");
+            if !mappings.insert((
+                mapping.category,
+                mapping.source_hash.as_str(),
+                mapping.target_hash.as_str(),
+            )) {
+                eyre::bail!("a migration variant cannot contain duplicate mappings");
             }
             ensure_hash_category(mapping.category, &mapping.source_hash)?;
             ensure_hash_category(mapping.category, &mapping.target_hash)?;
@@ -422,7 +426,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rejects_duplicate_sources_in_one_variant() {
+    fn allows_one_source_to_map_to_multiple_targets_in_one_variant() {
+        let mapping = WebMigrationMapping {
+            category: EquipmentCategory::Helmet,
+            source_hash: "13f9269d08e52cf2".to_string(),
+            target_hash: "a856edff49cfdd95".to_string(),
+        };
+        let variant = WebMigrationVariant {
+            mappings: vec![
+                mapping,
+                WebMigrationMapping {
+                    category: EquipmentCategory::Helmet,
+                    source_hash: "13f9269d08e52cf2".to_string(),
+                    target_hash: "1a2fc86abd27bf5b".to_string(),
+                },
+            ],
+        };
+        assert!(validate_variants(&[variant]).is_ok());
+    }
+
+    #[test]
+    fn rejects_duplicate_mappings_in_one_variant() {
         let mapping = WebMigrationMapping {
             category: EquipmentCategory::Helmet,
             source_hash: "13f9269d08e52cf2".to_string(),

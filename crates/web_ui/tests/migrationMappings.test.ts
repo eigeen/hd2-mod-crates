@@ -4,6 +4,7 @@ import {
   configuredMappings,
   multiTargetEligible,
   selectTarget,
+  singlePatchRequired,
   targetsForSource,
 } from "../src/migrationMappings";
 import type { DetectedSource, EquipmentOption } from "../src/types";
@@ -44,6 +45,14 @@ describe("unified migration mapping state", () => {
       .toEqual([1, 1]);
   });
 
+  test("bundles all targets from one source into one variant when requested", () => {
+    const mappings = configuredMappings([source("helmet", helmet)], {
+      helmet: [helmetTarget.hash, "helmet-target-2"],
+    });
+
+    expect(buildMigrationVariants(mappings, true)).toEqual([{ mappings }]);
+  });
+
   test("expands multiple sources into the cartesian product of their targets", () => {
     const mappings = configuredMappings([source("armor", armor), source("helmet", helmet)], {
       armor: [armorTarget.hash, "armor-target-2"],
@@ -62,6 +71,22 @@ describe("unified migration mapping state", () => {
         ["armor-target-2", "helmet-target-2"],
         ["armor-target-2", "helmet-target-3"],
       ]);
+  });
+
+  test("requires one Patch output when multiple sources have mappings", () => {
+    const oneSource = configuredMappings([source("armor", armor), source("helmet", helmet)], {
+      armor: [armorTarget.hash, "armor-target-2"],
+    });
+    const multipleSources = configuredMappings(
+      [source("armor", armor), source("helmet", helmet)],
+      { armor: [armorTarget.hash], helmet: [helmetTarget.hash, "helmet-target-2"] },
+    );
+
+    expect(singlePatchRequired(oneSource)).toBe(false);
+    expect(singlePatchRequired(multipleSources)).toBe(true);
+    expect(buildMigrationVariants(multipleSources, true)).toEqual([{
+      mappings: multipleSources,
+    }]);
   });
 
   test("enables multi-target when any source is resolved", () => {

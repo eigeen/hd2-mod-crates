@@ -82,6 +82,9 @@ export const zhCN = {
   "mapping.helmet": "头盔",
   "mapping.multiTarget": "多目标",
   "mapping.multiTargetHelp": "一次性向多个目标版本生成迁移补丁。注意：大量目标会显著增加 CPU 和内存占用。",
+  "mapping.singlePatch": "打包为单个 Patch",
+  "mapping.singlePatchHelp": "把所有已选目标映射合并到一个 Patch，而不是为每种目标组合分别生成 Patch。",
+  "mapping.singlePatchForcedHelp": "已有多个源配置了目标映射，为避免生成笛卡尔积数量的产物，必须打包为单个 Patch。",
   "mapping.source": "源版本",
   "mapping.target": "目标版本",
   "mapping.importPatchFirst": "请先导入补丁文件",
@@ -102,7 +105,7 @@ export const zhCN = {
   "options.unmatchedKeep": "保留未知 Unit",
   "options.unmatchedUnitsHelp": "未配置目标的来源或无法识别的内容会按此选项处理。“丢弃未知 Unit”只留下已成功转换的装备；“保留未知 Unit”会把其余内容原样放进输出文件，但不会转换它们。",
   "performance.title": "多目标",
-  "performance.body": "多目标会根据 Patch 大小自动分批，每批输出一个包含一个或多个目标版本的 ZIP，以限制 WASM 内存占用。多源补丁会分别生成所选目标的每种组合。较大的任务可能会让浏览器询问是否允许此站点下载多个文件。",
+  "performance.body": "分别输出时，多目标会根据 Patch 大小自动分批。开启“打包为单个 Patch”后，所有已选映射会合并为一个 Patch；多个源都配置了映射时会强制开启，以避免生成笛卡尔积数量的产物。较大的分别输出任务可能会让浏览器询问是否允许此站点下载多个文件。",
   "dialog.cancel": "取消",
   "dialog.continue": "继续",
 } satisfies TranslationResources;
