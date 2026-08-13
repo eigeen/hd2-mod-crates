@@ -45,6 +45,17 @@ function MigrationCredit() {
       >
         @大紫
       </a>
+      {t("intro.migrateCreditMappingSuffix")}
+      {t("intro.migrateCreditDesignPrefix")}
+      <a
+        className="text-hd2-yellow underline underline-offset-2"
+        href="https://github.com/S1lverAkatsuki/"
+        rel="noreferrer"
+        target="_blank"
+      >
+        @S1lverAkatsuki
+      </a>
+      {t("intro.migrateCreditSuffix")}
     </p>
   );
 }

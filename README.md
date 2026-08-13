@@ -38,7 +38,7 @@ Unit repatching behavior was inspired by hd2-repatcher, created by Evie / Raidin
 
 See [RaidingForPants/hd2-repatcher](https://github.com/RaidingForPants/hd2-repatcher).
 
-Armor and helmet mapping tables provided by [@大紫](https://space.bilibili.com/263230957).
+Armor and helmet mapping tables provided by [@大紫](https://space.bilibili.com/263230957); original UI style designed by [@S1lverAkatsuki](https://github.com/S1lverAkatsuki/).
 
 ## Build
 
