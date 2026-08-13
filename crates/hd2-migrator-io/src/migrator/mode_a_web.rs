@@ -49,6 +49,7 @@ pub struct WebTargetResult {
     pub target_name: String,
     pub patch: StreamToc,
     pub report: MigrationReport,
+    pub(crate) source_unit_ids: HashSet<u64>,
 }
 
 /// Run the async cross-archive migration. Returns one [`WebTargetResult`]
@@ -99,6 +100,12 @@ pub async fn run<S: DataSource + ?Sized>(
         &mapping,
         options.unmatched_unit_policy,
     );
+    prepared.source_unit_ids = selected_source_unit_ids(
+        &prepared.migration,
+        source_archive.as_ref(),
+        &mapping,
+        &source_name,
+    )?;
     prepared.model_detection_warning = model_detection_warning;
 
     let empty_unit_template: Option<EmptyUnitTemplate> = if options.no_padding {
@@ -190,6 +197,7 @@ struct PreparedPatch {
     dropped_entries: usize,
     preserved_units: usize,
     model_detection_warning: Option<String>,
+    source_unit_ids: HashSet<u64>,
 }
 
 fn prepare_patch(
@@ -206,6 +214,7 @@ fn prepare_patch(
             dropped_entries: 0,
             preserved_units: 0,
             model_detection_warning: None,
+            source_unit_ids: HashSet::new(),
         },
     }
 }
@@ -223,6 +232,7 @@ fn prepare_armor_patch(
             dropped_entries: filter.dropped_entries,
             preserved_units: 0,
             model_detection_warning: None,
+            source_unit_ids: HashSet::new(),
         };
     }
 
@@ -237,7 +247,39 @@ fn prepare_armor_patch(
         dropped_entries: 0,
         preserved_units: foreign_units.len(),
         model_detection_warning: None,
+        source_unit_ids: HashSet::new(),
     }
+}
+
+fn selected_source_unit_ids(
+    patch: &StreamToc,
+    source: Option<&StreamToc>,
+    mapping: &CategoryMapping,
+    source_name: &str,
+) -> crate::Result<HashSet<u64>> {
+    match mapping {
+        CategoryMapping::Armor(_) => selected_armor_unit_ids(patch, source),
+        CategoryMapping::Helmet(table) => {
+            let patch_units = unit_file_ids(patch);
+            Ok(table
+                .unit_id(source_name)
+                .filter(|file_id| patch_units.contains(file_id))
+                .into_iter()
+                .collect())
+        }
+    }
+}
+
+fn selected_armor_unit_ids(
+    patch: &StreamToc,
+    source: Option<&StreamToc>,
+) -> crate::Result<HashSet<u64>> {
+    let source =
+        source.ok_or_else(|| eyre::eyre!("armor migration is missing its source archive"))?;
+    Ok(unit_file_ids(patch)
+        .intersection(&unit_file_ids(source))
+        .copied()
+        .collect())
 }
 
 /// Reports uniquely identifiable model objects left after the selected source.
@@ -288,6 +330,7 @@ fn finish_target_result(
         target_name,
         patch: artifact.patch,
         report: artifact.report,
+        source_unit_ids: prepared.source_unit_ids.clone(),
     }
 }
 
@@ -517,8 +560,6 @@ mod same_source_tests {
 
     #[test]
     fn rejects_source_archive_in_targets() {
-        assert!(
-            ensure_targets_differ_from_source(&["source".to_string()], "source").is_err()
-        );
+        assert!(ensure_targets_differ_from_source(&["source".to_string()], "source").is_err());
     }
 }
