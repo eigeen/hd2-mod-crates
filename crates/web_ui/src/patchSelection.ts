@@ -7,18 +7,28 @@ export interface PatchFileSelection {
 export async function patchSelectionFromDrop(
   dataTransfer: DataTransfer,
 ): Promise<PatchFileSelection> {
-  const directory = await firstDroppedDirectory(dataTransfer.items);
+  // Drag data is only readable while the drop event is active. Snapshot files and
+  // start every handle request before the first await yields back to the browser.
+  const files = Array.from(dataTransfer.files);
+  const handleRequests = droppedHandleRequests(dataTransfer.items);
+  const directory = await firstDroppedDirectory(handleRequests);
   if (directory) {
     return { files: await filesInDirectory(directory), originalName: directory.name };
   }
-  return { files: Array.from(dataTransfer.files) };
+  return { files };
+}
+
+function droppedHandleRequests(
+  items: DataTransferItemList,
+): Promise<FileSystemHandle | null | undefined>[] {
+  return Array.from(items, (item) => Promise.resolve(item.getAsFileSystemHandle?.()));
 }
 
 async function firstDroppedDirectory(
-  items: DataTransferItemList,
+  requests: Promise<FileSystemHandle | null | undefined>[],
 ): Promise<FileSystemDirectoryHandle | null> {
-  for (const item of Array.from(items)) {
-    const handle = await item.getAsFileSystemHandle?.();
+  for (const request of requests) {
+    const handle = await request;
     if (handle?.kind === "directory") return handle as FileSystemDirectoryHandle;
   }
   return null;

@@ -123,6 +123,7 @@ function App() {
     const inspection = await inspectEquipmentContents(nextPatch, dataSource);
     setSources(inspection.sources);
     setActiveSourceId(inspection.sources[0]?.id ?? "");
+    setMultiTarget(canUseMultiTarget(inspection.sources));
   }, [gameDir]);
 
   useEffect(() => {
@@ -136,7 +137,7 @@ function App() {
       setSources(inspection.sources);
       setActiveSourceId(inspection.sources[0]?.id ?? "");
       setTargetsBySource({});
-      setMultiTarget(false);
+      setMultiTarget(canUseMultiTarget(inspection.sources));
     });
   }, [gameDir]);
 
@@ -171,11 +172,13 @@ function App() {
   }, []);
 
   const resolveSource = useCallback((sourceId: string, hash: string) => {
-    setSources((current) => current.map((source) => (
+    const resolvedSources = sources.map((source) => (
       source.id === sourceId ? { ...source, resolvedHash: hash } : source
-    )));
+    ));
+    setSources(resolvedSources);
     setTargetsBySource((current) => ({ ...current, [sourceId]: [] }));
-  }, []);
+    setMultiTarget(canUseMultiTarget(resolvedSources));
+  }, [sources]);
 
   const chooseTarget = useCallback(
     (hash: string) => {
