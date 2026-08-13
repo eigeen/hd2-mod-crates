@@ -11,8 +11,7 @@ import { useI18n, type Translate } from "./i18n";
 import type { TranslationKey } from "./locales/translationKeys";
 import { LanguageMenu } from "./LanguageMenu";
 import {
-  migrateTargetsToBatchDownloads,
-  type MigrationBatch,
+  migrateVariantsToBatchDownloads,
   uniqueOutputFilename,
 } from "./migrationDownloads";
 import {
@@ -153,19 +152,18 @@ function App() {
   );
 
   const toggleMultiTarget = useCallback((enabled: boolean) => {
-    if (!multiTargetEligible || !activeSource) return;
+    if (!multiTargetEligible) return;
     setMultiTarget(enabled);
     if (!enabled) {
-      setTargetsBySource((current) => ({
-        ...current,
-        [activeSource.id]: (current[activeSource.id] ?? []).slice(0, 1),
-      }));
+      setTargetsBySource((current) => Object.fromEntries(
+        Object.entries(current).map(([sourceId, targets]) => [sourceId, targets.slice(0, 1)]),
+      ));
       return;
     }
     if (!multiConfirmed) {
       setWarningOpen(true);
     }
-  }, [activeSource, multiConfirmed, multiTargetEligible]);
+  }, [multiConfirmed, multiTargetEligible]);
 
   const chooseSource = useCallback((sourceId: string) => {
     setActiveSourceId(sourceId);
@@ -199,25 +197,25 @@ function App() {
   const runMigration = useCallback(async () => {
     const patch = patchRef.current;
     if (!patch) return;
-    if (multiTarget && configuredMappings.length > 1 && !multiConfirmed) {
+    const variants = buildMigrationVariants(configuredMappings);
+    if (multiTarget && variants.length > 1 && !multiConfirmed) {
       setWarningOpen(true);
       return;
     }
     if (!gameDir) return;
     const dataSource = new GameDataSource(gameDir.handle);
-    const variants = buildMigrationVariants(configuredMappings, sources.length === 1);
     setProgressLabel("");
     await runTask(setBusy, async () => {
       const summary = variants.length > 1
-        ? await migrateSingleSourceVariants({
+        ? await migrateVariantBatches({
             dataSource,
-            mappings: configuredMappings,
             noPadding,
             options: equipmentOptions,
             patch,
             setProgressLabel,
             t,
             unmatchedUnitPolicy,
+            variants,
           })
         : await migrateCombinedVariant({
             dataSource,
@@ -239,7 +237,6 @@ function App() {
     multiConfirmed,
     multiTarget,
     noPadding,
-    sources.length,
     t,
     unmatchedUnitPolicy,
   ]);
@@ -416,37 +413,31 @@ function nextBlockerHint(input: BlockerHintInput, t: Translate): string {
   return "";
 }
 
-interface SingleSourceMigrationRequest {
+interface VariantMigrationRequest {
   dataSource: GameDataSource;
-  mappings: MigrationMapping[];
   noPadding: boolean;
   options: EquipmentOption[];
   patch: PatchFiles;
   setProgressLabel: (label: string) => void;
   t: Translate;
   unmatchedUnitPolicy: UnmatchedUnitPolicy;
+  variants: MigrationVariant[];
 }
 
-/** Preserve the existing memory-bounded download behavior for one source with many targets. */
-async function migrateSingleSourceVariants(
-  request: SingleSourceMigrationRequest,
+/** Process target combinations in batches so multi-source expansion stays memory bounded. */
+async function migrateVariantBatches(
+  request: VariantMigrationRequest,
 ): Promise<MigrationSummary> {
-  const targetHashes = request.mappings.map((mapping) => mapping.targetHash);
-  return migrateTargetsToBatchDownloads({
+  return migrateVariantsToBatchDownloads({
     patchByteLength: patchByteLength(request.patch),
-    sourceName: request.patch.originalName ?? request.patch.name,
-    targetHashes,
-    targets: request.options,
+    variants: request.variants,
     migrateBatch: (batch) => {
-      const mappings = batch.targetHashes.map((targetHash) => ({
-        ...request.mappings[0],
-        targetHash,
-      }));
+      const mappings = batch.variants.flatMap((variant) => variant.mappings);
       return migrateEquipmentVariants(
         request.patch,
-        unifiedOptions(mappings.map((mapping) => ({ mappings: [mapping] })), request),
+        unifiedOptions(batch.variants, request),
         request.dataSource,
-        migrationProgress(batch, mappings, request.options, request.setProgressLabel, request.t),
+        migrationProgress(mappings, request.options, request.setProgressLabel, request.t),
       );
     },
     download: downloadZip,
@@ -472,7 +463,6 @@ async function migrateCombinedVariant(
     unifiedOptions([request.variant], request),
     request.dataSource,
     migrationProgress(
-      null,
       request.variant.mappings,
       request.options,
       request.setProgressLabel,
@@ -502,7 +492,7 @@ function combinedOutputFilename(
 
 function unifiedOptions(
   variants: MigrationVariant[],
-  settings: Pick<SingleSourceMigrationRequest, "noPadding" | "unmatchedUnitPolicy">,
+  settings: Pick<VariantMigrationRequest, "noPadding" | "unmatchedUnitPolicy">,
 ) {
   return {
     variants,
@@ -513,22 +503,19 @@ function unifiedOptions(
 }
 
 function migrationProgress(
-  batch: MigrationBatch | null,
   mappings: MigrationMapping[],
   options: EquipmentOption[],
   setProgressLabel: (label: string) => void,
   t: Translate,
 ): MigrationProgressSink {
   let mappingIndex = 0;
-  const targetOffset = batch?.targetOffset ?? 0;
-  const targetCount = batch?.targetCount ?? mappings.length;
   const label = () => {
     const mapping = mappings[Math.min(mappingIndex, mappings.length - 1)];
     const source = options.find((candidate) => candidate.hash === mapping?.sourceHash)?.name
       ?? mapping?.sourceHash;
     const target = options.find((candidate) => candidate.hash === mapping?.targetHash)?.name
       ?? mapping?.targetHash;
-    return numberedTargetLabel(`${source} → ${target}`, targetOffset + mappingIndex, targetCount);
+    return numberedTargetLabel(`${source} → ${target}`, mappingIndex, mappings.length);
   };
   return {
     onTargetStart: () => setProgressLabel(t("app.progressMigrating", { name: label() })),

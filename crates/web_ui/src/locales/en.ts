@@ -62,6 +62,8 @@ export const en = {
   "faq.workaroundAnswer": "In Steam's storage settings, add a game library such as D:\\SteamLibrary or C:\\Games, then move Helldivers 2 there. If you do not want to move the game, you can temporarily copy the data folder outside Program Files instead.",
   "faq.readOnlyQuestion": "Will this tool modify my game folder?",
   "faq.readOnlyAnswer": "No. The web tool only reads current game files to find data needed for migration and Mod updates. It does not write, delete, or replace anything in the game folder.",
+  "faq.partsTableQuestion": "Shared/contaminated parts table",
+  "faq.partsTableAnswer": "Open the shared/contaminated parts table in KDocs",
   "patch.title": "Patch",
   "patch.pick": "Choose Patch Files",
   "patch.help": "Select the main patch file plus .gpu_resources and .stream. Missing sidecar files may be omitted when unused.",
@@ -98,7 +100,7 @@ export const en = {
   "options.unmatchedKeep": "Keep unknown Units",
   "options.unmatchedUnitsHelp": "Sources without a target and unrecognized content follow this option. “Discard unknown Units” keeps only successfully converted equipment. “Keep unknown Units” copies everything else unchanged without converting it.",
   "performance.title": "Multi-target",
-  "performance.body": "Targets are automatically batched by patch size. Each ZIP contains one or more target versions while keeping WASM memory bounded. Large jobs may make your browser ask you to allow multiple downloads.",
+  "performance.body": "Targets are automatically batched by patch size. Each ZIP contains one or more target versions while keeping WASM memory bounded. Multi-source patches generate every selected target combination separately. Large jobs may make your browser ask you to allow multiple downloads.",
   "dialog.cancel": "Cancel",
   "dialog.continue": "Continue",
 } satisfies TranslationResources;

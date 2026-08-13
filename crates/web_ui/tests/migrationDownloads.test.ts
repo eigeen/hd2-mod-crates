@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test";
 import {
   batchZipFilename,
   migrateTargetsToBatchDownloads,
+  migrateVariantsToBatchDownloads,
   migrationBatchSize,
   planMigrationBatches,
+  planMigrationVariantBatches,
 } from "../src/migrationDownloads";
-import type { MigrationResult, TargetOption } from "../src/types";
+import type { MigrationResult, MigrationVariant, TargetOption } from "../src/types";
 
 const MIB = 1024 * 1024;
 const targets = makeTargets(25);
@@ -37,6 +39,14 @@ test("splits the measured 151 MiB patch into safe three-variant batches", () => 
   const batches = planMigrationBatches(hashes, 158_659_188);
 
   expect(batches.map((batch) => batch.targetHashes.length)).toEqual([3, 3, 1]);
+});
+
+test("partitions combined variants without changing their order", () => {
+  const variants = makeVariants(5);
+  const batches = planMigrationVariantBatches(variants, 256 * MIB);
+
+  expect(batches.map((batch) => batch.variants.length)).toEqual([2, 2, 1]);
+  expect(batches.flatMap((batch) => batch.variants)).toEqual(variants);
 });
 
 describe("batchZipFilename", () => {
@@ -98,12 +108,42 @@ test("migrates, downloads, and summarizes batches sequentially", async () => {
   expect(summary.reports.map((report) => report.targetHash)).toEqual(hashes);
 });
 
+test("migrates combined variants in numbered memory-bounded batches", async () => {
+  const downloads: string[] = [];
+  const variants = makeVariants(5);
+  const summary = await migrateVariantsToBatchDownloads({
+    patchByteLength: 256 * MIB,
+    variants,
+    migrateBatch: async (batch) => migrationResult(
+      batch.variants.map((variant) => variant.mappings[0].targetHash),
+    ),
+    download: (_bytes, filename) => downloads.push(filename),
+  });
+
+  expect(downloads).toEqual([
+    "hd2-patch-part-001-of-003.zip",
+    "hd2-patch-part-002-of-003.zip",
+    "hd2-patch-part-003-of-003.zip",
+  ]);
+  expect(summary.migratedCount).toBe(5);
+});
+
 function makeTargets(count: number): TargetOption[] {
   return Array.from({ length: count }, (_, index) => ({
     category: "Armor",
     hash: `hash-${index}`,
     name: index === 1 ? "Target/1" : `Target ${index}`,
     excluded: false,
+  }));
+}
+
+function makeVariants(count: number): MigrationVariant[] {
+  return Array.from({ length: count }, (_, index) => ({
+    mappings: [{
+      category: "Armor",
+      sourceHash: "source",
+      targetHash: `hash-${index}`,
+    }],
   }));
 }
 

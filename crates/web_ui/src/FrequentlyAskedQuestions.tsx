@@ -3,11 +3,13 @@ import HelpOutlineIcon from "@mui/icons-material/HelpOutlined";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import { IconButton } from "@mui/material";
 import { useEffect, useRef } from "react";
-import { useI18n } from "./i18n";
+import { useI18n, type LanguageCode } from "./i18n";
 import type { TranslationKey } from "./locales/translationKeys";
 
 interface FaqEntry {
   answer: TranslationKey;
+  href?: string;
+  language?: LanguageCode;
   question: TranslationKey;
   recommendation?: TranslationKey;
 }
@@ -19,6 +21,12 @@ const entries: FaqEntry[] = [
     answer: "faq.workaroundAnswer",
   },
   { question: "faq.readOnlyQuestion", answer: "faq.readOnlyAnswer" },
+  {
+    question: "faq.partsTableQuestion",
+    answer: "faq.partsTableAnswer",
+    href: "https://www.kdocs.cn/l/cjYiKiuvtSoF",
+    language: "zh-CN",
+  },
 ];
 
 interface FrequentlyAskedQuestionsProps {
@@ -65,7 +73,8 @@ export function FrequentlyAskedQuestions(props: FrequentlyAskedQuestionsProps) {
 }
 
 function FaqPanel(props: Pick<FrequentlyAskedQuestionsProps, "attentionQuestion"> & { onClose: () => void }) {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
+  const visibleEntries = entries.filter((entry) => !entry.language || entry.language === language);
 
   return (
     <section
@@ -80,7 +89,7 @@ function FaqPanel(props: Pick<FrequentlyAskedQuestionsProps, "attentionQuestion"
           <CloseIcon fontSize="small" />
         </IconButton>
       </div>
-      {entries.map((entry) => (
+      {visibleEntries.map((entry) => (
         <FaqItem
           attention={props.attentionQuestion === entry.question}
           entry={entry}
@@ -112,7 +121,16 @@ function FaqItem({ attention, entry }: { attention: boolean; entry: FaqEntry }) 
           </p>
         )}
         <p className={`m-0 text-hd2-muted ${entry.recommendation ? "mt-3" : ""}`}>
-          {t(entry.answer)}
+          {entry.href ? (
+            <a
+              className="font-semibold text-hd2-yellow underline underline-offset-2"
+              href={entry.href}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {t(entry.answer)}
+            </a>
+          ) : t(entry.answer)}
         </p>
       </div>
     </details>

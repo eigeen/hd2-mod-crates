@@ -60,6 +60,8 @@ export const translationKeys = [
   "faq.workaroundAnswer",
   "faq.readOnlyQuestion",
   "faq.readOnlyAnswer",
+  "faq.partsTableQuestion",
+  "faq.partsTableAnswer",
   "patch.title",
   "patch.pick",
   "patch.help",

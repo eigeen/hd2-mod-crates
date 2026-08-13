@@ -21,12 +21,17 @@ export function configuredMappings(
 
 export function buildMigrationVariants(
   mappings: MigrationMapping[],
-  singleSource: boolean,
 ): MigrationVariant[] {
-  if (singleSource) {
-    return mappings.map((mapping) => ({ mappings: [mapping] }));
-  }
-  return mappings.length ? [{ mappings }] : [];
+  const mappingGroups = mappingsBySource(mappings);
+  const combinations = mappingGroups.reduce<MigrationMapping[][]>(
+    (variants, group) => variants.flatMap((variant) => (
+      group.map((mapping) => [...variant, mapping])
+    )),
+    [[]],
+  );
+  return combinations
+    .filter((variant) => variant.length > 0)
+    .map((variant) => ({ mappings: variant }));
 }
 
 export function targetsForSource(
@@ -40,7 +45,7 @@ export function targetsForSource(
 }
 
 export function multiTargetEligible(sources: DetectedSource[]): boolean {
-  return sources.length === 1 && Boolean(sources[0]?.resolvedHash);
+  return sources.some((source) => Boolean(source.resolvedHash));
 }
 
 export function selectTarget(values: string[], hash: string, multiTarget: boolean): string[] {
@@ -48,4 +53,15 @@ export function selectTarget(values: string[], hash: string, multiTarget: boolea
     return values.includes(hash) ? [] : [hash];
   }
   return values.includes(hash) ? values.filter((value) => value !== hash) : [...values, hash];
+}
+
+function mappingsBySource(mappings: MigrationMapping[]): MigrationMapping[][] {
+  const groups = new Map<string, MigrationMapping[]>();
+  for (const mapping of mappings) {
+    const key = `${mapping.category}:${mapping.sourceHash}`;
+    const group = groups.get(key) ?? [];
+    group.push(mapping);
+    groups.set(key, group);
+  }
+  return Array.from(groups.values());
 }

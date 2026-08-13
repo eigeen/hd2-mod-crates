@@ -28,7 +28,7 @@ describe("unified migration mapping state", () => {
       sourceHash: armor.hash,
       targetHash: armorTarget.hash,
     }]);
-    expect(buildMigrationVariants(mappings, false)).toEqual([{ mappings }]);
+    expect(buildMigrationVariants(mappings)).toEqual([{ mappings }]);
   });
 
   test("cancels a single target by selecting it again", () => {
@@ -40,13 +40,37 @@ describe("unified migration mapping state", () => {
     const mappings = configuredMappings([source("helmet", helmet)], {
       helmet: [helmetTarget.hash, "helmet-target-2"],
     });
-    expect(buildMigrationVariants(mappings, true).map((variant) => variant.mappings.length))
+    expect(buildMigrationVariants(mappings).map((variant) => variant.mappings.length))
       .toEqual([1, 1]);
   });
 
-  test("enables multi-target only for one resolved source", () => {
+  test("expands multiple sources into the cartesian product of their targets", () => {
+    const mappings = configuredMappings([source("armor", armor), source("helmet", helmet)], {
+      armor: [armorTarget.hash, "armor-target-2"],
+      helmet: [helmetTarget.hash, "helmet-target-2", "helmet-target-3"],
+    });
+    const variants = buildMigrationVariants(mappings);
+
+    expect(variants).toHaveLength(6);
+    expect(variants.every((variant) => variant.mappings.length === 2)).toBeTrue();
+    expect(variants.map((variant) => variant.mappings.map((mapping) => mapping.targetHash)))
+      .toEqual([
+        [armorTarget.hash, helmetTarget.hash],
+        [armorTarget.hash, "helmet-target-2"],
+        [armorTarget.hash, "helmet-target-3"],
+        ["armor-target-2", helmetTarget.hash],
+        ["armor-target-2", "helmet-target-2"],
+        ["armor-target-2", "helmet-target-3"],
+      ]);
+  });
+
+  test("enables multi-target when any source is resolved", () => {
     expect(multiTargetEligible([source("armor", armor)])).toBe(true);
-    expect(multiTargetEligible([source("armor", armor), source("helmet", helmet)])).toBe(false);
+    expect(multiTargetEligible([source("armor", armor), source("helmet", helmet)])).toBe(true);
+    expect(multiTargetEligible([
+      source("armor", armor),
+      { ...source("helmet", helmet), resolvedHash: null },
+    ])).toBe(true);
     expect(multiTargetEligible([{ ...source("armor", armor), resolvedHash: null }])).toBe(false);
   });
 });

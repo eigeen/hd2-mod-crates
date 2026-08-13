@@ -42,9 +42,14 @@ pub async fn migrate_variants_with_source<S: DataSource + ?Sized>(
         .unwrap_or(super::migration::DEFAULT_PATCH_SUFFIX);
     let mut files = Vec::new();
     let mut reports = Vec::new();
-    for variant in &options.variants {
+    for (variant_index, variant) in options.variants.iter().enumerate() {
         let result = migrate_variant(&patch_bytes, variant, &options, source, progress).await?;
-        let directory = variant_directory(variant, &result.report.target_name);
+        let directory = variant_directory(
+            variant,
+            &result.report.target_name,
+            variant_index,
+            options.variants.len(),
+        );
         files.extend(output_files(result.patch, &directory, suffix));
         reports.push(result.report);
     }
@@ -290,9 +295,17 @@ fn merge_report(report: &mut WebMigrationReportRow, next: crate::migrator::Migra
     report.warnings.extend(next.warnings);
 }
 
-fn variant_directory(variant: &WebMigrationVariant, target_name: &str) -> String {
+fn variant_directory(
+    variant: &WebMigrationVariant,
+    target_name: &str,
+    variant_index: usize,
+    variant_count: usize,
+) -> String {
     if variant.mappings.len() > 1 {
-        return "combined".to_string();
+        return match variant_count {
+            1 => "combined".to_string(),
+            _ => format!("combined-{:03}", variant_index + 1),
+        };
     }
     crate::migrator::safe_filename(target_name)
 }
@@ -342,6 +355,26 @@ mod tests {
     }
 
     #[test]
+    fn numbers_combined_directories_when_a_batch_contains_multiple_variants() {
+        let variant = WebMigrationVariant {
+            mappings: vec![
+                mapping(EquipmentCategory::Armor),
+                mapping(EquipmentCategory::Helmet),
+            ],
+        };
+
+        assert_eq!(
+            variant_directory(&variant, "combined", 0, 2),
+            "combined-001"
+        );
+        assert_eq!(
+            variant_directory(&variant, "combined", 1, 2),
+            "combined-002"
+        );
+        assert_eq!(variant_directory(&variant, "combined", 0, 1), "combined");
+    }
+
+    #[test]
     fn identical_writes_are_deduplicated_but_different_writes_fail() {
         let before = archive(&[]);
         let first = archive(&[entry(7, vec![1])]);
@@ -375,5 +408,13 @@ mod tests {
         let mut entry = TocEntry::new(file_id, UNIT_ID);
         entry.toc_data = toc_data;
         entry
+    }
+
+    fn mapping(category: EquipmentCategory) -> WebMigrationMapping {
+        WebMigrationMapping {
+            category,
+            source_hash: "source".to_string(),
+            target_hash: "target".to_string(),
+        }
     }
 }

@@ -62,6 +62,8 @@ export const zhCN = {
   "faq.workaroundAnswer": "可以在 Steam 的存储设置中添加新的游戏库，例如 D:\\SteamLibrary 或 C:\\Games，然后移动《绝地潜兵 2》。如果暂时不想移动游戏，也可以把 data 文件夹临时复制到非系统目录后使用。",
   "faq.readOnlyQuestion": "工具会修改游戏目录吗？",
   "faq.readOnlyAnswer": "不会。网页只读取当前游戏文件来查找迁移和更新 Mod 所需的数据，不会写入、删除或替换游戏目录里的任何文件。",
+  "faq.partsTableQuestion": "部件共享/污染表",
+  "faq.partsTableAnswer": "在金山文档中查看部件共享/污染表",
   "patch.title": "补丁",
   "patch.pick": "选择patch文件",
   "patch.help": "同时选择 patch 主文件、.gpu_resources、.stream 三个文件（缺失的辅助文件可省略）。",
@@ -98,7 +100,7 @@ export const zhCN = {
   "options.unmatchedKeep": "保留未知 Unit",
   "options.unmatchedUnitsHelp": "未配置目标的来源或无法识别的内容会按此选项处理。“丢弃未知 Unit”只留下已成功转换的装备；“保留未知 Unit”会把其余内容原样放进输出文件，但不会转换它们。",
   "performance.title": "多目标",
-  "performance.body": "多目标会根据 Patch 大小自动分批，每批输出一个包含一个或多个目标版本的 ZIP，以限制 WASM 内存占用。较大的任务可能会让浏览器询问是否允许此站点下载多个文件。",
+  "performance.body": "多目标会根据 Patch 大小自动分批，每批输出一个包含一个或多个目标版本的 ZIP，以限制 WASM 内存占用。多源补丁会分别生成所选目标的每种组合。较大的任务可能会让浏览器询问是否允许此站点下载多个文件。",
   "dialog.cancel": "取消",
   "dialog.continue": "继续",
 } satisfies TranslationResources;

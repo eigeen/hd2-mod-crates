@@ -1,6 +1,7 @@
 import type {
   MigrationResult,
   MigrationSummary,
+  MigrationVariant,
   TargetOption,
 } from "./types";
 
@@ -25,6 +26,21 @@ export interface BatchedMigrationRequest {
   download: (bytes: Uint8Array, filename: string) => void;
 }
 
+export interface MigrationVariantBatch {
+  variants: MigrationVariant[];
+  variantOffset: number;
+  variantCount: number;
+  batchIndex: number;
+  batchCount: number;
+}
+
+interface BatchedVariantMigrationRequest {
+  patchByteLength: number;
+  variants: MigrationVariant[];
+  migrateBatch: (batch: MigrationVariantBatch) => Promise<MigrationResult>;
+  download: (bytes: Uint8Array, filename: string) => void;
+}
+
 /** Migrate targets in memory-bounded batches and download each completed ZIP immediately. */
 export async function migrateTargetsToBatchDownloads(
   request: BatchedMigrationRequest,
@@ -37,6 +53,20 @@ export async function migrateTargetsToBatchDownloads(
       result.zipBytes,
       batchZipFilename(batch, request.targets, request.sourceName),
     );
+    summary = appendMigrationSummary(summary, result.summary);
+  }
+  return summary;
+}
+
+/** Migrate combined variants in memory-bounded batches without merging duplicate sources. */
+export async function migrateVariantsToBatchDownloads(
+  request: BatchedVariantMigrationRequest,
+): Promise<MigrationSummary> {
+  const batches = planMigrationVariantBatches(request.variants, request.patchByteLength);
+  let summary = emptyMigrationSummary();
+  for (const batch of batches) {
+    const result = await request.migrateBatch(batch);
+    request.download(result.zipBytes, variantBatchFilename(batch));
     summary = appendMigrationSummary(summary, result.summary);
   }
   return summary;
@@ -67,6 +97,24 @@ export function planMigrationBatches(
   });
 }
 
+export function planMigrationVariantBatches(
+  variants: MigrationVariant[],
+  patchByteLength: number,
+): MigrationVariantBatch[] {
+  const batchSize = migrationBatchSize(patchByteLength);
+  const batchCount = Math.ceil(variants.length / batchSize);
+  return Array.from({ length: batchCount }, (_, batchIndex) => {
+    const variantOffset = batchIndex * batchSize;
+    return {
+      variants: variants.slice(variantOffset, variantOffset + batchSize),
+      variantOffset,
+      variantCount: variants.length,
+      batchIndex,
+      batchCount,
+    };
+  });
+}
+
 export function batchZipFilename(
   batch: MigrationBatch,
   targets: TargetOption[],
@@ -75,6 +123,13 @@ export function batchZipFilename(
   if (batch.targetCount === 1) {
     return uniqueOutputFilename(sourceName, batch.targetHashes[0], targets);
   }
+  if (batch.batchCount === 1) return "hd2-migrated-patch.zip";
+  const current = paddedBatchNumber(batch.batchIndex + 1, batch.batchCount);
+  const total = paddedBatchNumber(batch.batchCount, batch.batchCount);
+  return `hd2-patch-part-${current}-of-${total}.zip`;
+}
+
+function variantBatchFilename(batch: MigrationVariantBatch): string {
   if (batch.batchCount === 1) return "hd2-migrated-patch.zip";
   const current = paddedBatchNumber(batch.batchIndex + 1, batch.batchCount);
   const total = paddedBatchNumber(batch.batchCount, batch.batchCount);
