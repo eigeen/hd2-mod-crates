@@ -9,6 +9,7 @@ export const translationKeys = [
   "mode.migrate",
   "mode.repatch",
   "github.openRepository",
+  "github.revision",
   "intro.migrateTitle",
   "intro.migratePrinciple",
   "intro.migrateWarning",

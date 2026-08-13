@@ -11,6 +11,7 @@ export const zhCN = {
   "mode.migrate": "外观迁移",
   "mode.repatch": "更新 Mod 版本",
   "github.openRepository": "打开 GitHub 仓库",
+  "github.revision": "Git 提交 {{hash}}",
   "intro.migrateTitle": "把外观 Mod 换到另一件装备上",
   "intro.migratePrinciple": "有些外观 Mod 只能用在指定的胸甲或头盔上。选择这个 Mod 原本对应的装备，再选择你想换到的目标装备，本工具会尝试生成一份可用于目标装备的新 Patch。",
   "intro.migrateWarning": "转换结果不保证一定可用。结构复杂或同时修改多件装备的 Mod，转换后可能缺少部件、显示异常，甚至导致游戏崩溃。请保留原始 Patch，并在游戏中检查输出结果。",

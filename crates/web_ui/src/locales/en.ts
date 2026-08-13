@@ -11,6 +11,7 @@ export const en = {
   "mode.migrate": "Appearance Migration",
   "mode.repatch": "Update Mod Version",
   "github.openRepository": "Open GitHub repository",
+  "github.revision": "Git commit {{hash}}",
   "intro.migrateTitle": "Move an appearance mod to another item",
   "intro.migratePrinciple": "Some appearance mods only work with one specific armor or helmet. Select the item the mod was made for, then choose the new target item. This tool will try to create a new patch that works with that target.",
   "intro.migrateWarning": "The converted mod is not guaranteed to work. Complex mods or mods that change several items may have missing parts, look wrong, or even crash the game after conversion. Keep the original patch and test the output in game.",

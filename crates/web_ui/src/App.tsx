@@ -1,3 +1,4 @@
+import AccountTreeIcon from "@mui/icons-material/AccountTree";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import GitHubIcon from "@mui/icons-material/GitHub";
 import { Button, CircularProgress, IconButton, Tab, Tabs, Tooltip } from "@mui/material";
@@ -276,7 +277,15 @@ function App() {
           {/* Panel title bar */}
           <div className="flex flex-col items-center border-b border-hd2-border bg-hd2-surface/70 px-4 py-5">
             <div className="flex w-full items-center gap-3">
-              <div className="w-[4.75rem] shrink-0 min-[35rem]:w-24" />
+              <Tooltip title={t("github.revision", { hash: __GIT_HASH__ })}>
+                <div
+                  aria-label={t("github.revision", { hash: __GIT_HASH__ })}
+                  className="flex w-[4.75rem] shrink-0 items-center gap-1 font-mono text-[0.625rem] tracking-wide text-hd2-faint min-[35rem]:w-24 min-[35rem]:text-[0.6875rem]"
+                >
+                  <AccountTreeIcon sx={{ fontSize: "0.875rem" }} />
+                  <span>{__GIT_HASH__}</span>
+                </div>
+              </Tooltip>
               <div className="flex min-w-0 flex-1 items-center justify-center gap-3">
               <img alt="" className="hidden min-[40rem]:block" draggable={false} src="/title.svg" style={{ height: "2rem", transform: "scaleX(-1)" }} />
               <h1 className="m-0 text-center text-lg font-bold text-hd2-yellow min-[35rem]:text-xl min-[51.25rem]:text-2xl">{t("app.title")}</h1>

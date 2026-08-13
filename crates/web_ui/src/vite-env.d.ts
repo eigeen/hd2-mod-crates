@@ -1,5 +1,7 @@
 /// <reference types="vite/client" />
 
+declare const __GIT_HASH__: string;
+
 // File System Access API：lib.dom 暂未涵盖权限方法、entries() 与 showDirectoryPicker
 // 因此在此处补全所需的最小类型表面，仅覆盖项目实际使用到的形态。
 interface FileSystemHandlePermissionDescriptor {
