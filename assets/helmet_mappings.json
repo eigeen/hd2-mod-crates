@@ -1,109 +1,323 @@
 {
-  "A-35 Recon": { "Helmet": 8662683021885766733 },
-  "A-9 Helljumper": { "Helmet": 15418518113916889238 },
-  "AC-1 Dutiful": { "Helmet": 321335359463830030 },
-  "AC-2 Obedient": { "Helmet": 3286421935347422185 },
-  "AD-11 Livewire": { "Helmet": 875166177103928158 },
-  "AD-26 Bleeding Edge": { "Helmet": 10445627675959038134 },
-  "AD-49 Apollonian": { "Helmet": 9975523152882285545 },
-  "AF-02 Haz-Master": { "Helmet": 4865030268636470400 },
-  "AF-50 Noxious Ranger": { "Helmet": 14490609863577937175 },
-  "AF-52 Lockdown": { "Helmet": 11406260482220867111 },
-  "AF-91 Field Chemist": { "Helmet": 14733069420597479532 },
-  "B-01 Tactical (Variation 1)": { "Helmet": 13556064353924354700 },
-  "B-01 Tactical (Variation 2)": { "Helmet": 8873186107497182744 },
-  "B-01 Tactical (Variation 3)": { "Helmet": 14514172405078426917 },
-  "B-01 Tactical (Variation 4)": { "Helmet": 8651754045361790910 },
-  "B-08 Light Gunner": { "Helmet": 4131421001356999706 },
-  "B-22 Model Citizen": { "Helmet": 13556064353924354700 },
-  "B-24 Enforcer": { "Helmet": 3954130796314399534 },
-  "B-27 Fortified Commando": { "Helmet": 8399161923851875572 },
-  "BP-20 Correct Officer": { "Helmet": 1626486170957620566 },
-  "BP-32 Jackboot": { "Helmet": 4169083875469264217 },
-  "BP-77 Grand Juror": { "Helmet": 16058210596544271905 },
-  "CE-07 Demolition Specialist": { "Helmet": 7744913445459795635 },
-  "CE-101 Guerilla Gorilla": { "Helmet": 8648711675149544067 },
-  "CE-27 Ground Breaker": { "Helmet": 11313096106785347680 },
-  "CE-35 Trench Engineer": { "Helmet": 7601348670501265665 },
-  "CE-64 Grenadier": { "Helmet": 8678656197582665224 },
-  "CE-67 Titan": { "Helmet": 7902265795160533902 },
-  "CE-74 Breaker": { "Helmet": 12730382597307458442 },
-  "CE-81 Juggernaut": { "Helmet": 13254993767511698164 },
-  "CM-09 Bonesnapper": { "Helmet": 16001723592336083491 },
-  "CM-10 Clinician": { "Helmet": 7808024526513152240 },
-  "CM-14 Physician": { "Helmet": 15819689819915417733 },
-  "CM-17 Butcher": { "Helmet": 10583934180552236525 },
-  "CM-21 Trench Paramedic": { "Helmet": 8382130788667610504 },
-  "CPG-48 Sapper": { "Helmet": 7057651244424989457 },
-  "CPH-26 Commandant": { "Helmet": 4935522424991749936 },
-  "CPR-80 Bulwark": { "Helmet": 15628900206856435498 },
-  "CW-22 Kodiak": { "Helmet": 6075028763446045879 },
-  "CW-36 Winter Warrior": { "Helmet": 7341024049703618466 },
-  "CW-4 Arctic Ranger": { "Helmet": 17438525524839299421 },
-  "CW-9 White Wolf": { "Helmet": 7876815139290439352 },
-  "DP-00 Tactical": { "Helmet": 8561217713380376446 },
-  "DP-11 Champion of the People": { "Helmet": 5252955854116479892 },
-  "DP-40 Hero of the Federation": { "Helmet": 3148179888321948003 },
-  "DP-53 Savior of the Free": { "Helmet": 17016371081593995329 },
-  "DP-8 Mountain-Scaled": { "Helmet": 5837388310570650004 },
-  "DS-10 Big Game Hunter": { "Helmet": 5853218845032405587 },
-  "DS-191 Scorpion": { "Helmet": 12553218768796819248 },
-  "DS-42 Federation's Blade": { "Helmet": 6726464881973151493 },
-  "EX-00 Prototype X": { "Helmet": 6469607965781156094 },
-  "EX-03 Prototype 3": { "Helmet": 3910569372330332832 },
-  "EX-16 Prototype 16": { "Helmet": 14676861962345020465 },
-  "FS-05 Marksman": { "Helmet": 18429449806859828280 },
-  "FS-11 Executioner": { "Helmet": 8379182691508484484 },
-  "FS-23 Battle Master / TR-62 Knight": { "Helmet": 10683583799272006843 },
-  "FS-34 Exterminator": { "Helmet": 862174694943184392 },
-  "FS-37 Ravager": { "Helmet": 5555255822099584608 },
-  "FS-38 Eradicator": { "Helmet": 9396741587218288497 },
-  "FS-55 Devastator": { "Helmet": 230434125355632415 },
-  "FS-61 Dreadnought": { "Helmet": 18435226424678019495 },
-  "GS-11 Democracy's Deputy": { "Helmet": 2920725188299623770 },
-  "GS-17 Frontier Marshall": { "Helmet": 14297126877334652644 },
-  "GS-66 Lawmaker": { "Helmet": 17551185999791963403 },
-  "I-09 Heatseeker": { "Helmet": 8374885877894426397 },
-  "I-102 Draconaught": { "Helmet": 4382571357012474472 },
-  "I-44 Salamander": { "Helmet": 18398362631942419217 },
-  "I-92 Fire Fighter": { "Helmet": 1089481995096327574 },
-  "IE-12 Righteous": { "Helmet": 4846801377118760762 },
-  "IE-3 Martyr": { "Helmet": 8035325190270545130 },
-  "IE-57 Hell-Bent": { "Helmet": 12941176804273243829 },
-  "O-2 Heavy Operator": { "Helmet": 17631317308600054692 },
-  "O-3 Free Spirit": { "Helmet": 9944632787246190059 },
-  "O-44 Bonded Pilot": { "Helmet": 362230160882931272 },
-  "PH-202 Twigsnapper": { "Helmet": 5574513890160481015 },
-  "PH-56 Jaguar": { "Helmet": 1619799062283423855 },
-  "PH-9 Predator": { "Helmet": 4541334684346792740 },
-  "RE-1861 Parade Commander": { "Helmet": 12758505377461713108 },
-  "RE-2310 Honorary Guard": { "Helmet": 12628959026638052995 },
-  "RE-824 Bearer of the Standard": { "Helmet": 6984202569693032508 },
-  "RS-100 Sanctioner": { "Helmet": 11586703162267525687 },
-  "RS-20 Constrictor": { "Helmet": 7673885235683731198 },
-  "RS-40 Beast of Prey": { "Helmet": 146597885254571637 },
-  "RS-6 Fiend Destroyer": { "Helmet": 10209554656734551868 },
-  "RS-67 Null Cipher": { "Helmet": 12041764276490687563 },
-  "RS-89 Shadow Paragon": { "Helmet": 5875036652163912175 },
-  "SA-04 Combat Technician": { "Helmet": 7648023769279353857 },
-  "SA-12 Servo-Assisted": { "Helmet": 6678011981787728539 },
-  "SA-25 Steel Trooper": { "Helmet": 9906437840165122024 },
-  "SA-32 Dynamo": { "Helmet": 13135626165718134923 },
-  "SA-7 Headfirst": { "Helmet": 8688149011154174433 },
-  "SA-8 Ram": { "Helmet": 6020974683820538325 },
-  "SC-15 Drone Master": { "Helmet": 9689159159731344788 },
-  "SC-30 Trailblazer Scout": { "Helmet": 7285925993452441626 },
-  "SC-34 Infiltrator": { "Helmet": 15567352184674080261 },
-  "SC-37 Legionnaire": { "Helmet": 2123465521732463246 },
-  "SR-18 Roadblock": { "Helmet": 2715776501221045608 },
-  "SR-24 Street Scout": { "Helmet": 13164148178108423800 },
-  "SR-64 Cinderblock": { "Helmet": 15652406647423938091 },
-  "TR-117 Alpha Commander": { "Helmet": 15819689819915417733 },
-  "TR-40 Gold Eagle": { "Helmet": 13556064353924354700 },
-  "TR-7 Ambassador of the Brand": { "Helmet": 13556064353924354700 },
-  "TR-9 Cavalier of Democracy": { "Helmet": 3148179888321948003 },
-  "UF-16 Inspector": { "Helmet": 2297438333961312338 },
-  "UF-50 Bloodhound": { "Helmet": 14733483563195715658 },
-  "TG-8 Sharpshooter": { "Helmet": 16686489699036771610 },
-  "TG-122 Demo-Trooper": { "Helmet": 13824941454287247048 }
+    "A-35 Recon": {
+        "Helmet": 8662683021885766733
+    },
+    "A-9 Helljumper": {
+        "Helmet": 15418518113916889238
+    },
+    "AC-1 Dutiful": {
+        "Helmet": 321335359463830030
+    },
+    "AC-2 Obedient": {
+        "Helmet": 3286421935347422185
+    },
+    "AD-11 Livewire": {
+        "Helmet": 875166177103928158
+    },
+    "AD-26 Bleeding Edge": {
+        "Helmet": 10445627675959038134
+    },
+    "AD-49 Apollonian": {
+        "Helmet": 9975523152882285545
+    },
+    "AF-02 Haz-Master": {
+        "Helmet": 4865030268636470400
+    },
+    "AF-50 Noxious Ranger": {
+        "Helmet": 14490609863577937175
+    },
+    "AF-52 Lockdown": {
+        "Helmet": 11406260482220867111
+    },
+    "AF-91 Field Chemist": {
+        "Helmet": 14733069420597479532
+    },
+    "B-01 Tactical (Variation 1)": {
+        "Helmet": 13556064353924354700
+    },
+    "B-01 Tactical (Variation 2)": {
+        "Helmet": 8873186107497182744
+    },
+    "B-01 Tactical (Variation 3)": {
+        "Helmet": 14514172405078426917
+    },
+    "B-01 Tactical (Variation 4)": {
+        "Helmet": 8651754045361790910
+    },
+    "B-08 Light Gunner": {
+        "Helmet": 4131421001356999706
+    },
+    "B-22 Model Citizen": {
+        "Helmet": 13556064353924354700
+    },
+    "B-24 Enforcer": {
+        "Helmet": 3954130796314399534
+    },
+    "B-27 Fortified Commando": {
+        "Helmet": 8399161923851875572
+    },
+    "BP-20 Correct Officer": {
+        "Helmet": 1626486170957620566
+    },
+    "BP-32 Jackboot": {
+        "Helmet": 4169083875469264217
+    },
+    "BP-77 Grand Juror": {
+        "Helmet": 16058210596544271905
+    },
+    "CE-07 Demolition Specialist": {
+        "Helmet": 7744913445459795635
+    },
+    "CE-101 Guerilla Gorilla": {
+        "Helmet": 8648711675149544067
+    },
+    "CE-27 Ground Breaker": {
+        "Helmet": 11313096106785347680
+    },
+    "CE-35 Trench Engineer": {
+        "Helmet": 7601348670501265665
+    },
+    "CE-64 Grenadier": {
+        "Helmet": 8678656197582665224
+    },
+    "CE-67 Titan": {
+        "Helmet": 7902265795160533902
+    },
+    "CE-74 Breaker": {
+        "Helmet": 12730382597307458442
+    },
+    "CE-81 Juggernaut": {
+        "Helmet": 13254993767511698164
+    },
+    "CM-09 Bonesnapper": {
+        "Helmet": 16001723592336083491
+    },
+    "CM-10 Clinician": {
+        "Helmet": 7808024526513152240
+    },
+    "CM-14 Physician": {
+        "Helmet": 15819689819915417733
+    },
+    "CM-17 Butcher": {
+        "Helmet": 10583934180552236525
+    },
+    "CM-21 Trench Paramedic": {
+        "Helmet": 8382130788667610504
+    },
+    "CPG-48 Sapper": {
+        "Helmet": 7057651244424989457
+    },
+    "CPH-26 Commandant": {
+        "Helmet": 4935522424991749936
+    },
+    "CPR-80 Bulwark": {
+        "Helmet": 15628900206856435498
+    },
+    "CW-22 Kodiak": {
+        "Helmet": 6075028763446045879
+    },
+    "CW-36 Winter Warrior": {
+        "Helmet": 7341024049703618466
+    },
+    "CW-4 Arctic Ranger": {
+        "Helmet": 17438525524839299421
+    },
+    "CW-9 White Wolf": {
+        "Helmet": 7876815139290439352
+    },
+    "DP-00 Tactical": {
+        "Helmet": 8561217713380376446
+    },
+    "DP-11 Champion of the People": {
+        "Helmet": 5252955854116479892
+    },
+    "DP-40 Hero of the Federation": {
+        "Helmet": 3148179888321948003
+    },
+    "DP-53 Savior of the Free": {
+        "Helmet": 17016371081593995329
+    },
+    "DP-8 Mountain-Scaled": {
+        "Helmet": 5837388310570650004
+    },
+    "DS-10 Big Game Hunter": {
+        "Helmet": 5853218845032405587
+    },
+    "DS-191 Scorpion": {
+        "Helmet": 12553218768796819248
+    },
+    "DS-42 Federation's Blade": {
+        "Helmet": 6726464881973151493
+    },
+    "EX-00 Prototype X": {
+        "Helmet": 6469607965781156094
+    },
+    "EX-03 Prototype 3": {
+        "Helmet": 3910569372330332832
+    },
+    "EX-16 Prototype 16": {
+        "Helmet": 14676861962345020465
+    },
+    "FS-05 Marksman": {
+        "Helmet": 18429449806859828280
+    },
+    "FS-11 Executioner": {
+        "Helmet": 8379182691508484484
+    },
+    "FS-23 Battle Master / TR-62 Knight": {
+        "Helmet": 10683583799272006843
+    },
+    "FS-34 Exterminator": {
+        "Helmet": 862174694943184392
+    },
+    "FS-37 Ravager": {
+        "Helmet": 5555255822099584608
+    },
+    "FS-38 Eradicator": {
+        "Helmet": 9396741587218288497
+    },
+    "FS-55 Devastator": {
+        "Helmet": 230434125355632415
+    },
+    "FS-61 Dreadnought": {
+        "Helmet": 18435226424678019495
+    },
+    "GS-11 Democracy's Deputy": {
+        "Helmet": 2920725188299623770
+    },
+    "GS-17 Frontier Marshall": {
+        "Helmet": 14297126877334652644
+    },
+    "GS-66 Lawmaker": {
+        "Helmet": 17551185999791963403
+    },
+    "I-09 Heatseeker": {
+        "Helmet": 8374885877894426397
+    },
+    "I-102 Draconaught": {
+        "Helmet": 4382571357012474472
+    },
+    "I-44 Salamander": {
+        "Helmet": 18398362631942419217
+    },
+    "I-92 Fire Fighter": {
+        "Helmet": 1089481995096327574
+    },
+    "IE-12 Righteous": {
+        "Helmet": 4846801377118760762
+    },
+    "IE-3 Martyr": {
+        "Helmet": 8035325190270545130
+    },
+    "IE-57 Hell-Bent": {
+        "Helmet": 12941176804273243829
+    },
+    "O-2 Heavy Operator": {
+        "Helmet": 17631317308600054692
+    },
+    "O-3 Free Spirit": {
+        "Helmet": 9944632787246190059
+    },
+    "O-44 Bonded Pilot": {
+        "Helmet": 362230160882931272
+    },
+    "PH-202 Twigsnapper": {
+        "Helmet": 5574513890160481015
+    },
+    "PH-56 Jaguar": {
+        "Helmet": 1619799062283423855
+    },
+    "PH-9 Predator": {
+        "Helmet": 4541334684346792740
+    },
+    "RE-1861 Parade Commander": {
+        "Helmet": 12758505377461713108
+    },
+    "RE-2310 Honorary Guard": {
+        "Helmet": 12628959026638052995
+    },
+    "RE-824 Bearer of the Standard": {
+        "Helmet": 6984202569693032508
+    },
+    "RS-100 Sanctioner": {
+        "Helmet": 11586703162267525687
+    },
+    "RS-20 Constrictor": {
+        "Helmet": 7673885235683731198
+    },
+    "RS-40 Beast of Prey": {
+        "Helmet": 146597885254571637
+    },
+    "RS-6 Fiend Destroyer": {
+        "Helmet": 10209554656734551868
+    },
+    "RS-67 Null Cipher": {
+        "Helmet": 12041764276490687563
+    },
+    "RS-89 Shadow Paragon": {
+        "Helmet": 5875036652163912175
+    },
+    "SA-04 Combat Technician": {
+        "Helmet": 7648023769279353857
+    },
+    "SA-12 Servo-Assisted": {
+        "Helmet": 6678011981787728539
+    },
+    "SA-25 Steel Trooper": {
+        "Helmet": 9906437840165122024
+    },
+    "SA-32 Dynamo": {
+        "Helmet": 13135626165718134923
+    },
+    "SA-7 Headfirst": {
+        "Helmet": 8688149011154174433
+    },
+    "SA-8 Ram": {
+        "Helmet": 6020974683820538325
+    },
+    "SC-15 Drone Master": {
+        "Helmet": 9689159159731344788
+    },
+    "SC-30 Trailblazer Scout": {
+        "Helmet": 7285925993452441626
+    },
+    "SC-34 Infiltrator": {
+        "Helmet": 15567352184674080261
+    },
+    "SC-37 Legionnaire": {
+        "Helmet": 2123465521732463246
+    },
+    "SR-18 Roadblock": {
+        "Helmet": 2715776501221045608
+    },
+    "SR-24 Street Scout": {
+        "Helmet": 13164148178108423800
+    },
+    "SR-64 Cinderblock": {
+        "Helmet": 15652406647423938091
+    },
+    "TR-117 Alpha Commander": {
+        "Helmet": 15819689819915417733
+    },
+    "TR-40 Gold Eagle": {
+        "Helmet": 13556064353924354700
+    },
+    "TR-7 Ambassador of the Brand": {
+        "Helmet": 13556064353924354700
+    },
+    "TR-9 Cavalier of Democracy": {
+        "Helmet": 3148179888321948003
+    },
+    "UF-16 Inspector": {
+        "Helmet": 2297438333961312338
+    },
+    "UF-50 Bloodhound": {
+        "Helmet": 14733483563195715658
+    },
+    "TG-122 Demo-Trooper": {
+        "Helmet": 16686489699036771610
+    },
+    "TG-8 Sharpshooter": {
+        "Helmet": 13824941454287247048
+    }
 }
