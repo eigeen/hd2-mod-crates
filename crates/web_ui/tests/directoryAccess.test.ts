@@ -1,5 +1,15 @@
 import { expect, test } from "bun:test";
-import { droppedGameDirectory, isFileSystemAbort } from "../src/directoryAccess";
+import {
+  droppedGameDirectory,
+  isDirectoryAccessSupported,
+  isFileSystemAbort,
+} from "../src/directoryAccess";
+
+test("detects whether the directory picker API is callable", () => {
+  expect(isDirectoryAccessSupported(undefined)).toBeFalse();
+  expect(isDirectoryAccessSupported({ showDirectoryPicker: undefined })).toBeFalse();
+  expect(isDirectoryAccessSupported({ showDirectoryPicker: async () => ({}) })).toBeTrue();
+});
 
 test("extracts a dragged directory after ignoring non-directory items", async () => {
   const directory = handle("directory", "data") as FileSystemDirectoryHandle;

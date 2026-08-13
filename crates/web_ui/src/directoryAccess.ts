@@ -13,9 +13,19 @@ export interface GameDirStatus {
   hasBundleToc: boolean;
 }
 
-// 仅在支持 File System Access API 的 Chromium 浏览器中可用。
-export function isDirectoryAccessSupported(): boolean {
-  return typeof window !== "undefined" && "showDirectoryPicker" in window;
+interface DirectoryPickerEnvironment {
+  showDirectoryPicker?: unknown;
+}
+
+// 仅在浏览器真正提供目录选择器时启用直接文件系统访问。
+export function isDirectoryAccessSupported(
+  environment: DirectoryPickerEnvironment | undefined = currentBrowserEnvironment(),
+): boolean {
+  return typeof environment?.showDirectoryPicker === "function";
+}
+
+function currentBrowserEnvironment(): DirectoryPickerEnvironment | undefined {
+  return typeof window === "undefined" ? undefined : window;
 }
 
 // 弹出系统目录选择器。

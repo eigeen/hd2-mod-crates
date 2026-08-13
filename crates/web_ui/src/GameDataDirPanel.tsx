@@ -176,19 +176,19 @@ function Body({ busy, dragging, onForget, onPick, state }: BodyProps) {
           <code className="bg-hd2-ink px-1 py-0.5">data</code>{" "}
           {t("gameData.descriptionSuffix")}
         </p>
-        <p className={`m-0 border border-dashed px-3 py-2 ${dragging ? "border-hd2-yellow text-hd2-yellow" : "border-hd2-line"}`}>
-          {dragging ? t("gameData.dropActive") : t("gameData.dropHint")}
-        </p>
         <div>
           <Button
             disabled={busy}
             onClick={onPick}
             startIcon={<FolderOpenIcon />}
-          variant="contained"
-        >
+            variant="contained"
+          >
             {t("gameData.pick")}
           </Button>
         </div>
+        <p className={`m-0 border border-dashed px-3 py-2 ${dragging ? "border-hd2-yellow text-hd2-yellow" : "border-hd2-line"}`}>
+          {dragging ? t("gameData.dropActive") : t("gameData.dropHint")}
+        </p>
       </div>
     );
   }
