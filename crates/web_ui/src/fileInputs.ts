@@ -19,6 +19,7 @@ export interface PatchFileMessages {
 export async function patchFilesFromList(
   files: FileList | File[],
   messages: PatchFileMessages,
+  originalName?: string,
 ) {
   const values = Array.from(files);
   const toc = values.find(isTocFile);
@@ -32,6 +33,7 @@ export async function patchFilesFromList(
   const streamBytes = streamFile ? await fileBytes(streamFile) : new Uint8Array();
   const patch: PatchFiles = {
     name: toc.name,
+    originalName: originalName ?? originalNameFromRelativePath(toc),
     toc: tocBytes,
     gpu: gpuBytes,
     stream: streamBytes,
@@ -42,6 +44,11 @@ export async function patchFilesFromList(
     messages,
   });
   return patch;
+}
+
+function originalNameFromRelativePath(file: File): string | undefined {
+  const [root, child] = file.webkitRelativePath.split(/[\\/]/);
+  return root && child ? root : undefined;
 }
 
 // 校验已加载的 PatchFiles 是否满足 TOC 引用的 sidecar 尺寸；任何路径加载后都应调用。

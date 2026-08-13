@@ -6,8 +6,6 @@ import HelpOutlineIcon from "@mui/icons-material/HelpOutlined";
 import SearchIcon from "@mui/icons-material/Search";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
-import ShieldOutlinedIcon from "@mui/icons-material/ShieldOutlined";
-import SportsMotorsportsOutlinedIcon from "@mui/icons-material/SportsMotorsportsOutlined";
 import {
   Button,
   Checkbox,
@@ -34,6 +32,8 @@ import type {
   PatchInfo,
   UnmatchedUnitPolicy,
 } from "./types";
+import { EquipmentCategoryIcon } from "./EquipmentCategoryIcon";
+import { patchSelectionFromDrop } from "./patchSelection";
 import { useDropZone } from "./useDropZone";
 
 const panelClass = "overflow-hidden";
@@ -43,13 +43,16 @@ const metaLineClass =
 
 interface PatchPanelProps {
   patch: PatchInfo | null;
-  onPatchFiles: (files: FileList | null) => void;
+  onPatchFiles: (files: FileList | File[] | null, originalName?: string) => void;
 }
 
 export function PatchPanel(props: PatchPanelProps) {
   const { t } = useI18n();
   const receiveDrop = useCallback(
-    (dataTransfer: DataTransfer) => props.onPatchFiles(dataTransfer.files),
+    async (dataTransfer: DataTransfer) => {
+      const selection = await patchSelectionFromDrop(dataTransfer);
+      props.onPatchFiles(selection.files, selection.originalName);
+    },
     [props.onPatchFiles],
   );
   const dropZone = useDropZone(receiveDrop);
@@ -342,9 +345,7 @@ function SourceChoice(props: SourceChoiceProps) {
 
 function EquipmentIcon({ category }: { category: EquipmentCategory }) {
   const className = "shrink-0 text-hd2-faint";
-  return category === "Armor"
-    ? <ShieldOutlinedIcon className={className} fontSize="small" />
-    : <SportsMotorsportsOutlinedIcon className={className} fontSize="small" />;
+  return <EquipmentCategoryIcon category={category} className={className} fontSize="small" />;
 }
 
 function EmptyMapping({ icon, text }: { icon: ReactNode; text: string }) {

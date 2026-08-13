@@ -42,3 +42,10 @@ export function targetsForSource(
 export function multiTargetEligible(sources: DetectedSource[]): boolean {
   return sources.length === 1 && Boolean(sources[0]?.resolvedHash);
 }
+
+export function selectTarget(values: string[], hash: string, multiTarget: boolean): string[] {
+  if (!multiTarget) {
+    return values.includes(hash) ? [] : [hash];
+  }
+  return values.includes(hash) ? values.filter((value) => value !== hash) : [...values, hash];
+}

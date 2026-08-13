@@ -3,6 +3,7 @@ import {
   buildMigrationVariants,
   configuredMappings,
   multiTargetEligible,
+  selectTarget,
   targetsForSource,
 } from "../src/migrationMappings";
 import type { DetectedSource, EquipmentOption } from "../src/types";
@@ -28,6 +29,11 @@ describe("unified migration mapping state", () => {
       targetHash: armorTarget.hash,
     }]);
     expect(buildMigrationVariants(mappings, false)).toEqual([{ mappings }]);
+  });
+
+  test("cancels a single target by selecting it again", () => {
+    expect(selectTarget([armorTarget.hash], armorTarget.hash, false)).toEqual([]);
+    expect(selectTarget([], armorTarget.hash, false)).toEqual([armorTarget.hash]);
   });
 
   test("expands one source with multiple targets into independent variants", () => {

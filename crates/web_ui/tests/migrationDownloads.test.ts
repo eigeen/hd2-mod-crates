@@ -40,19 +40,24 @@ test("splits the measured 151 MiB patch into safe three-variant batches", () => 
 });
 
 describe("batchZipFilename", () => {
-  test("keeps the readable single-target filename", () => {
+  test("combines the original and target names for one output", () => {
     const [batch] = planMigrationBatches([targets[1].hash], 50 * MIB);
-    expect(batchZipFilename(batch, targets)).toBe("hd2-patch-Target_1.zip");
+    expect(batchZipFilename(batch, targets, "Original Mod")).toBe("Original Mod_Target_1.zip");
+  });
+
+  test("sanitizes package names and removes an existing zip suffix", () => {
+    const [batch] = planMigrationBatches([targets[1].hash], 50 * MIB);
+    expect(batchZipFilename(batch, targets, "Original:Mod.zip")).toBe("Original_Mod_Target_1.zip");
   });
 
   test("uses the combined filename when every target fits one batch", () => {
     const [batch] = planMigrationBatches(targets.slice(0, 2).map((target) => target.hash), 50 * MIB);
-    expect(batchZipFilename(batch, targets)).toBe("hd2-migrated-patch.zip");
+    expect(batchZipFilename(batch, targets, "Original Mod")).toBe("hd2-migrated-patch.zip");
   });
 
   test("numbers output batches rather than individual targets", () => {
     const batches = planMigrationBatches(targets.slice(0, 5).map((target) => target.hash), 256 * MIB);
-    expect(batches.map((batch) => batchZipFilename(batch, targets))).toEqual([
+    expect(batches.map((batch) => batchZipFilename(batch, targets, "Original Mod"))).toEqual([
       "hd2-patch-part-001-of-003.zip",
       "hd2-patch-part-002-of-003.zip",
       "hd2-patch-part-003-of-003.zip",
@@ -65,6 +70,7 @@ test("migrates, downloads, and summarizes batches sequentially", async () => {
   const hashes = targets.slice(0, 5).map((target) => target.hash);
   const summary = await migrateTargetsToBatchDownloads({
     patchByteLength: 256 * MIB,
+    sourceName: "Original Mod",
     targetHashes: hashes,
     targets,
     migrateBatch: async (batch) => {

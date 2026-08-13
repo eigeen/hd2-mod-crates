@@ -91,7 +91,7 @@ export const en = {
   "options.noPadding": "Disable Padding",
   "options.noPaddingHelp": "Do not fill target-only unit slots with empty mesh templates. Missing target parts may look wrong; recommended for debugging only.",
   "options.unmatchedUnits": "How to handle other content",
-  "options.unmatchedDrop": "Discard unknown Units (recommended)",
+  "options.unmatchedDrop": "Discard unknown Units",
   "options.unmatchedKeep": "Keep unknown Units",
   "options.unmatchedUnitsHelp": "Sources without a target and unrecognized content follow this option. “Discard unknown Units” keeps only successfully converted equipment. “Keep unknown Units” copies everything else unchanged without converting it.",
   "performance.title": "Multi-target",

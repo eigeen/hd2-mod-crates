@@ -18,6 +18,7 @@ export interface MigrationBatch {
 
 export interface BatchedMigrationRequest {
   patchByteLength: number;
+  sourceName: string;
   targetHashes: string[];
   targets: TargetOption[];
   migrateBatch: (batch: MigrationBatch) => Promise<MigrationResult>;
@@ -32,7 +33,10 @@ export async function migrateTargetsToBatchDownloads(
   let summary = emptyMigrationSummary();
   for (const batch of batches) {
     const result = await request.migrateBatch(batch);
-    request.download(result.zipBytes, batchZipFilename(batch, request.targets));
+    request.download(
+      result.zipBytes,
+      batchZipFilename(batch, request.targets, request.sourceName),
+    );
     summary = appendMigrationSummary(summary, result.summary);
   }
   return summary;
@@ -63,9 +67,13 @@ export function planMigrationBatches(
   });
 }
 
-export function batchZipFilename(batch: MigrationBatch, targets: TargetOption[]): string {
+export function batchZipFilename(
+  batch: MigrationBatch,
+  targets: TargetOption[],
+  sourceName: string,
+): string {
   if (batch.targetCount === 1) {
-    return singleTargetFilename(batch.targetHashes[0], targets);
+    return uniqueOutputFilename(sourceName, batch.targetHashes[0], targets);
   }
   if (batch.batchCount === 1) return "hd2-migrated-patch.zip";
   const current = paddedBatchNumber(batch.batchIndex + 1, batch.batchCount);
@@ -73,10 +81,15 @@ export function batchZipFilename(batch: MigrationBatch, targets: TargetOption[])
   return `hd2-patch-part-${current}-of-${total}.zip`;
 }
 
-function singleTargetFilename(targetHash: string, targets: TargetOption[]): string {
+export function uniqueOutputFilename(
+  sourceName: string,
+  targetHash: string,
+  targets: TargetOption[],
+): string {
   const target = targets.find((candidate) => candidate.hash === targetHash);
+  const sourceLabel = sanitizeFilenameSegment(sourceName.replace(/\.zip$/i, ""));
   const targetLabel = sanitizeFilenameSegment(target?.name ?? targetHash);
-  return `hd2-patch-${targetLabel}.zip`;
+  return `${sourceLabel}_${targetLabel}.zip`;
 }
 
 function paddedBatchNumber(value: number, batchCount: number): string {

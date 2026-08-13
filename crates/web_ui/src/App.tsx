@@ -13,11 +13,13 @@ import { LanguageMenu } from "./LanguageMenu";
 import {
   migrateTargetsToBatchDownloads,
   type MigrationBatch,
+  uniqueOutputFilename,
 } from "./migrationDownloads";
 import {
   buildMigrationVariants,
   configuredMappings as collectConfiguredMappings,
   multiTargetEligible as canUseMultiTarget,
+  selectTarget,
   targetsForSource,
 } from "./migrationMappings";
 import {
@@ -64,7 +66,7 @@ function App() {
   const [targetsBySource, setTargetsBySource] = useState<Record<string, string[]>>({});
   const [multiTarget, setMultiTarget] = useState(false);
   const [noPadding, setNoPadding] = useState(false);
-  const [unmatchedUnitPolicy, setUnmatchedUnitPolicy] = useState<UnmatchedUnitPolicy>("drop");
+  const [unmatchedUnitPolicy, setUnmatchedUnitPolicy] = useState<UnmatchedUnitPolicy>("keep");
   const [busy, setBusy] = useState(false);
   const [progressLabel, setProgressLabel] = useState("");
   const [warningOpen, setWarningOpen] = useState(false);
@@ -139,10 +141,10 @@ function App() {
   }, [gameDir]);
 
   const importPatchFiles = useCallback(
-    async (files: FileList | null) => {
+    async (files: FileList | File[] | null, originalName?: string) => {
       if (!files) return;
       await runTask(setBusy, async () => {
-        const nextPatch = await patchFilesFromList(files, patchMessages);
+        const nextPatch = await patchFilesFromList(files, patchMessages, originalName);
         await applyPatch(nextPatch);
       });
     },
@@ -178,13 +180,9 @@ function App() {
   const chooseTarget = useCallback(
     (hash: string) => {
       if (!activeSource) return;
-      if (!multiTarget) {
-        setTargetsBySource((current) => ({ ...current, [activeSource.id]: [hash] }));
-        return;
-      }
       setTargetsBySource((current) => ({
         ...current,
-        [activeSource.id]: toggleHash(current[activeSource.id] ?? [], hash),
+        [activeSource.id]: selectTarget(current[activeSource.id] ?? [], hash, multiTarget),
       }));
     },
     [activeSource, multiTarget],
@@ -433,6 +431,7 @@ async function migrateSingleSourceVariants(
   const targetHashes = request.mappings.map((mapping) => mapping.targetHash);
   return migrateTargetsToBatchDownloads({
     patchByteLength: patchByteLength(request.patch),
+    sourceName: request.patch.originalName ?? request.patch.name,
     targetHashes,
     targets: request.options,
     migrateBatch: (batch) => {
@@ -477,8 +476,25 @@ async function migrateCombinedVariant(
       request.t,
     ),
   );
-  downloadZip(result.zipBytes, "hd2-migrated-patch.zip");
+  downloadZip(
+    result.zipBytes,
+    combinedOutputFilename(request.patch, request.variant, request.options),
+  );
   return result.summary;
+}
+
+function combinedOutputFilename(
+  patch: PatchFiles,
+  variant: MigrationVariant,
+  options: EquipmentOption[],
+): string {
+  const mapping = variant.mappings.length === 1 ? variant.mappings[0] : undefined;
+  if (!mapping) return "hd2-migrated-patch.zip";
+  return uniqueOutputFilename(
+    patch.originalName ?? patch.name,
+    mapping.targetHash,
+    options,
+  );
 }
 
 function unifiedOptions(
@@ -567,10 +583,6 @@ function showUnitRepatchReport(summary: UnitRepatchSummary, t: Translate): void 
   toast.success(t("repatch.reportTitle"), options);
 }
 
-function toggleHash(values: string[], hash: string) {
-  if (values.includes(hash)) return values.filter((v) => v !== hash);
-  return [...values, hash];
-}
 
 async function runTask(
   setBusy: (value: boolean) => void,

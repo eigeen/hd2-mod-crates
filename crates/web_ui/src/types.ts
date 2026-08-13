@@ -24,6 +24,7 @@ export interface DetectedSource {
 
 export interface PatchFiles {
   name: string;
+  originalName?: string;
   toc: Uint8Array;
   gpu: Uint8Array;
   stream: Uint8Array;

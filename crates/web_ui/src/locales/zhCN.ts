@@ -91,7 +91,7 @@ export const zhCN = {
   "options.noPadding": "禁用填充",
   "options.noPaddingHelp": "不在仅目标版本存在的 Unit 槽位中填充空网格模板。可能导致目标缺失部件出现异常，仅在调试时建议启用。",
   "options.unmatchedUnits": "其他内容如何处理",
-  "options.unmatchedDrop": "丢弃未知 Unit（推荐）",
+  "options.unmatchedDrop": "丢弃未知 Unit",
   "options.unmatchedKeep": "保留未知 Unit",
   "options.unmatchedUnitsHelp": "未配置目标的来源或无法识别的内容会按此选项处理。“丢弃未知 Unit”只留下已成功转换的装备；“保留未知 Unit”会把其余内容原样放进输出文件，但不会转换它们。",
   "performance.title": "多目标",

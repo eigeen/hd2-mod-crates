@@ -19,8 +19,8 @@ pub const DEFAULT_PATCH_SUFFIX: &str = "9ba626afa44a3aa3.patch_0";
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum UnmatchedUnitPolicy {
-    #[default]
     Drop,
+    #[default]
     Keep,
 }
 
