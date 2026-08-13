@@ -29,6 +29,8 @@ export const en = {
   "report.padded": "Padded {{count}}",
   "report.skipped": "Skipped {{count}}",
   "report.warnings": "⚠ {{count}} warnings",
+  "downloads.multipleTitle": "{{count}} files will be downloaded",
+  "downloads.multipleDescription": "Your browser may block the second and later files. If a permission prompt or blocked-download icon appears, allow multiple downloads or some converted results will be missing.",
   "repatch.settings": "Update options",
   "repatch.missingPolicy": "Units missing from the current game",
   "repatch.missingDrop": "Remove from output (recommended)",

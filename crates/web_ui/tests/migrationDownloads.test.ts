@@ -89,12 +89,14 @@ test("migrates, downloads, and summarizes batches sequentially", async () => {
       events.push(`finish:${batch.targetHashes.join(",")}`);
       return migrationResult(batch.targetHashes);
     },
+    onMultipleDownloads: (downloadCount) => events.push(`multiple:${downloadCount}`),
     download: (_bytes, filename) => events.push(`download:${filename}`),
   });
 
   expect(events).toEqual([
     "start:hash-0,hash-1",
     "finish:hash-0,hash-1",
+    "multiple:3",
     "download:hd2-patch-part-001-of-003.zip",
     "start:hash-2,hash-3",
     "finish:hash-2,hash-3",
@@ -110,6 +112,7 @@ test("migrates, downloads, and summarizes batches sequentially", async () => {
 
 test("migrates combined variants in numbered memory-bounded batches", async () => {
   const downloads: string[] = [];
+  const multipleDownloadNotices: number[] = [];
   const variants = makeVariants(5);
   const summary = await migrateVariantsToBatchDownloads({
     patchByteLength: 256 * MIB,
@@ -117,6 +120,7 @@ test("migrates combined variants in numbered memory-bounded batches", async () =
     migrateBatch: async (batch) => migrationResult(
       batch.variants.map((variant) => variant.mappings[0].targetHash),
     ),
+    onMultipleDownloads: (downloadCount) => multipleDownloadNotices.push(downloadCount),
     download: (_bytes, filename) => downloads.push(filename),
   });
 
@@ -125,7 +129,23 @@ test("migrates combined variants in numbered memory-bounded batches", async () =
     "hd2-patch-part-002-of-003.zip",
     "hd2-patch-part-003-of-003.zip",
   ]);
+  expect(multipleDownloadNotices).toEqual([3]);
   expect(summary.migratedCount).toBe(5);
+});
+
+test("does not show a multiple-download notice for one output file", async () => {
+  const multipleDownloadNotices: number[] = [];
+  const variants = makeVariants(1);
+
+  await migrateVariantsToBatchDownloads({
+    patchByteLength: 25 * MIB,
+    variants,
+    migrateBatch: async () => migrationResult([variants[0].mappings[0].targetHash]),
+    onMultipleDownloads: (downloadCount) => multipleDownloadNotices.push(downloadCount),
+    download: () => undefined,
+  });
+
+  expect(multipleDownloadNotices).toEqual([]);
 });
 
 function makeTargets(count: number): TargetOption[] {

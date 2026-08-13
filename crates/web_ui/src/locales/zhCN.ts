@@ -29,6 +29,8 @@ export const zhCN = {
   "report.padded": "填充 {{count}}",
   "report.skipped": "跳过 {{count}}",
   "report.warnings": "⚠ {{count}} 警告",
+  "downloads.multipleTitle": "即将下载 {{count}} 个文件",
+  "downloads.multipleDescription": "浏览器可能拦截第 2 个及后续文件。出现权限提示或地址栏下载拦截图标时，请选择“允许多个文件下载”，否则部分转换结果会遗漏。",
   "repatch.settings": "更新选项",
   "repatch.missingPolicy": "当前游戏中已不存在的 Unit",
   "repatch.missingDrop": "从输出移除（推荐）",

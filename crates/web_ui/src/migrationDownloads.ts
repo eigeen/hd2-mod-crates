@@ -24,6 +24,7 @@ export interface BatchedMigrationRequest {
   targets: TargetOption[];
   migrateBatch: (batch: MigrationBatch) => Promise<MigrationResult>;
   download: (bytes: Uint8Array, filename: string) => void;
+  onMultipleDownloads?: (downloadCount: number) => void;
 }
 
 export interface MigrationVariantBatch {
@@ -39,6 +40,7 @@ interface BatchedVariantMigrationRequest {
   variants: MigrationVariant[];
   migrateBatch: (batch: MigrationVariantBatch) => Promise<MigrationResult>;
   download: (bytes: Uint8Array, filename: string) => void;
+  onMultipleDownloads?: (downloadCount: number) => void;
 }
 
 /** Migrate targets in memory-bounded batches and download each completed ZIP immediately. */
@@ -49,6 +51,7 @@ export async function migrateTargetsToBatchDownloads(
   let summary = emptyMigrationSummary();
   for (const batch of batches) {
     const result = await request.migrateBatch(batch);
+    notifyMultipleDownloads(request.onMultipleDownloads, batch.batchCount, batch.batchIndex);
     request.download(
       result.zipBytes,
       batchZipFilename(batch, request.targets, request.sourceName),
@@ -66,10 +69,19 @@ export async function migrateVariantsToBatchDownloads(
   let summary = emptyMigrationSummary();
   for (const batch of batches) {
     const result = await request.migrateBatch(batch);
+    notifyMultipleDownloads(request.onMultipleDownloads, batch.batchCount, batch.batchIndex);
     request.download(result.zipBytes, variantBatchFilename(batch));
     summary = appendMigrationSummary(summary, result.summary);
   }
   return summary;
+}
+
+function notifyMultipleDownloads(
+  notify: ((downloadCount: number) => void) | undefined,
+  downloadCount: number,
+  downloadIndex: number,
+): void {
+  if (downloadIndex === 0 && downloadCount > 1) notify?.(downloadCount);
 }
 
 /** Limit each batch to 512 MiB of source-size-equivalent work and at most 20 variants. */

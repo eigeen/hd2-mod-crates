@@ -27,6 +27,8 @@ export const translationKeys = [
   "report.padded",
   "report.skipped",
   "report.warnings",
+  "downloads.multipleTitle",
+  "downloads.multipleDescription",
   "repatch.settings",
   "repatch.missingPolicy",
   "repatch.missingDrop",

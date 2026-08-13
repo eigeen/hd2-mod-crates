@@ -198,10 +198,6 @@ function App() {
     const patch = patchRef.current;
     if (!patch) return;
     const variants = buildMigrationVariants(configuredMappings);
-    if (multiTarget && variants.length > 1 && !multiConfirmed) {
-      setWarningOpen(true);
-      return;
-    }
     if (!gameDir) return;
     const dataSource = new GameDataSource(gameDir.handle);
     setProgressLabel("");
@@ -234,8 +230,6 @@ function App() {
     gameDir,
     configuredMappings,
     equipmentOptions,
-    multiConfirmed,
-    multiTarget,
     noPadding,
     t,
     unmatchedUnitPolicy,
@@ -351,27 +345,43 @@ function App() {
           </div>
 
           {/* Action row: options + blocker hint + execute */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-hd2-border bg-hd2-pit px-5 py-3">
-            {toolMode === "migrate" && <OptionsPanel
-              noPadding={noPadding}
-              setNoPadding={setNoPadding}
-              setUnmatchedUnitPolicy={setUnmatchedUnitPolicy}
-              unmatchedUnitPolicy={unmatchedUnitPolicy}
-            />}
-            <div className="flex-1" />
-            {busy && <CircularProgress size="1.25rem" />}
-            {busy && progressLabel
-              ? <span className="text-xs text-hd2-muted">{progressLabel}</span>
-              : !canRun && <span className="text-xs text-hd2-muted">{blockerHint}</span>
-            }
-            <Button
-              disabled={!canRun || busy}
-              onClick={runSelectedTool}
-              startIcon={<PlayArrowIcon />}
-              variant="contained"
-            >
-              {toolMode === "migrate" ? t("app.run") : t("repatch.run")}
-            </Button>
+          <div className="flex flex-col items-stretch gap-3 border-t border-hd2-border bg-hd2-pit px-5 py-3 min-[51.25rem]:flex-row min-[51.25rem]:items-center min-[51.25rem]:gap-4">
+            {toolMode === "migrate" && (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 min-[51.25rem]:shrink-0">
+                <OptionsPanel
+                  noPadding={noPadding}
+                  setNoPadding={setNoPadding}
+                  setUnmatchedUnitPolicy={setUnmatchedUnitPolicy}
+                  unmatchedUnitPolicy={unmatchedUnitPolicy}
+                />
+              </div>
+            )}
+            <div className="flex min-w-0 flex-1 items-center gap-4">
+              <div
+                aria-atomic="true"
+                aria-live="polite"
+                className="flex min-w-0 flex-1 items-center justify-end gap-2"
+              >
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                  {busy && <CircularProgress size="1.25rem" />}
+                </span>
+                <span
+                  className="min-w-0 truncate text-xs text-hd2-muted"
+                  title={busy ? progressLabel : blockerHint}
+                >
+                  {busy ? progressLabel : blockerHint}
+                </span>
+              </div>
+              <Button
+                className="shrink-0"
+                disabled={!canRun || busy}
+                onClick={runSelectedTool}
+                startIcon={<PlayArrowIcon />}
+                variant="contained"
+              >
+                {toolMode === "migrate" ? t("app.run") : t("repatch.run")}
+              </Button>
+            </div>
           </div>
         </div>
         <FrequentlyAskedQuestions
@@ -431,6 +441,7 @@ async function migrateVariantBatches(
   return migrateVariantsToBatchDownloads({
     patchByteLength: patchByteLength(request.patch),
     variants: request.variants,
+    onMultipleDownloads: (downloadCount) => showMultipleDownloadsWarning(downloadCount, request.t),
     migrateBatch: (batch) => {
       const mappings = batch.variants.flatMap((variant) => variant.mappings);
       return migrateEquipmentVariants(
@@ -555,6 +566,14 @@ function showMigrationReport(summary: MigrationSummary, t: Translate): void {
   } else {
     toast.success(title, { description, duration: 6000 });
   }
+}
+
+function showMultipleDownloadsWarning(downloadCount: number, t: Translate): void {
+  toast.warning(t("downloads.multipleTitle", { count: downloadCount }), {
+    closeButton: true,
+    description: t("downloads.multipleDescription"),
+    duration: Infinity,
+  });
 }
 
 function showUnitRepatchReport(summary: UnitRepatchSummary, t: Translate): void {

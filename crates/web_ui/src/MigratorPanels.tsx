@@ -370,13 +370,14 @@ export const OptionsPanel = memo(function OptionsPanel(props: OptionsPanelProps)
   return (
     <>
       <FormControlLabel
-        className="optionsControl"
+        className="optionsControl shrink-0"
         control={<Checkbox checked={props.noPadding} onChange={(event) => props.setNoPadding(event.target.checked)} />}
         label={t("options.noPadding")}
       />
       <HelpHint title={t("options.noPaddingHelp")} />
-      <span className="text-xs text-hd2-muted">{t("options.unmatchedUnits")}</span>
+      <span className="shrink-0 whitespace-nowrap text-xs text-hd2-muted">{t("options.unmatchedUnits")}</span>
       <ToggleButtonGroup
+        className="shrink-0"
         exclusive
         onChange={(_, value: UnmatchedUnitPolicy | null) => {
           if (value) props.setUnmatchedUnitPolicy(value);
@@ -467,7 +468,7 @@ function QuickSelectMenu({ multiTarget, filteredTargets, onBatchSelect, selected
 function HelpHint({ title }: { title: string }) {
   return (
     <Tooltip arrow title={title} placement="top">
-      <HelpOutlineIcon className="cursor-help text-hd2-faint hover:text-hd2-yellow" sx={{ fontSize: "1rem" }} />
+      <HelpOutlineIcon className="shrink-0 cursor-help text-hd2-faint hover:text-hd2-yellow" sx={{ fontSize: "1rem" }} />
     </Tooltip>
   );
 }
