@@ -4,9 +4,11 @@ import { Button, CircularProgress, IconButton, Tab, Tabs, Tooltip } from "@mui/m
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast, Toaster } from "sonner";
 import { downloadRepatchedPatch, downloadZip, patchFilesFromList } from "./fileInputs";
+import { FrequentlyAskedQuestions } from "./FrequentlyAskedQuestions";
 import { GameDataDirPanel, type GameDirSelection } from "./GameDataDirPanel";
 import { GameDataSource } from "./gameDataSource";
 import { useI18n, type Translate } from "./i18n";
+import type { TranslationKey } from "./locales/translationKeys";
 import { LanguageMenu } from "./LanguageMenu";
 import {
   migrateTargetsToBatchDownloads,
@@ -68,6 +70,8 @@ function App() {
   const [detectedModels, setDetectedModels] = useState<DetectedModel[]>([]);
   const [gameDir, setGameDir] = useState<GameDirSelection | null>(null);
   const [missingUnitPolicy, setMissingUnitPolicy] = useState<MissingUnitPolicy>("drop");
+  const [faqOpen, setFaqOpen] = useState(false);
+  const [faqAttention, setFaqAttention] = useState<TranslationKey | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -299,7 +303,14 @@ function App() {
           {/* Row 1: game data dir + patch */}
           <div className="flex flex-col min-[51.25rem]:flex-row">
             <div className="flex min-w-0 flex-1">
-              <GameDataDirPanel onChange={setGameDir} selection={gameDir} />
+              <GameDataDirPanel
+                onChange={setGameDir}
+                onDirectoryAccessAborted={() => {
+                  setFaqAttention("faq.workaroundQuestion");
+                  setFaqOpen(true);
+                }}
+                selection={gameDir}
+              />
             </div>
             <div className="flex min-w-0 flex-1 border-t border-hd2-border min-[51.25rem]:border-t-0 min-[51.25rem]:border-l">
               <PatchPanel onPatchFiles={importPatchFiles} patch={patchInfo} />
@@ -357,6 +368,14 @@ function App() {
             </Button>
           </div>
         </div>
+        <FrequentlyAskedQuestions
+          attentionQuestion={faqAttention}
+          onOpenChange={(open) => {
+            setFaqOpen(open);
+            if (!open) setFaqAttention(null);
+          }}
+          open={faqOpen}
+        />
       </main>
       </div>
 

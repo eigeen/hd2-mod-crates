@@ -4,15 +4,19 @@ import FolderOffIcon from "@mui/icons-material/FolderOff";
 import { Alert, Button } from "@mui/material";
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "./i18n";
+import { useDropZone } from "./useDropZone";
 import {
+  droppedGameDirectory,
   ensureReadPermission,
   forgetRememberedDirectory,
   type GameDirStatus,
   inspectGameDirectory,
+  isFileSystemAbort,
   isDirectoryAccessSupported,
   loadRememberedDirectory,
   pickGameDirectory,
   queryReadPermission,
+  rememberGameDirectory,
 } from "./directoryAccess";
 
 const panelClass = "p-6";
@@ -25,6 +29,7 @@ export interface GameDirSelection {
 interface GameDataDirPanelProps {
   selection: GameDirSelection | null;
   onChange: (selection: GameDirSelection | null) => void;
+  onDirectoryAccessAborted: () => void;
 }
 
 type PanelState =
@@ -32,7 +37,7 @@ type PanelState =
   | { kind: "empty" }
   | { kind: "ready"; selection: GameDirSelection };
 
-export function GameDataDirPanel({ selection, onChange }: GameDataDirPanelProps) {
+export function GameDataDirPanel({ selection, onChange, onDirectoryAccessAborted }: GameDataDirPanelProps) {
   const { t } = useI18n();
   const [state, setState] = useState<PanelState>(() =>
     isDirectoryAccessSupported() ? { kind: "empty" } : { kind: "unsupported" },
@@ -58,14 +63,18 @@ export function GameDataDirPanel({ selection, onChange }: GameDataDirPanelProps)
     void restoreRemembered(setState, onChange);
   }, [selection, onChange]);
 
+  const selectDirectory = useCallback(async (handle: FileSystemDirectoryHandle) => {
+    const ready = await activate(handle, t("gameData.permissionDenied"));
+    await rememberGameDirectory(handle);
+    setState({ kind: "ready", selection: ready });
+    onChange(ready);
+  }, [onChange, t]);
+
   const handlePick = useCallback(async () => {
     setError("");
     setBusy(true);
     try {
-      const handle = await pickGameDirectory();
-      const ready = await activate(handle, t("gameData.permissionDenied"));
-      setState({ kind: "ready", selection: ready });
-      onChange(ready);
+      await selectDirectory(await pickGameDirectory());
     } catch (e) {
       if (!isCancelError(e)) {
         setError(messageOf(e));
@@ -73,7 +82,27 @@ export function GameDataDirPanel({ selection, onChange }: GameDataDirPanelProps)
     } finally {
       setBusy(false);
     }
-  }, [onChange, t]);
+  }, [selectDirectory]);
+
+  const handleDrop = useCallback(async (dataTransfer: DataTransfer) => {
+    setError("");
+    setBusy(true);
+    try {
+      const handle = await droppedGameDirectory(dataTransfer.items);
+      if (!handle) throw new Error(t("gameData.dropInvalid"));
+      await selectDirectory(handle);
+    } catch (e) {
+      if (isFileSystemAbort(e)) {
+        setError(t("gameData.dropAborted"));
+        onDirectoryAccessAborted();
+      } else {
+        setError(messageOf(e));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [onDirectoryAccessAborted, selectDirectory, t]);
+  const dropZone = useDropZone(handleDrop);
 
   const handleForget = useCallback(async () => {
     setError("");
@@ -94,10 +123,14 @@ export function GameDataDirPanel({ selection, onChange }: GameDataDirPanelProps)
   }
 
   return (
-    <div className={panelClass}>
+    <div
+      className={`${panelClass} ${dropZone.dragging ? "bg-hd2-yellow-bg outline-1 outline-hd2-yellow -outline-offset-1" : ""}`}
+      {...dropZone.handlers}
+    >
       <Header />
       <Body
         busy={busy}
+        dragging={dropZone.dragging}
         onForget={handleForget}
         onPick={handlePick}
         state={state}
@@ -126,12 +159,13 @@ type ActiveState = Exclude<PanelState, { kind: "unsupported" }>;
 
 interface BodyProps {
   busy: boolean;
+  dragging: boolean;
   onForget: () => void;
   onPick: () => void;
   state: ActiveState;
 }
 
-function Body({ busy, onForget, onPick, state }: BodyProps) {
+function Body({ busy, dragging, onForget, onPick, state }: BodyProps) {
   const { t } = useI18n();
 
   if (state.kind === "empty") {
@@ -141,6 +175,9 @@ function Body({ busy, onForget, onPick, state }: BodyProps) {
           {t("gameData.descriptionPrefix")}{" "}
           <code className="bg-hd2-ink px-1 py-0.5">data</code>{" "}
           {t("gameData.descriptionSuffix")}
+        </p>
+        <p className={`m-0 border border-dashed px-3 py-2 ${dragging ? "border-hd2-yellow text-hd2-yellow" : "border-hd2-line"}`}>
+          {dragging ? t("gameData.dropActive") : t("gameData.dropHint")}
         </p>
         <div>
           <Button
@@ -169,6 +206,9 @@ function Body({ busy, onForget, onPick, state }: BodyProps) {
           {t("gameData.clear")}
         </Button>
       </div>
+      <p className={`m-0 border border-dashed px-3 py-2 ${dragging ? "border-hd2-yellow text-hd2-yellow" : "border-hd2-line"}`}>
+        {dragging ? t("gameData.dropActive") : t("gameData.dropReplaceHint")}
+      </p>
     </div>
   );
 }
@@ -210,7 +250,7 @@ async function restoreRemembered(
 }
 
 function isCancelError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
+  return isFileSystemAbort(error);
 }
 
 function messageOf(error: unknown): string {

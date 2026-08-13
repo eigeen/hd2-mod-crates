@@ -24,9 +24,10 @@ import {
 } from "@mui/material";
 import { Hd2Dialog, Hd2DialogActions, Hd2DialogContent, Hd2DialogTitle } from "./Hd2Dialog";
 import { useI18n } from "./i18n";
-import { memo, useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { MigrationCategory, PatchInfo, TargetOption, UnmatchedUnitPolicy } from "./types";
+import { useDropZone } from "./useDropZone";
 
 const panelClass = "overflow-hidden";
 const setupPanelClass = `${panelClass} flex flex-1 flex-col p-6`;
@@ -40,9 +41,17 @@ interface PatchPanelProps {
 
 export function PatchPanel(props: PatchPanelProps) {
   const { t } = useI18n();
+  const receiveDrop = useCallback(
+    (dataTransfer: DataTransfer) => props.onPatchFiles(dataTransfer.files),
+    [props.onPatchFiles],
+  );
+  const dropZone = useDropZone(receiveDrop);
 
   return (
-    <div className={setupPanelClass}>
+    <div
+      className={`${setupPanelClass} ${dropZone.dragging ? "bg-hd2-yellow-bg outline-1 outline-hd2-yellow -outline-offset-1" : ""}`}
+      {...dropZone.handlers}
+    >
       <SectionTitle icon={<ArchiveIcon />} title={t("patch.title")} />
       <div className="flex flex-wrap items-center gap-2.5">
         <Button component="label" startIcon={<UploadFileIcon />} variant="contained">
@@ -51,6 +60,9 @@ export function PatchPanel(props: PatchPanelProps) {
         </Button>
         <HelpHint title={t("patch.help")} />
       </div>
+      <p className={`m-0 mt-3 border border-dashed px-3 py-2 text-xs ${dropZone.dragging ? "border-hd2-yellow text-hd2-yellow" : "border-hd2-line text-hd2-muted"}`}>
+        {dropZone.dragging ? t("patch.dropActive") : t("patch.dropHint")}
+      </p>
       <p className={`${metaLineClass} m-0 mt-auto pt-3`}>
         <span className="inline-flex h-[0.3125rem] w-[0.3125rem] bg-hd2-faint" />
         {props.patch ? props.patch.name : t("patch.empty")}

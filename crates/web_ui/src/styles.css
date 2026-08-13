@@ -52,6 +52,30 @@ body {
   min-width: 20rem;
 }
 
+.faqDrawer {
+  opacity: 1;
+  overflow: hidden;
+  transform: translateX(0);
+  transition:
+    width 200ms cubic-bezier(0, 0, 0.2, 1),
+    opacity 140ms ease-out,
+    transform 200ms cubic-bezier(0, 0, 0.2, 1);
+  width: min(22rem, calc(100vw - 3.75rem));
+}
+
+.faqDrawerClosed {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(1rem);
+  width: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .faqDrawer {
+    transition: none;
+  }
+}
+
 /* Thin HD2-themed scrollbar for inner scroll containers */
 .hd2-scroll {
   scrollbar-width: thin;

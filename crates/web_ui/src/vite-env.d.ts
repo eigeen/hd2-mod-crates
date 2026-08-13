@@ -25,6 +25,10 @@ interface Window {
   showDirectoryPicker(options?: ShowDirectoryPickerOptions): Promise<FileSystemDirectoryHandle>;
 }
 
+interface DataTransferItem {
+  getAsFileSystemHandle?(): Promise<FileSystemHandle | null>;
+}
+
 declare module "./wasm/hd2_migrator_wasm/hd2_migrator_wasm.js" {
   export default function init(input?: RequestInfo | URL | Response | BufferSource | WebAssembly.Module): Promise<unknown>;
   export function builtin_target_options(category?: string): unknown;

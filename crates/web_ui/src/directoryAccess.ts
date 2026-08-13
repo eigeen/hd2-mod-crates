@@ -18,14 +18,38 @@ export function isDirectoryAccessSupported(): boolean {
   return typeof window !== "undefined" && "showDirectoryPicker" in window;
 }
 
-// 弹出系统目录选择器，并将句柄持久化到 IndexedDB。
+// 弹出系统目录选择器。
 export async function pickGameDirectory(): Promise<FileSystemDirectoryHandle> {
-  const handle = await window.showDirectoryPicker({
+  return window.showDirectoryPicker({
     id: "hd2-game-data",
     mode: "read",
   });
+}
+
+// 从系统文件管理器的拖放数据中提取第一个目录句柄。
+export async function droppedGameDirectory(
+  items: DataTransferItemList,
+): Promise<FileSystemDirectoryHandle | null> {
+  for (const item of Array.from(items)) {
+    const handle = await droppedFileSystemHandle(item);
+    if (isDirectoryHandle(handle)) {
+      return handle;
+    }
+  }
+  return null;
+}
+
+// 记住已验证的目录句柄，供下次打开页面时恢复。
+export async function rememberGameDirectory(handle: FileSystemDirectoryHandle): Promise<void> {
   await persistDirHandle(handle).catch(() => undefined);
-  return handle;
+}
+
+// 识别浏览器中止目录访问时产生的原生或包装后异常。
+export function isFileSystemAbort(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return error.name === "AbortError" || /user aborted a request/i.test(error.message);
 }
 
 // 加载上次记住的目录句柄；权限可能已失效，调用方需在用户手势下调用 ensureReadPermission。
@@ -88,6 +112,19 @@ function looksLikeArchiveName(name: string): boolean {
   // 16 char hex base, optionally followed by ".gpu_resources" or ".stream"
   const base = name.replace(/\.(gpu_resources|stream)$/, "");
   return /^[0-9a-f]{16}$/.test(base);
+}
+
+async function droppedFileSystemHandle(item: DataTransferItem): Promise<FileSystemHandle | null> {
+  if (item.kind !== "file" || !item.getAsFileSystemHandle) {
+    return null;
+  }
+  return item.getAsFileSystemHandle();
+}
+
+function isDirectoryHandle(
+  handle: FileSystemHandle | null,
+): handle is FileSystemDirectoryHandle {
+  return handle?.kind === "directory";
 }
 
 function openDb(): Promise<IDBDatabase> {
