@@ -81,7 +81,7 @@ export const zhCN = {
   "options.unmatchedKeep": "保留未知 Unit",
   "options.unmatchedUnitsHelp": "有些 Mod 会在同一个 Patch 里修改多件装备，或者带有本工具无法识别的内容。“丢弃未知 Unit”只留下当前装备成功转换的部分；“保留未知 Unit”会把其余内容原样放进输出文件，但不会转换它们。",
   "performance.title": "多目标",
-  "performance.body": "多目标会逐个迁移并下载带编号的独立 ZIP，以限制 WASM 内存占用。浏览器可能会询问是否允许此站点下载多个文件。",
+  "performance.body": "多目标会根据 Patch 大小自动分批，每批输出一个包含一个或多个目标版本的 ZIP，以限制 WASM 内存占用。较大的任务可能会让浏览器询问是否允许此站点下载多个文件。",
   "dialog.cancel": "取消",
   "dialog.continue": "继续",
 } satisfies TranslationResources;

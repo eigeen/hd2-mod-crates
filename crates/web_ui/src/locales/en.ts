@@ -81,7 +81,7 @@ export const en = {
   "options.unmatchedKeep": "Keep unknown Units",
   "options.unmatchedUnitsHelp": "Some mods change several items in one patch or include content this tool cannot identify. “Discard unknown Units” keeps only the parts successfully converted for the current equipment. “Keep unknown Units” copies everything else into the output unchanged, but does not convert it.",
   "performance.title": "Multi-target",
-  "performance.body": "Targets are migrated one at a time into independently numbered ZIP downloads to limit WASM memory use. Your browser may ask you to allow multiple downloads.",
+  "performance.body": "Targets are automatically batched by patch size. Each ZIP contains one or more target versions while keeping WASM memory bounded. Large jobs may make your browser ask you to allow multiple downloads.",
   "dialog.cancel": "Cancel",
   "dialog.continue": "Continue",
 } satisfies TranslationResources;

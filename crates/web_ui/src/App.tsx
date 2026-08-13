@@ -8,7 +8,10 @@ import { GameDataDirPanel, type GameDirSelection } from "./GameDataDirPanel";
 import { GameDataSource } from "./gameDataSource";
 import { useI18n, type Translate } from "./i18n";
 import { LanguageMenu } from "./LanguageMenu";
-import { migrateTargetsToNumberedDownloads } from "./migrationDownloads";
+import {
+  migrateTargetsToBatchDownloads,
+  type MigrationBatch,
+} from "./migrationDownloads";
 import {
   OptionsPanel,
   PatchPanel,
@@ -193,16 +196,17 @@ function App() {
     const dataSource = gameDir ? new GameDataSource(gameDir.handle) : null;
     setProgressLabel("");
     await runTask(setBusy, async () => {
-      const summary = await migrateTargetsToNumberedDownloads({
+      const summary = await migrateTargetsToBatchDownloads({
+        patchByteLength: patch.toc.byteLength + patch.gpu.byteLength + patch.stream.byteLength,
         targetHashes,
         targets,
-        migrateTarget: (targetHash, targetIndex, targetCount) => migrateSelectedTarget({
+        migrateBatch: (batch) => migrateTargetBatch({
+          batch,
           category: migrationCategory,
           dataSource,
           options,
           patch,
-          progress: migrationProgress(targetIndex, targetCount, setProgressLabel, t),
-          targetHash,
+          progress: migrationProgress(batch, setProgressLabel, t),
         }),
         download: downloadZip,
       });
@@ -384,19 +388,20 @@ function nextBlockerHint(input: BlockerHintInput, t: Translate): string {
   return "";
 }
 
-interface SelectedTargetMigrationRequest {
+interface TargetBatchMigrationRequest {
+  batch: MigrationBatch;
   category: MigrationCategory;
   dataSource: GameDataSource | null;
   options: MigrateOptions;
   patch: PatchFiles;
   progress: MigrationProgressSink;
-  targetHash: string;
 }
 
-/** Route one target through the smallest applicable WASM migration entry point. */
-async function migrateSelectedTarget(request: SelectedTargetMigrationRequest) {
-  const options = { ...request.options, targetHashes: [request.targetHash] };
-  if (!request.dataSource || request.targetHash === options.sourceHash) {
+/** Route one memory-bounded target batch through the applicable WASM migration entry point. */
+async function migrateTargetBatch(request: TargetBatchMigrationRequest) {
+  const options = { ...request.options, targetHashes: request.batch.targetHashes };
+  const needsGameData = options.targetHashes.some((hash) => hash !== options.sourceHash);
+  if (!request.dataSource || !needsGameData) {
     return migrate(request.patch, options, request.category);
   }
   return migrateCrossArchive(
@@ -409,16 +414,19 @@ async function migrateSelectedTarget(request: SelectedTargetMigrationRequest) {
 }
 
 function migrationProgress(
-  targetIndex: number,
-  targetCount: number,
+  batch: MigrationBatch,
   setProgressLabel: (label: string) => void,
   t: Translate,
 ): MigrationProgressSink {
-  const label = (name: string) => numberedTargetLabel(name, targetIndex, targetCount);
+  let targetIndex = batch.targetOffset;
+  const label = (name: string) => numberedTargetLabel(name, targetIndex, batch.targetCount);
   return {
     onTargetStart: (name) => setProgressLabel(t("app.progressMigrating", { name: label(name) })),
     onStage: (name, stage) => setProgressLabel(t("app.progressStage", { name: label(name), stage })),
-    onTargetFinish: () => setProgressLabel(""),
+    onTargetFinish: () => {
+      targetIndex += 1;
+      setProgressLabel("");
+    },
   };
 }
 
