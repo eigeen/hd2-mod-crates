@@ -1,4 +1,4 @@
-// 实现 wasm `migrate_cross_archive` 所需的 DataSource 接口，基于 FileSystemDirectoryHandle。
+// 实现 WASM 迁移与识别所需的 DataSource 接口，基于 FileSystemDirectoryHandle。
 // 方法对应 Rust 端 JsDataSource 中通过 Reflect::get 提取的四个 JS 函数。
 
 const BUNDLE_CHUNK_PATTERN = /^bundles\.\d\d\.nxa$/;

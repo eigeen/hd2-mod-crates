@@ -23,11 +23,14 @@ parts are matched first through the bundled manually verified
 `armor_mappings.merged.json`; geometry and customization-name matching only
 fill gaps that the authoritative table cannot cover.
 
-The Web/WASM UI supports separate armor and helmet appearance migration. Armor
-uses the multi-part table and geometry fallback; helmet migration uses its
-dedicated one-Unit mapping and only reads archive TOCs for lower I/O and memory
-use. The UI can also refresh a mod patch's Unit version-dependent layout data
+The Web/WASM UI detects armor and helmet content together and can migrate both
+from one mixed patch into a combined output. Armor uses the multi-part table
+and geometry fallback; helmet migration uses its dedicated one-Unit mapping
+and only reads archive TOCs for lower I/O and memory use. The UI can also
+refresh a mod patch's Unit version-dependent layout data
 from the currently installed game without modifying the game files.
+Appearance migration requires access to the current game `data/` directory;
+same-source pass-through output is intentionally unsupported.
 
 ## Credits
 

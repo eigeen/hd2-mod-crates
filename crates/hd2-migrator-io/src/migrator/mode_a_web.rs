@@ -84,6 +84,7 @@ pub async fn run<S: DataSource + ?Sized>(
 
     let mapping = CategoryMapping::load(category)?;
     let source_hash = resolve_source_hash(&patch, options, category, &by_hash)?;
+    ensure_targets_differ_from_source(&options.target_hashes, &source_hash)?;
     let source_name = by_hash
         .get(&source_hash)
         .cloned()
@@ -131,34 +132,25 @@ pub async fn run<S: DataSource + ?Sized>(
             p.target_started(&target_name, target_hash);
             p.stage(&target_name, "loading target");
         }
-        let (resolved_hash, artifact) = if target_hash == &source_hash {
-            let artifact = mode_a_common::compute_source_target(
-                &prepared.migration,
-                target_hash,
-                &target_name,
-            );
-            (target_hash.clone(), artifact)
-        } else {
-            let load_context = ArchiveLoadContext {
-                source,
-                bundle: bundle.as_ref(),
-                archives,
-            };
-            let loaded =
-                load_migration_target(&load_context, target_hash, &target_name, &mapping).await?;
-            let stage_callback = |stage: &str| {
-                if let Some(p) = progress {
-                    p.stage(&target_name, stage);
-                }
-            };
-            let identity = TargetIdentity {
-                hash: &loaded.hash,
-                name: &target_name,
-            };
-            let artifact =
-                compute_cross_target(&compute_context, &loaded.archive, &identity, stage_callback)?;
-            (loaded.hash, artifact)
+        let load_context = ArchiveLoadContext {
+            source,
+            bundle: bundle.as_ref(),
+            archives,
         };
+        let loaded =
+            load_migration_target(&load_context, target_hash, &target_name, &mapping).await?;
+        let stage_callback = |stage: &str| {
+            if let Some(p) = progress {
+                p.stage(&target_name, stage);
+            }
+        };
+        let identity = TargetIdentity {
+            hash: &loaded.hash,
+            name: &target_name,
+        };
+        let artifact =
+            compute_cross_target(&compute_context, &loaded.archive, &identity, stage_callback)?;
+        let resolved_hash = loaded.hash;
         let result = finish_target_result(resolved_hash, target_name, artifact, &prepared);
         if let Some(p) = progress {
             p.target_finished(&result.target_name);
@@ -166,6 +158,16 @@ pub async fn run<S: DataSource + ?Sized>(
         results.push(result);
     }
     Ok(results)
+}
+
+fn ensure_targets_differ_from_source(
+    target_hashes: &[String],
+    source_hash: &str,
+) -> crate::Result<()> {
+    if target_hashes.iter().any(|hash| hash == source_hash) {
+        eyre::bail!("source archive cannot also be a migration target");
+    }
+    Ok(())
 }
 
 async fn load_armor_source_archive<S: DataSource + ?Sized>(
@@ -507,4 +509,16 @@ fn resolve_source_hash(
         .ok_or_else(|| {
             eyre::eyre!("could not auto-detect source archive from authoritative mapping")
         })
+}
+
+#[cfg(test)]
+mod same_source_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_source_archive_in_targets() {
+        assert!(
+            ensure_targets_differ_from_source(&["source".to_string()], "source").is_err()
+        );
+    }
 }

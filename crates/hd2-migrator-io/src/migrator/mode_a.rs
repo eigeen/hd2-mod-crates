@@ -67,8 +67,8 @@ pub(super) fn run(opts: MigrateAllOpts) -> crate::Result<Vec<MigrationReport>> {
                 super::detect_source_archive(&patch, opts.data_dir, &armor_list, bundle_index_ref)
                     .ok_or_else(|| {
                         eyre::eyre!(
-                    "could not auto-detect source archive — pass --source <hash> explicitly"
-                )
+                            "could not auto-detect source archive — pass --source <hash> explicitly"
+                        )
                     })?;
             tracing::info!(
                 hash = %detected.hash,
@@ -94,10 +94,11 @@ pub(super) fn run(opts: MigrateAllOpts) -> crate::Result<Vec<MigrationReport>> {
         None => armor_list
             .into_iter()
             .filter(|(h, n)| {
-                h == &source_hash || !crate::target_exclusions::is_default_excluded_target(h, n)
+                h != &source_hash && !crate::target_exclusions::is_default_excluded_target(h, n)
             })
             .collect(),
     };
+    ensure_targets_differ_from_source(&targets, &source_hash)?;
 
     let source = Arc::new(source);
     let patch = Arc::new(patch);
@@ -113,26 +114,22 @@ pub(super) fn run(opts: MigrateAllOpts) -> crate::Result<Vec<MigrationReport>> {
                 p.target_started(&progress_label);
                 p.stage(&progress_label, "loading target");
             }
-            let res = if thash == &source_hash {
-                build_source_target(&patch, order, thash, tname, &progress_label, opts.progress)
-            } else {
-                build_migrated_target(
-                    &patch,
-                    &source,
-                    opts.data_dir,
-                    bundle_arc.as_deref(),
-                    order,
-                    thash,
-                    tname,
-                    &progress_label,
-                    opts.empty_unit_template,
-                    opts.padding_mode,
-                    &armor_mapping_table,
-                    &source_name,
-                    opts.experimental_partial_remap,
-                    opts.progress,
-                )
-            };
+            let res = build_migrated_target(
+                &patch,
+                &source,
+                opts.data_dir,
+                bundle_arc.as_deref(),
+                order,
+                thash,
+                tname,
+                &progress_label,
+                opts.empty_unit_template,
+                opts.padding_mode,
+                &armor_mapping_table,
+                &source_name,
+                opts.experimental_partial_remap,
+                opts.progress,
+            );
             if let Some(p) = opts.progress {
                 p.target_finished(&progress_label);
             }
@@ -177,6 +174,16 @@ fn resolve_target_filters(
 
 fn target_name_matches(name: &str, filter: &str) -> bool {
     name == filter || name.eq_ignore_ascii_case(filter)
+}
+
+fn ensure_targets_differ_from_source(
+    targets: &[(String, String)],
+    source_hash: &str,
+) -> crate::Result<()> {
+    if targets.iter().any(|(hash, _)| hash == source_hash) {
+        eyre::bail!("source archive cannot also be a migration target");
+    }
+    Ok(())
 }
 
 fn log_patch_source_filter(source_name: &str, filter: &super::source_selection::PatchSourceFilter) {
@@ -251,25 +258,6 @@ fn build_migrated_target(
     })
 }
 
-fn build_source_target(
-    patch: &StreamToc,
-    order: usize,
-    target_hash: &str,
-    target_name: &str,
-    progress_label: &str,
-    progress: Option<&dyn super::ProgressSink>,
-) -> crate::Result<TargetBuild> {
-    if let Some(p) = progress {
-        p.stage(progress_label, "copying source patch");
-    }
-    let artifact = mode_a_common::compute_source_target(patch, target_hash, target_name);
-    Ok(TargetBuild {
-        order,
-        patch: artifact.patch,
-        report: artifact.report,
-    })
-}
-
 fn load_bundle_index_if_present(data_dir: &Path) -> crate::Result<Option<BundleIndex>> {
     let p = data_dir.join("bundles.nxa");
     if !p.exists() {
@@ -283,5 +271,16 @@ fn load_armor_mapping_table(path: Option<&Path>) -> crate::Result<ArmorMappingTa
     match path {
         Some(path) => ArmorMappingTable::load(path),
         None => ArmorMappingTable::bundled(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_source_archive_in_explicit_targets() {
+        let targets = vec![("source".to_string(), "Source".to_string())];
+        assert!(ensure_targets_differ_from_source(&targets, "source").is_err());
     }
 }

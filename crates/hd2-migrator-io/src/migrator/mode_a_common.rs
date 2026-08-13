@@ -240,30 +240,6 @@ pub fn compute_migrated_target<F: Fn(&str)>(
     })
 }
 
-/// Build a "same source" artifact: pass the patch through unchanged.
-pub fn compute_source_target(
-    patch: &StreamToc,
-    target_hash: &str,
-    target_name: &str,
-) -> TargetBuildArtifact {
-    tracing::info!(target = %target_name, "prepared source target without remap");
-    TargetBuildArtifact {
-        patch: patch.clone(),
-        report: MigrationReport {
-            target_hash: target_hash.to_string(),
-            target_name: target_name.to_string(),
-            out_path: None,
-            file_id_remapped: patch.entries.len(),
-            slot_id_remapped: 0,
-            padded_units: 0,
-            skipped_entries: 0,
-            skipped_types: Vec::new(),
-            type_counts: HashMap::new(),
-            warnings: Vec::new(),
-        },
-    }
-}
-
 // ---------- entry-rewrite helpers ---------------------------------------
 
 fn entry_target_file_ids(

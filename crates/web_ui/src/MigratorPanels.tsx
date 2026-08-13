@@ -6,6 +6,8 @@ import HelpOutlineIcon from "@mui/icons-material/HelpOutlined";
 import SearchIcon from "@mui/icons-material/Search";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
+import ShieldOutlinedIcon from "@mui/icons-material/ShieldOutlined";
+import SportsMotorsportsOutlinedIcon from "@mui/icons-material/SportsMotorsportsOutlined";
 import {
   Button,
   Checkbox,
@@ -15,7 +17,6 @@ import {
   Menu,
   MenuItem,
   Radio,
-  RadioGroup,
   Switch,
   TextField,
   Tooltip,
@@ -26,7 +27,13 @@ import { Hd2Dialog, Hd2DialogActions, Hd2DialogContent, Hd2DialogTitle } from ".
 import { useI18n } from "./i18n";
 import { memo, useCallback, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import type { MigrationCategory, PatchInfo, TargetOption, UnmatchedUnitPolicy } from "./types";
+import type {
+  DetectedSource,
+  EquipmentCategory,
+  EquipmentOption,
+  PatchInfo,
+  UnmatchedUnitPolicy,
+} from "./types";
 import { useDropZone } from "./useDropZone";
 
 const panelClass = "overflow-hidden";
@@ -72,17 +79,20 @@ export function PatchPanel(props: PatchPanelProps) {
 }
 
 interface TargetPanelProps {
-  category: MigrationCategory;
+  activeSourceId: string;
+  equipmentOptions: EquipmentOption[];
   multiTarget: boolean;
+  multiTargetEligible: boolean;
   onBatchSelect: (hashes: string[]) => void;
-  onCategoryChange: (category: MigrationCategory) => void;
   onMultiTargetChange: (enabled: boolean) => void;
-  onSourceChange: (hash: string) => void;
+  onResolveSource: (sourceId: string, hash: string) => void;
+  onSourceChange: (sourceId: string) => void;
   onTargetChange: (hash: string) => void;
   selectedTargets: string[];
-  sourceChoices: TargetOption[];
-  sourceHash: string;
-  targetOptions: TargetOption[];
+  sources: DetectedSource[];
+  targetOptions: EquipmentOption[];
+  targetSelectionEnabled: boolean;
+  targetsBySource: Record<string, string[]>;
 }
 
 export function TargetPanel(props: TargetPanelProps) {
@@ -92,49 +102,48 @@ export function TargetPanel(props: TargetPanelProps) {
     <div className={`${panelClass} flex flex-col`}>
       <div className="flex flex-col flex-wrap items-center gap-2 border-b border-hd2-border hd2-stripes-accent px-6 py-3.5 min-[51.25rem]:flex-row min-[51.25rem]:gap-4">
         <SectionTitle icon={<CompareArrowsIcon />} title={t("mapping.title")} inHeader />
-        <ToggleButtonGroup
-          exclusive
-          onChange={(_, value: MigrationCategory | null) => {
-            if (value) props.onCategoryChange(value);
-          }}
-          size="small"
-          value={props.category}
-        >
-          <ToggleButton value="Armor">{t("mapping.armor")}</ToggleButton>
-          <ToggleButton value="Helmet">{t("mapping.helmet")}</ToggleButton>
-        </ToggleButtonGroup>
         <div className="hidden flex-1 min-[51.25rem]:block" />
-        <FormControlLabel
-          className="multiToggle"
-          control={<Switch checked={props.multiTarget} onChange={(event) => props.onMultiTargetChange(event.target.checked)} />}
-          label={t("mapping.multiTarget")}
-        />
-        <HelpHint title={t("mapping.multiTargetHelp")} />
+        {props.multiTargetEligible && <>
+          <FormControlLabel
+            className="multiToggle"
+            control={<Switch checked={props.multiTarget} onChange={(event) => props.onMultiTargetChange(event.target.checked)} />}
+            label={t("mapping.multiTarget")}
+          />
+          <HelpHint title={t("mapping.multiTargetHelp")} />
+        </>}
       </div>
 
       <MappingGrid
+        activeSourceId={props.activeSourceId}
+        equipmentOptions={props.equipmentOptions}
         multiTarget={props.multiTarget}
         onBatchSelect={props.onBatchSelect}
+        onResolveSource={props.onResolveSource}
         onSourceChange={props.onSourceChange}
         onTargetChange={props.onTargetChange}
         selectedTargets={props.selectedTargets}
-        sourceChoices={props.sourceChoices}
-        sourceHash={props.sourceHash}
+        sources={props.sources}
         targetOptions={props.targetOptions}
+        targetSelectionEnabled={props.targetSelectionEnabled}
+        targetsBySource={props.targetsBySource}
       />
     </div>
   );
 }
 
 interface MappingGridProps {
+  activeSourceId: string;
+  equipmentOptions: EquipmentOption[];
   multiTarget: boolean;
   onBatchSelect: (hashes: string[]) => void;
+  onResolveSource: (sourceId: string, hash: string) => void;
   onSourceChange: (hash: string) => void;
   onTargetChange: (hash: string) => void;
   selectedTargets: string[];
-  sourceChoices: TargetOption[];
-  sourceHash: string;
-  targetOptions: TargetOption[];
+  sources: DetectedSource[];
+  targetOptions: EquipmentOption[];
+  targetSelectionEnabled: boolean;
+  targetsBySource: Record<string, string[]>;
 }
 
 const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
@@ -153,13 +162,19 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
           会导致内部所有 Radio 在每次父级 render 时都重渲染，对几百项列表非常卡。 */}
       <div className="flex min-w-0 flex-1 flex-col p-6 min-[51.25rem]:pr-9">
         <MappingSectionLabel>{t("mapping.source")}</MappingSectionLabel>
-        {props.sourceChoices.length ? (
+        {props.sources.length ? (
           <div className="hd2-scroll flex max-h-[22.5rem] flex-1 flex-col overflow-auto">
-            <RadioGroup value={props.sourceHash} onChange={(event) => props.onSourceChange(event.target.value)}>
-              {props.sourceChoices.map((target) => (
-                <TargetRadio key={target.hash} target={target} />
-              ))}
-            </RadioGroup>
+            {props.sources.map((source) => (
+              <SourceChoice
+                active={source.id === props.activeSourceId}
+                key={source.id}
+                onActivate={props.onSourceChange}
+                onResolve={props.onResolveSource}
+                selectedTargets={props.targetsBySource[source.id] ?? []}
+                source={source}
+                targetOptions={props.equipmentOptions}
+              />
+            ))}
           </div>
         ) : (
           <EmptyMapping icon={<DescriptionIcon />} text={t("mapping.importPatchFirst")} />
@@ -190,7 +205,9 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
           <HelpHint title={t("mapping.quickSelectHelp")} />
         </div>
         <div className="hd2-scroll flex max-h-[22.5rem] flex-1 flex-col overflow-auto">
-          {filteredTargets.length ? (
+          {!props.activeSourceId || !props.targetSelectionEnabled ? (
+            <EmptyMapping icon={<DescriptionIcon />} text={t("mapping.selectSource")} />
+          ) : filteredTargets.length ? (
             filteredTargets.map((target) => (
               <TargetChoice
                 key={target.hash}
@@ -221,7 +238,7 @@ function MappingSectionLabel({ children, inline }: { children: ReactNode; inline
   );
 }
 
-function filterTargets(targets: TargetOption[], query: string) {
+function filterTargets(targets: EquipmentOption[], query: string) {
   const trimmed = query.trim().toLowerCase();
   if (!trimmed) {
     return targets;
@@ -235,7 +252,7 @@ interface TargetChoiceProps {
   multiTarget: boolean;
   onChange: (hash: string) => void;
   selected: boolean;
-  target: TargetOption;
+  target: EquipmentOption;
 }
 
 const TargetChoice = memo(function TargetChoice(props: TargetChoiceProps) {
@@ -250,24 +267,84 @@ const TargetChoice = memo(function TargetChoice(props: TargetChoiceProps) {
   );
 });
 
-const TargetRadio = memo(function TargetRadio({ target }: { target: TargetOption }) {
+function TargetText({ target }: { target: EquipmentOption }) {
   return (
-    <FormControlLabel
-      className="sourceChoice"
-      control={<Radio />}
-      label={<TargetText target={target} />}
-      value={target.hash}
-    />
-  );
-});
-
-function TargetText({ target }: { target: TargetOption }) {
-  return (
-    <div className="min-w-0">
+    <div className="flex min-w-0 items-center gap-2">
+      <EquipmentIcon category={target.category} />
+      <div className="min-w-0">
       <p className="m-0 text-[0.8125rem] font-bold leading-[1.35] text-hd2-text [overflow-wrap:anywhere]">{target.name}</p>
       <p className="m-0 font-mono text-[0.6875rem] leading-[1.45] text-hd2-faint [overflow-wrap:anywhere]">{target.hash}</p>
+      </div>
     </div>
   );
+}
+
+interface SourceChoiceProps {
+  active: boolean;
+  onActivate: (sourceId: string) => void;
+  onResolve: (sourceId: string, hash: string) => void;
+  selectedTargets: string[];
+  source: DetectedSource;
+  targetOptions: EquipmentOption[];
+}
+
+function SourceChoice(props: SourceChoiceProps) {
+  const { t } = useI18n();
+  const resolved = props.source.candidates.find((candidate) => candidate.hash === props.source.resolvedHash);
+  const selectedNames = props.selectedTargets
+    .map((hash) => props.targetOptions.find((target) => target.hash === hash)?.name ?? hash);
+  return (
+    <div
+      className={`mb-2 cursor-pointer border px-3 py-2 transition-colors ${
+        props.active ? "border-hd2-yellow bg-hd2-yellow-bg" : "border-transparent hover:border-hd2-line"
+      }`}
+      onClick={() => props.onActivate(props.source.id)}
+    >
+      <div className="flex items-center gap-2">
+        <Radio checked={props.active} size="small" />
+        <EquipmentIcon category={props.source.category} />
+        <div className="min-w-0 flex-1">
+          <p className="m-0 text-[0.8125rem] font-bold text-hd2-text">
+            {resolved?.name ?? props.source.candidates[0]?.name}
+          </p>
+          {resolved && selectedNames.length > 0 && (
+            <p className="m-0 text-xs text-hd2-yellow">
+              {resolved.name} → {selectedNames[0]}{selectedNames.length > 1 ? ` +${selectedNames.length - 1}` : ""}
+            </p>
+          )}
+          {resolved && selectedNames.length === 0 && (
+            <p className="m-0 text-xs text-hd2-muted">{t("mapping.sourceUnconfigured")}</p>
+          )}
+        </div>
+      </div>
+      {props.source.candidates.length > 1 && (
+        <TextField
+          className="mt-2"
+          fullWidth
+          label={t("mapping.sourceModel")}
+          onChange={(event) => props.onResolve(props.source.id, event.target.value)}
+          onClick={(event) => event.stopPropagation()}
+          select
+          size="small"
+          value={resolved?.hash ?? props.source.candidates[0]?.hash ?? ""}
+        >
+          {props.source.candidates.map((candidate) => (
+            <MenuItem key={candidate.hash} value={candidate.hash}>
+              <span className="mr-2">{candidate.name}</span>
+              <span className="font-mono text-xs text-hd2-faint">{candidate.hash}</span>
+            </MenuItem>
+          ))}
+        </TextField>
+      )}
+    </div>
+  );
+}
+
+function EquipmentIcon({ category }: { category: EquipmentCategory }) {
+  const className = "shrink-0 text-hd2-faint";
+  return category === "Armor"
+    ? <ShieldOutlinedIcon className={className} fontSize="small" />
+    : <SportsMotorsportsOutlinedIcon className={className} fontSize="small" />;
 }
 
 function EmptyMapping({ icon, text }: { icon: ReactNode; text: string }) {
@@ -341,7 +418,7 @@ export function PerformanceDialog(props: PerformanceDialogProps) {
 
 interface QuickSelectMenuProps {
   multiTarget: boolean;
-  filteredTargets: TargetOption[];
+  filteredTargets: EquipmentOption[];
   onBatchSelect: (hashes: string[]) => void;
   selectedTargets: string[];
 }

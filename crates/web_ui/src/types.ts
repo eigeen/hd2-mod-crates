@@ -1,20 +1,25 @@
-export interface TargetOption {
+export type EquipmentCategory = "Armor" | "Helmet";
+
+export interface EquipmentOption {
+  category: EquipmentCategory;
   hash: string;
   name: string;
   excluded: boolean;
 }
 
-export type MigrationCategory = "Armor" | "Helmet";
-
-export interface DetectedModel {
-  category: MigrationCategory;
-  name: string;
-  unitHits: number;
-}
+export type TargetOption = EquipmentOption;
+export type MigrationCategory = EquipmentCategory;
 
 export interface PatchInspection {
-  source: TargetOption | null;
-  models: DetectedModel[];
+  sources: DetectedSource[];
+}
+
+export interface DetectedSource {
+  id: string;
+  category: EquipmentCategory;
+  unitHits: number;
+  candidates: EquipmentOption[];
+  resolvedHash: string | null;
 }
 
 export interface PatchFiles {
@@ -34,9 +39,18 @@ export interface AuthorityMappings {
   hasArmor: (name: string) => boolean;
 }
 
-export interface MigrateOptions {
-  sourceHash: string | null;
-  targetHashes: string[];
+export interface MigrationMapping {
+  category: EquipmentCategory;
+  sourceHash: string;
+  targetHash: string;
+}
+
+export interface MigrationVariant {
+  mappings: MigrationMapping[];
+}
+
+export interface UnifiedMigrateOptions {
+  variants: MigrationVariant[];
   patchSuffix: string | null;
   noPadding: boolean;
   unmatchedUnitPolicy: UnmatchedUnitPolicy;
@@ -63,6 +77,7 @@ export interface MigrationReportRow {
   paddedUnits: number;
   skippedEntries: number;
   warnings: string[];
+  mappings: MigrationMapping[];
 }
 
 export type MissingUnitPolicy = "drop" | "keep" | "fail";

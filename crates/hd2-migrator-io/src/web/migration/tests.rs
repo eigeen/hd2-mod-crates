@@ -118,64 +118,6 @@ fn ignores_units_reused_by_multiple_model_objects() {
     assert_eq!(models[0].unit_hits, 1);
 }
 
-#[test]
-fn migrate_one_requires_one_target() {
-    let err = migrate_one(
-        "Armor",
-        patch_bytes("patch", &[1]),
-        WebMigrateOptions {
-            source_hash: None,
-            target_hashes: Vec::new(),
-            patch_suffix: None,
-            no_padding: true,
-            unmatched_unit_policy: UnmatchedUnitPolicy::Drop,
-        },
-    )
-    .unwrap_err();
-
-    assert!(err.to_string().contains("exactly one target"));
-}
-
-#[test]
-fn migrate_cross_archive_is_unavailable_in_browser() {
-    let table = ArmorMappingTable::bundled().unwrap();
-    let by_hash = archive_name_lookup("Armor").unwrap();
-    let (source_entry, target_entry) = pick_two_authoritative_armors(&table, &by_hash);
-    let source_unit_id = first_authoritative_file_id(&table, &source_entry.1);
-    let patch = patch_bytes("patch", &[source_unit_id]);
-
-    let err = migrate_one(
-        "Armor",
-        patch,
-        WebMigrateOptions {
-            source_hash: Some(source_entry.0.clone()),
-            target_hashes: vec![target_entry.0.clone()],
-            patch_suffix: None,
-            no_padding: true,
-            unmatched_unit_policy: UnmatchedUnitPolicy::Drop,
-        },
-    )
-    .unwrap_err();
-
-    assert!(
-        err.to_string()
-            .contains("cross-archive migration is not available")
-    );
-}
-
-fn pick_two_authoritative_armors(
-    table: &ArmorMappingTable,
-    by_hash: &[(String, String)],
-) -> ((String, String), (String, String)) {
-    let mut iter = by_hash
-        .iter()
-        .filter(|(_, name)| table.armor(name).is_some())
-        .cloned();
-    let source = iter.next().expect("at least one authoritative armor");
-    let target = iter.next().expect("at least two authoritative armors");
-    (source, target)
-}
-
 fn first_authoritative_file_id(table: &ArmorMappingTable, armor_name: &str) -> u64 {
     *table
         .armor(armor_name)

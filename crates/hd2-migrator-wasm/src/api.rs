@@ -30,6 +30,12 @@ pub fn builtin_target_options(category: Option<String>) -> WasmResult<JsValue> {
 }
 
 #[wasm_bindgen]
+pub fn builtin_equipment_options() -> WasmResult<JsValue> {
+    let options = web::list_equipment_options().map_err(js_error)?;
+    serde_wasm_bindgen::to_value(&options).map_err(js_error)
+}
+
+#[wasm_bindgen]
 pub fn detect_source(
     patch_name: String,
     toc: Vec<u8>,
@@ -66,32 +72,34 @@ pub fn inspect_patch(
 }
 
 #[wasm_bindgen]
-pub fn migrate_one(
-    patch_name: String,
-    toc: Vec<u8>,
-    gpu: Vec<u8>,
-    stream: Vec<u8>,
-    options: JsValue,
-    category: Option<String>,
-) -> WasmResult<JsValue> {
-    let request = parse_options(options)?;
-    if request.target_hashes.len() != 1 {
-        return Err(js_error("migrate_one requires exactly one target"));
-    }
-    run_migration(patch_name, toc, gpu, stream, request, category, true)
+pub fn inspect_equipment(patch_name: String, toc: Vec<u8>) -> WasmResult<JsValue> {
+    let patch = PatchBytes {
+        name: patch_name,
+        toc,
+        gpu: Vec::new(),
+        stream: Vec::new(),
+    };
+    let inspection = web::inspect_equipment(&patch).map_err(js_error)?;
+    serde_wasm_bindgen::to_value(&inspection).map_err(js_error)
 }
 
 #[wasm_bindgen]
-pub fn migrate_many(
+pub async fn inspect_equipment_with_source(
     patch_name: String,
     toc: Vec<u8>,
-    gpu: Vec<u8>,
-    stream: Vec<u8>,
-    options: JsValue,
-    category: Option<String>,
+    data_source: JsValue,
 ) -> WasmResult<JsValue> {
-    let request = parse_options(options)?;
-    run_migration(patch_name, toc, gpu, stream, request, category, false)
+    let patch = PatchBytes {
+        name: patch_name,
+        toc,
+        gpu: Vec::new(),
+        stream: Vec::new(),
+    };
+    let source = JsDataSource::from_js(data_source)?;
+    let inspection = web::inspect_equipment_with_source(&patch, &source)
+        .await
+        .map_err(js_error)?;
+    serde_wasm_bindgen::to_value(&inspection).map_err(js_error)
 }
 
 /// Full cross-archive migration backed by a JS-supplied `DataSource`.
@@ -121,7 +129,34 @@ pub async fn migrate_cross_archive(
         gpu,
         stream,
     };
-    let bundle = web::migrate_many_with_source(&category, patch, request, &source, Some(&progress_sink))
+    let bundle =
+        web::migrate_many_with_source(&category, patch, request, &source, Some(&progress_sink))
+            .await
+            .map_err(js_error)?;
+    migration_result(zip_store(&bundle.files), bundle.summary)
+}
+
+#[wasm_bindgen]
+pub async fn migrate_equipment_variants(
+    patch_name: String,
+    toc: Vec<u8>,
+    gpu: Vec<u8>,
+    stream: Vec<u8>,
+    options: JsValue,
+    data_source: JsValue,
+    progress: JsValue,
+) -> WasmResult<JsValue> {
+    let request: web::WebUnifiedMigrateOptions =
+        serde_wasm_bindgen::from_value(options).map_err(js_error)?;
+    let source = JsDataSource::from_js(data_source)?;
+    let progress_sink = JsProgress::from_js(progress)?;
+    let patch = PatchBytes {
+        name: patch_name,
+        toc,
+        gpu,
+        stream,
+    };
+    let bundle = web::migrate_variants_with_source(patch, request, &source, Some(&progress_sink))
         .await
         .map_err(js_error)?;
     migration_result(zip_store(&bundle.files), bundle.summary)
@@ -153,31 +188,6 @@ pub async fn repatch_units(
         &serde_wasm_bindgen::to_value(&output.summary).map_err(js_error)?,
     )?;
     Ok(result.into())
-}
-
-fn run_migration(
-    patch_name: String,
-    toc: Vec<u8>,
-    gpu: Vec<u8>,
-    stream: Vec<u8>,
-    options: WebMigrateOptions,
-    category: Option<String>,
-    single_target: bool,
-) -> WasmResult<JsValue> {
-    let category = category.unwrap_or_else(|| DEFAULT_CATEGORY.to_string());
-    let patch = PatchBytes {
-        name: patch_name,
-        toc,
-        gpu,
-        stream,
-    };
-    let bundle = if single_target {
-        web::migrate_one(&category, patch, options)
-    } else {
-        web::migrate_many(&category, patch, options)
-    }
-    .map_err(js_error)?;
-    migration_result(zip_store(&bundle.files), bundle.summary)
 }
 
 fn parse_options(value: JsValue) -> WasmResult<WebMigrateOptions> {

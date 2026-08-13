@@ -99,12 +99,8 @@ pub struct WebMigrationReportRow {
     pub padded_units: usize,
     pub skipped_entries: usize,
     pub warnings: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-struct TargetBuild {
-    patch: StreamToc,
-    report: WebMigrationReportRow,
+    #[serde(default)]
+    pub mappings: Vec<super::equipment::WebMigrationMapping>,
 }
 
 pub fn list_target_options(category: &str) -> crate::Result<Vec<WebTargetOption>> {
@@ -147,58 +143,7 @@ pub fn inspect_patch(
     })
 }
 
-pub fn migrate_one(
-    category: &str,
-    patch_bytes: PatchBytes,
-    options: WebMigrateOptions,
-) -> crate::Result<WebMigrationBundle> {
-    if options.target_hashes.len() != 1 {
-        eyre::bail!("migrate_one requires exactly one target");
-    }
-    migrate_many(category, patch_bytes, options)
-}
-
-pub fn migrate_many(
-    category: &str,
-    patch_bytes: PatchBytes,
-    options: WebMigrateOptions,
-) -> crate::Result<WebMigrationBundle> {
-    validate_targets(&options)?;
-    let by_hash = archive_name_lookup(category)?;
-    let patch = patch_from_bytes(&patch_bytes)?;
-    let source_hash =
-        resolve_source_hash(category, &by_hash, &patch, options.source_hash.as_deref())?;
-    let patch_suffix = options
-        .patch_suffix
-        .as_deref()
-        .unwrap_or(DEFAULT_PATCH_SUFFIX);
-    let mut files = Vec::new();
-    let mut reports = Vec::new();
-    for target_hash in &options.target_hashes {
-        let target_name = by_hash
-            .iter()
-            .find(|(hash, _)| hash == target_hash)
-            .map(|(_, name)| name.clone())
-            .ok_or_else(|| eyre::eyre!("target {target_hash} not found in builtin index"))?;
-        let build = build_target(&patch, &source_hash, target_hash, &target_name)?;
-        files.extend(output_files(
-            build.patch,
-            &build.report.target_name,
-            patch_suffix,
-        ));
-        reports.push(build.report);
-    }
-    Ok(WebMigrationBundle {
-        files,
-        summary: summary_from_reports(reports),
-    })
-}
-
 /// Full cross-archive migration via an async [`DataSource`].
-///
-/// Unlike [`migrate_many`], this entry point can read source and target
-/// archives from a game `data/` directory (legacy or Slim install), and will
-/// run the full Mode A migration sequentially over the supplied targets.
 pub async fn migrate_many_with_source<S: DataSource + ?Sized>(
     category: &str,
     patch_bytes: PatchBytes,
@@ -224,6 +169,14 @@ pub async fn migrate_many_with_source<S: DataSource + ?Sized>(
             padded_units: result.report.padded_units,
             skipped_entries: result.report.skipped_entries,
             warnings: result.report.warnings.clone(),
+            mappings: vec![super::equipment::WebMigrationMapping {
+                category: match category {
+                    "Helmet" => super::equipment::EquipmentCategory::Helmet,
+                    _ => super::equipment::EquipmentCategory::Armor,
+                },
+                source_hash: options.source_hash.clone().unwrap_or_default(),
+                target_hash: result.target_hash.clone(),
+            }],
         };
         files.extend(output_files(
             result.patch,
@@ -245,13 +198,6 @@ fn validate_targets(options: &WebMigrateOptions) -> crate::Result<()> {
     Ok(())
 }
 
-fn archive_name_lookup(category: &str) -> crate::Result<Vec<(String, String)>> {
-    Ok(selectable_archive_entries(category)?
-        .into_iter()
-        .map(|entry| (entry.hash.clone(), entry.name.clone()))
-        .collect())
-}
-
 /// Return only actionable logical helmet options while preserving all Armor archives.
 pub(crate) fn selectable_archive_entries(
     category: &str,
@@ -271,35 +217,6 @@ pub(crate) fn selectable_archive_entries(
             mapping.unit_id(&entry.name).is_some() && seen_names.insert(entry.name.as_str())
         })
         .collect())
-}
-
-fn patch_from_bytes(bytes: &PatchBytes) -> crate::Result<StreamToc> {
-    StreamToc::from_buffers(&bytes.toc, &bytes.gpu, &bytes.stream, bytes.name.clone())
-}
-
-fn resolve_source_hash(
-    category: &str,
-    by_hash: &[(String, String)],
-    patch: &StreamToc,
-    source_hash: Option<&str>,
-) -> crate::Result<String> {
-    if let Some(hash) = source_hash {
-        ensure_archive(by_hash, hash)?;
-        return Ok(hash.to_string());
-    }
-    let patch_unit_ids = unit_file_ids(patch);
-    detect_source_via_authority(category, &patch_unit_ids)
-        .map(|option| option.hash)
-        .ok_or_else(|| {
-            eyre::eyre!("could not auto-detect source archive from authoritative mapping")
-        })
-}
-
-fn ensure_archive(by_hash: &[(String, String)], hash: &str) -> crate::Result<()> {
-    if by_hash.iter().any(|(h, _)| h == hash) {
-        return Ok(());
-    }
-    eyre::bail!("archive {hash} not found in builtin index")
 }
 
 pub(crate) fn detect_source_via_authority(
@@ -454,40 +371,6 @@ fn compare_source_candidates(left: &SourceCandidate, right: &SourceCandidate) ->
     left.unit_hits
         .cmp(&right.unit_hits)
         .then_with(|| right.option.hash.cmp(&left.option.hash))
-}
-
-fn build_target(
-    patch: &StreamToc,
-    source_hash: &str,
-    target_hash: &str,
-    target_name: &str,
-) -> crate::Result<TargetBuild> {
-    if target_hash == source_hash {
-        return Ok(build_source_target(patch, target_hash, target_name));
-    }
-    build_migrated_target(target_hash, target_name)
-}
-
-fn build_source_target(patch: &StreamToc, target_hash: &str, target_name: &str) -> TargetBuild {
-    TargetBuild {
-        patch: patch.clone(),
-        report: WebMigrationReportRow {
-            target_hash: target_hash.to_string(),
-            target_name: target_name.to_string(),
-            file_id_remapped: patch.entries.len(),
-            slot_id_remapped: 0,
-            padded_units: 0,
-            skipped_entries: 0,
-            warnings: Vec::new(),
-        },
-    }
-}
-
-fn build_migrated_target(target_hash: &str, target_name: &str) -> crate::Result<TargetBuild> {
-    eyre::bail!(
-        "cross-archive migration is not available in the browser: pick the source archive as target, \
-         or run the CLI/desktop migrator (target {target_name} / {target_hash})"
-    )
 }
 
 fn output_files(mut patch: StreamToc, target_name: &str, patch_suffix: &str) -> Vec<WebOutputFile> {

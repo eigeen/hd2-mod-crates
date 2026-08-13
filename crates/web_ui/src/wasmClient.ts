@@ -1,12 +1,13 @@
 import type { GameDataSource } from "./gameDataSource";
 import type {
-  MigrateOptions,
+  EquipmentOption,
   MigrationResult,
   PatchFiles,
   PatchInspection,
   TargetOption,
   UnitRepatchOptions,
   UnitRepatchResult,
+  UnifiedMigrateOptions,
 } from "./types";
 
 export interface MigrationProgressSink {
@@ -32,6 +33,13 @@ export async function builtinTargetOptions(category = "Armor") {
   return callWasm("builtin_target_options", () => wasm.builtin_target_options(category)) as Promise<TargetOption[]>;
 }
 
+export async function builtinEquipmentOptions() {
+  const wasm = await loadWasm();
+  return callWasm("builtin_equipment_options", () =>
+    wasm.builtin_equipment_options(),
+  ) as Promise<EquipmentOption[]>;
+}
+
 export async function detectSource(patch: PatchFiles, category = "Armor") {
   const wasm = await loadWasm();
   // 只传 toc，gpu/stream 不参与来源识别；避免把数百 MB 数据拷贝进 WASM 线性内存触发 OOM。
@@ -47,25 +55,30 @@ export async function inspectPatchContents(patch: PatchFiles, category = "Armor"
   ) as Promise<PatchInspection>;
 }
 
-export async function migrate(patch: PatchFiles, options: MigrateOptions, category = "Armor") {
+export async function inspectEquipmentContents(
+  patch: PatchFiles,
+  dataSource?: GameDataSource,
+) {
   const wasm = await loadWasm();
-  const fnName = options.targetHashes.length === 1 ? "migrate_one" : "migrate_many";
-  const fn = options.targetHashes.length === 1 ? wasm.migrate_one : wasm.migrate_many;
-  return callWasm(fnName, () =>
-    fn(patch.name, patch.toc, patch.gpu, patch.stream, options, category),
-  ) as Promise<MigrationResult>;
+  if (dataSource) {
+    return callWasm("inspect_equipment_with_source", () =>
+      wasm.inspect_equipment_with_source(patch.name, patch.toc, dataSource),
+    ) as Promise<PatchInspection>;
+  }
+  return callWasm("inspect_equipment", () =>
+    wasm.inspect_equipment(patch.name, patch.toc),
+  ) as Promise<PatchInspection>;
 }
 
-export async function migrateCrossArchive(
+export async function migrateEquipmentVariants(
   patch: PatchFiles,
-  options: MigrateOptions,
+  options: UnifiedMigrateOptions,
   dataSource: GameDataSource,
   progress: MigrationProgressSink | null,
-  category = "Armor",
 ): Promise<MigrationResult> {
   const wasm = await loadWasm();
-  return callWasm("migrate_cross_archive", () =>
-    wasm.migrate_cross_archive(
+  return callWasm("migrate_equipment_variants", () =>
+    wasm.migrate_equipment_variants(
       patch.name,
       patch.toc,
       patch.gpu,
@@ -73,7 +86,6 @@ export async function migrateCrossArchive(
       options,
       dataSource,
       progress ?? null,
-      category,
     ),
   ) as Promise<MigrationResult>;
 }

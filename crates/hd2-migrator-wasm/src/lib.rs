@@ -7,6 +7,7 @@ mod progress;
 mod zip_store;
 
 pub use api::{
-    builtin_target_options, detect_source, inspect_patch, migrate_cross_archive, migrate_many,
-    migrate_one, repatch_units,
+    builtin_equipment_options, builtin_target_options, detect_source, inspect_equipment,
+    inspect_equipment_with_source, inspect_patch, migrate_cross_archive,
+    migrate_equipment_variants, repatch_units,
 };

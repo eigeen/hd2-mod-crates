@@ -15,6 +15,12 @@ import {
   type MigrationBatch,
 } from "./migrationDownloads";
 import {
+  buildMigrationVariants,
+  configuredMappings as collectConfiguredMappings,
+  multiTargetEligible as canUseMultiTarget,
+  targetsForSource,
+} from "./migrationMappings";
+import {
   OptionsPanel,
   PatchPanel,
   PerformanceDialog,
@@ -22,25 +28,22 @@ import {
 } from "./MigratorPanels";
 import { UnitUpdaterPanel } from "./UnitUpdaterPanel";
 import { ToolIntro } from "./ToolIntro";
-import { UnclaimedModelAlert } from "./UnclaimedModelAlert";
 import type {
-  DetectedModel,
+  DetectedSource,
+  EquipmentOption,
   MissingUnitPolicy,
-  MigrateOptions,
-  MigrationCategory,
+  MigrationMapping,
   MigrationSummary,
+  MigrationVariant,
   PatchFiles,
   PatchInfo,
-  TargetOption,
   UnmatchedUnitPolicy,
   UnitRepatchSummary,
 } from "./types";
 import {
-  builtinTargetOptions,
-  detectSource,
-  inspectPatchContents,
-  migrate,
-  migrateCrossArchive,
+  builtinEquipmentOptions,
+  inspectEquipmentContents,
+  migrateEquipmentVariants,
   repatchUnits,
   type MigrationProgressSink,
 } from "./wasmClient";
@@ -51,14 +54,14 @@ type ToolMode = "migrate" | "repatch";
 function App() {
   const { t } = useI18n();
   const [toolMode, setToolMode] = useState<ToolMode>("migrate");
-  const [migrationCategory, setMigrationCategory] = useState<MigrationCategory>("Armor");
-  const [targets, setTargets] = useState<TargetOption[]>([]);
+  const [equipmentOptions, setEquipmentOptions] = useState<EquipmentOption[]>([]);
   // patch 的 Uint8Array 可能上百 MB，放在 React state 里会被 React DevTools 扩展枚举/序列化导致 CPU 拉满 + 堆 OOM。
   // 因此把字节存到 ref，state 只留小元数据用于驱动 UI。
   const patchRef = useRef<PatchFiles | null>(null);
   const [patchInfo, setPatchInfo] = useState<PatchInfo | null>(null);
-  const [sourceHash, setSourceHash] = useState("");
-  const [targetHashes, setTargetHashes] = useState<string[]>([]);
+  const [sources, setSources] = useState<DetectedSource[]>([]);
+  const [activeSourceId, setActiveSourceId] = useState("");
+  const [targetsBySource, setTargetsBySource] = useState<Record<string, string[]>>({});
   const [multiTarget, setMultiTarget] = useState(false);
   const [noPadding, setNoPadding] = useState(false);
   const [unmatchedUnitPolicy, setUnmatchedUnitPolicy] = useState<UnmatchedUnitPolicy>("drop");
@@ -66,8 +69,6 @@ function App() {
   const [progressLabel, setProgressLabel] = useState("");
   const [warningOpen, setWarningOpen] = useState(false);
   const [multiConfirmed, setMultiConfirmed] = useState(false);
-  const [showAllSources, setShowAllSources] = useState(false);
-  const [detectedModels, setDetectedModels] = useState<DetectedModel[]>([]);
   const [gameDir, setGameDir] = useState<GameDirSelection | null>(null);
   const [missingUnitPolicy, setMissingUnitPolicy] = useState<MissingUnitPolicy>("drop");
   const [faqOpen, setFaqOpen] = useState(false);
@@ -75,21 +76,27 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
-    setTargets([]);
-    builtinTargetOptions(migrationCategory)
+    builtinEquipmentOptions()
       .then((options) => {
-        if (!cancelled) setTargets(options);
+        if (!cancelled) setEquipmentOptions(options);
       })
       .catch((error) => console.error("[hd2-migrator] load builtin targets failed:", error));
     return () => {
       cancelled = true;
     };
-  }, [migrationCategory]);
+  }, []);
 
-  const selectedTargetCount = targetHashes.length;
+  const activeSource = sources.find((source) => source.id === activeSourceId) ?? null;
+  const activeTargets = activeSource ? targetsBySource[activeSource.id] ?? [] : [];
+  const configuredMappings = useMemo(
+    () => collectConfiguredMappings(sources, targetsBySource),
+    [sources, targetsBySource],
+  );
+  const selectedTargetCount = configuredMappings.length;
+  const multiTargetEligible = canUseMultiTarget(sources);
   const crossArchiveReady = gameDir !== null && gameDir.status.kind !== "empty";
   const canMigrate = Boolean(
-    targets.length && patchInfo && sourceHash && selectedTargetCount && crossArchiveReady,
+    equipmentOptions.length && patchInfo && selectedTargetCount && crossArchiveReady,
   );
   const canRepatch = Boolean(patchInfo && crossArchiveReady);
   const canRun = toolMode === "migrate" ? canMigrate : canRepatch;
@@ -100,50 +107,36 @@ function App() {
   }, t);
   const patchMessages = useMemo(() => patchFileMessages(t), [t]);
 
-  const sourceChoices = useMemo(
-    () => (patchInfo ? sourceChoicesForSelection(targets, sourceHash, showAllSources) : []),
-    [patchInfo, showAllSources, sourceHash, targets],
-  );
-
   const targetOptions = useMemo(
-    () => targets.filter((target) => target.hash !== sourceHash),
-    [sourceHash, targets],
-  );
-  const currentSourceName = useMemo(
-    () => targets.find((target) => target.hash === sourceHash)?.name ?? null,
-    [sourceHash, targets],
+    () => targetsForSource(activeSource, equipmentOptions),
+    [activeSource, equipmentOptions],
   );
 
   const applyPatch = useCallback(async (nextPatch: PatchFiles) => {
     patchRef.current = nextPatch;
     setPatchInfo({ name: nextPatch.name });
-    setSourceHash("");
-    setTargetHashes([]);
-    setShowAllSources(false);
-    setDetectedModels([]);
-    await inspectPatch({
-      category: migrationCategory,
-      patch: nextPatch,
-      setDetectedModels,
-      setSourceHash,
-      setShowAllSources,
-    });
-  }, [migrationCategory]);
+    setTargetsBySource({});
+    setMultiTarget(false);
+    const dataSource = gameDir ? new GameDataSource(gameDir.handle) : undefined;
+    const inspection = await inspectEquipmentContents(nextPatch, dataSource);
+    setSources(inspection.sources);
+    setActiveSourceId(inspection.sources[0]?.id ?? "");
+  }, [gameDir]);
 
-  const chooseMigrationCategory = useCallback((category: MigrationCategory) => {
-    setMigrationCategory(category);
-    setSourceHash("");
-    setTargetHashes([]);
-    setShowAllSources(false);
+  useEffect(() => {
     const patch = patchRef.current;
-    if (!patch) return;
-    void runTask(setBusy, () => detectPatchSource({
-      category,
-      patch,
-      setSourceHash,
-      setShowAllSources,
-    }));
-  }, []);
+    if (!patch || !gameDir) return;
+    void runTask(setBusy, async () => {
+      const inspection = await inspectEquipmentContents(
+        patch,
+        new GameDataSource(gameDir.handle),
+      );
+      setSources(inspection.sources);
+      setActiveSourceId(inspection.sources[0]?.id ?? "");
+      setTargetsBySource({});
+      setMultiTarget(false);
+    });
+  }, [gameDir]);
 
   const importPatchFiles = useCallback(
     async (files: FileList | null) => {
@@ -157,75 +150,95 @@ function App() {
   );
 
   const toggleMultiTarget = useCallback((enabled: boolean) => {
+    if (!multiTargetEligible || !activeSource) return;
     setMultiTarget(enabled);
     if (!enabled) {
-      setTargetHashes((current) => current.slice(0, 1));
+      setTargetsBySource((current) => ({
+        ...current,
+        [activeSource.id]: (current[activeSource.id] ?? []).slice(0, 1),
+      }));
       return;
     }
     if (!multiConfirmed) {
       setWarningOpen(true);
     }
-  }, [multiConfirmed]);
+  }, [activeSource, multiConfirmed, multiTargetEligible]);
 
-  const chooseSource = useCallback((hash: string) => {
-    setSourceHash(hash);
-    setTargetHashes((current) => current.filter((h) => h !== hash));
+  const chooseSource = useCallback((sourceId: string) => {
+    setActiveSourceId(sourceId);
+  }, []);
+
+  const resolveSource = useCallback((sourceId: string, hash: string) => {
+    setSources((current) => current.map((source) => (
+      source.id === sourceId ? { ...source, resolvedHash: hash } : source
+    )));
+    setTargetsBySource((current) => ({ ...current, [sourceId]: [] }));
   }, []);
 
   const chooseTarget = useCallback(
     (hash: string) => {
+      if (!activeSource) return;
       if (!multiTarget) {
-        setTargetHashes([hash]);
+        setTargetsBySource((current) => ({ ...current, [activeSource.id]: [hash] }));
         return;
       }
-      setTargetHashes((current) => toggleHash(current, hash));
+      setTargetsBySource((current) => ({
+        ...current,
+        [activeSource.id]: toggleHash(current[activeSource.id] ?? [], hash),
+      }));
     },
-    [multiTarget],
+    [activeSource, multiTarget],
   );
+
+  const chooseTargetBatch = useCallback((hashes: string[]) => {
+    if (!activeSource) return;
+    setTargetsBySource((current) => ({ ...current, [activeSource.id]: hashes }));
+  }, [activeSource]);
 
   const runMigration = useCallback(async () => {
     const patch = patchRef.current;
     if (!patch) return;
-    if (multiTarget && targetHashes.length > 1 && !multiConfirmed) {
+    if (multiTarget && configuredMappings.length > 1 && !multiConfirmed) {
       setWarningOpen(true);
       return;
     }
-    const options: MigrateOptions = {
-      sourceHash,
-      targetHashes,
-      patchSuffix: PATCH_SUFFIX,
-      noPadding,
-      unmatchedUnitPolicy,
-    };
-    const dataSource = gameDir ? new GameDataSource(gameDir.handle) : null;
+    if (!gameDir) return;
+    const dataSource = new GameDataSource(gameDir.handle);
+    const variants = buildMigrationVariants(configuredMappings, sources.length === 1);
     setProgressLabel("");
     await runTask(setBusy, async () => {
-      const summary = await migrateTargetsToBatchDownloads({
-        patchByteLength: patch.toc.byteLength + patch.gpu.byteLength + patch.stream.byteLength,
-        targetHashes,
-        targets,
-        migrateBatch: (batch) => migrateTargetBatch({
-          batch,
-          category: migrationCategory,
-          dataSource,
-          options,
-          patch,
-          progress: migrationProgress(batch, setProgressLabel, t),
-        }),
-        download: downloadZip,
-      });
+      const summary = variants.length > 1
+        ? await migrateSingleSourceVariants({
+            dataSource,
+            mappings: configuredMappings,
+            noPadding,
+            options: equipmentOptions,
+            patch,
+            setProgressLabel,
+            t,
+            unmatchedUnitPolicy,
+          })
+        : await migrateCombinedVariant({
+            dataSource,
+            noPadding,
+            options: equipmentOptions,
+            patch,
+            setProgressLabel,
+            t,
+            unmatchedUnitPolicy,
+            variant: variants[0]!,
+          });
       showMigrationReport(summary, t);
     });
     setProgressLabel("");
   }, [
     gameDir,
-    migrationCategory,
+    configuredMappings,
+    equipmentOptions,
     multiConfirmed,
     multiTarget,
     noPadding,
-    sourceHash,
-    targetHashes,
-    targets,
+    sources.length,
     t,
     unmatchedUnitPolicy,
   ]);
@@ -319,30 +332,25 @@ function App() {
 
           <div className="border-t border-hd2-border">
             {toolMode === "migrate" ? <TargetPanel
-              category={migrationCategory}
+              activeSourceId={activeSourceId}
+              equipmentOptions={equipmentOptions}
               multiTarget={multiTarget}
-              onBatchSelect={setTargetHashes}
-              onCategoryChange={chooseMigrationCategory}
+              multiTargetEligible={multiTargetEligible}
+              onBatchSelect={chooseTargetBatch}
+              onResolveSource={resolveSource}
               onMultiTargetChange={toggleMultiTarget}
               onSourceChange={chooseSource}
               onTargetChange={chooseTarget}
-              selectedTargets={targetHashes}
-              sourceHash={sourceHash}
-              sourceChoices={sourceChoices}
+              selectedTargets={activeTargets}
+              sources={sources}
               targetOptions={targetOptions}
+              targetSelectionEnabled={Boolean(activeSource?.resolvedHash)}
+              targetsBySource={targetsBySource}
             /> : <UnitUpdaterPanel
               missingUnitPolicy={missingUnitPolicy}
               onMissingUnitPolicyChange={setMissingUnitPolicy}
             />}
           </div>
-
-          {toolMode === "migrate" && (
-            <UnclaimedModelAlert
-              currentCategory={migrationCategory}
-              currentSourceName={currentSourceName}
-              detectedModels={detectedModels}
-            />
-          )}
 
           {/* Action row: options + blocker hint + execute */}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-hd2-border bg-hd2-pit px-5 py-3">
@@ -407,46 +415,114 @@ function nextBlockerHint(input: BlockerHintInput, t: Translate): string {
   return "";
 }
 
-interface TargetBatchMigrationRequest {
-  batch: MigrationBatch;
-  category: MigrationCategory;
-  dataSource: GameDataSource | null;
-  options: MigrateOptions;
+interface SingleSourceMigrationRequest {
+  dataSource: GameDataSource;
+  mappings: MigrationMapping[];
+  noPadding: boolean;
+  options: EquipmentOption[];
   patch: PatchFiles;
-  progress: MigrationProgressSink;
+  setProgressLabel: (label: string) => void;
+  t: Translate;
+  unmatchedUnitPolicy: UnmatchedUnitPolicy;
 }
 
-/** Route one memory-bounded target batch through the applicable WASM migration entry point. */
-async function migrateTargetBatch(request: TargetBatchMigrationRequest) {
-  const options = { ...request.options, targetHashes: request.batch.targetHashes };
-  const needsGameData = options.targetHashes.some((hash) => hash !== options.sourceHash);
-  if (!request.dataSource || !needsGameData) {
-    return migrate(request.patch, options, request.category);
-  }
-  return migrateCrossArchive(
+/** Preserve the existing memory-bounded download behavior for one source with many targets. */
+async function migrateSingleSourceVariants(
+  request: SingleSourceMigrationRequest,
+): Promise<MigrationSummary> {
+  const targetHashes = request.mappings.map((mapping) => mapping.targetHash);
+  return migrateTargetsToBatchDownloads({
+    patchByteLength: patchByteLength(request.patch),
+    targetHashes,
+    targets: request.options,
+    migrateBatch: (batch) => {
+      const mappings = batch.targetHashes.map((targetHash) => ({
+        ...request.mappings[0],
+        targetHash,
+      }));
+      return migrateEquipmentVariants(
+        request.patch,
+        unifiedOptions(mappings.map((mapping) => ({ mappings: [mapping] })), request),
+        request.dataSource,
+        migrationProgress(batch, mappings, request.options, request.setProgressLabel, request.t),
+      );
+    },
+    download: downloadZip,
+  });
+}
+
+interface CombinedMigrationRequest {
+  dataSource: GameDataSource;
+  noPadding: boolean;
+  options: EquipmentOption[];
+  patch: PatchFiles;
+  setProgressLabel: (label: string) => void;
+  t: Translate;
+  unmatchedUnitPolicy: UnmatchedUnitPolicy;
+  variant: MigrationVariant;
+}
+
+async function migrateCombinedVariant(
+  request: CombinedMigrationRequest,
+): Promise<MigrationSummary> {
+  const result = await migrateEquipmentVariants(
     request.patch,
-    options,
+    unifiedOptions([request.variant], request),
     request.dataSource,
-    request.progress,
-    request.category,
+    migrationProgress(
+      null,
+      request.variant.mappings,
+      request.options,
+      request.setProgressLabel,
+      request.t,
+    ),
   );
+  downloadZip(result.zipBytes, "hd2-migrated-patch.zip");
+  return result.summary;
+}
+
+function unifiedOptions(
+  variants: MigrationVariant[],
+  settings: Pick<SingleSourceMigrationRequest, "noPadding" | "unmatchedUnitPolicy">,
+) {
+  return {
+    variants,
+    patchSuffix: PATCH_SUFFIX,
+    noPadding: settings.noPadding,
+    unmatchedUnitPolicy: settings.unmatchedUnitPolicy,
+  };
 }
 
 function migrationProgress(
-  batch: MigrationBatch,
+  batch: MigrationBatch | null,
+  mappings: MigrationMapping[],
+  options: EquipmentOption[],
   setProgressLabel: (label: string) => void,
   t: Translate,
 ): MigrationProgressSink {
-  let targetIndex = batch.targetOffset;
-  const label = (name: string) => numberedTargetLabel(name, targetIndex, batch.targetCount);
+  let mappingIndex = 0;
+  const targetOffset = batch?.targetOffset ?? 0;
+  const targetCount = batch?.targetCount ?? mappings.length;
+  const label = () => {
+    const mapping = mappings[Math.min(mappingIndex, mappings.length - 1)];
+    const source = options.find((candidate) => candidate.hash === mapping?.sourceHash)?.name
+      ?? mapping?.sourceHash;
+    const target = options.find((candidate) => candidate.hash === mapping?.targetHash)?.name
+      ?? mapping?.targetHash;
+    return numberedTargetLabel(`${source} → ${target}`, targetOffset + mappingIndex, targetCount);
+  };
   return {
-    onTargetStart: (name) => setProgressLabel(t("app.progressMigrating", { name: label(name) })),
-    onStage: (name, stage) => setProgressLabel(t("app.progressStage", { name: label(name), stage })),
+    onTargetStart: () => setProgressLabel(t("app.progressMigrating", { name: label() })),
+    onStage: (_name, stage) => setProgressLabel(t("app.progressStage", { name: label(), stage })),
     onTargetFinish: () => {
-      targetIndex += 1;
+      mappingIndex += 1;
       setProgressLabel("");
     },
   };
+}
+
+function patchByteLength(patch: PatchFiles): number {
+  return patch.toc.byteLength + patch.gpu.byteLength + patch.stream.byteLength;
 }
 
 function numberedTargetLabel(name: string, targetIndex: number, targetCount: number): string {
@@ -489,47 +565,6 @@ function showUnitRepatchReport(summary: UnitRepatchSummary, t: Translate): void 
     return;
   }
   toast.success(t("repatch.reportTitle"), options);
-}
-
-function sourceChoicesForSelection(
-  targets: TargetOption[],
-  sourceHash: string,
-  showAllSources: boolean,
-) {
-  if (showAllSources) return targets;
-  const selectedSource = targets.find((target) => target.hash === sourceHash);
-  return selectedSource ? [selectedSource] : [];
-}
-
-interface DetectPatchSourceRequest {
-  category: MigrationCategory;
-  patch: PatchFiles;
-  setSourceHash: (hash: string) => void;
-  setShowAllSources: (show: boolean) => void;
-}
-
-async function detectPatchSource(request: DetectPatchSourceRequest) {
-  const { category, patch, setSourceHash, setShowAllSources } = request;
-  const source = await detectSource(patch, category);
-  if (source) {
-    setSourceHash(source.hash);
-    return;
-  }
-  setShowAllSources(true);
-}
-
-interface InspectPatchRequest extends DetectPatchSourceRequest {
-  setDetectedModels: (models: DetectedModel[]) => void;
-}
-
-async function inspectPatch(request: InspectPatchRequest) {
-  const inspection = await inspectPatchContents(request.patch, request.category);
-  request.setDetectedModels(inspection.models);
-  if (inspection.source) {
-    request.setSourceHash(inspection.source.hash);
-    return;
-  }
-  request.setShowAllSources(true);
 }
 
 function toggleHash(values: string[], hash: string) {

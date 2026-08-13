@@ -94,6 +94,7 @@ test("migrates, downloads, and summarizes batches sequentially", async () => {
 
 function makeTargets(count: number): TargetOption[] {
   return Array.from({ length: count }, (_, index) => ({
+    category: "Armor",
     hash: `hash-${index}`,
     name: index === 1 ? "Target/1" : `Target ${index}`,
     excluded: false,
@@ -109,6 +110,7 @@ function migrationResult(targetHashes: string[]): MigrationResult {
     paddedUnits: 0,
     skippedEntries: 0,
     warnings: targetHash === "hash-4" ? ["warning"] : [],
+    mappings: [],
   }));
   return {
     zipBytes: new Uint8Array([1]),
