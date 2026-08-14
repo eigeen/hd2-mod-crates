@@ -93,6 +93,7 @@ interface TargetPanelProps {
   onSourceChange: (sourceId: string) => void;
   onTargetChange: (hash: string) => void;
   selectedTargets: string[];
+  separateOutputMappingLimit: number;
   singlePatch: boolean;
   singlePatchMappingLimit: number;
   singlePatchRequired: boolean;
@@ -134,6 +135,12 @@ export function TargetPanel(props: TargetPanelProps) {
               : "mapping.singlePatchHelp",
             { max: props.singlePatchMappingLimit },
           )} />
+          <span className="border border-hd2-line px-2 py-1 text-center text-[0.6875rem] text-hd2-muted">
+            {t("mapping.outputLimitPreview", {
+              separate: props.separateOutputMappingLimit,
+              single: props.singlePatchMappingLimit,
+            })}
+          </span>
         </>}
       </div>
 

@@ -86,6 +86,7 @@ export const translationKeys = [
   "mapping.singlePatch",
   "mapping.singlePatchHelp",
   "mapping.singlePatchForcedHelp",
+  "mapping.outputLimitPreview",
   "mapping.source",
   "mapping.target",
   "mapping.importPatchFirst",

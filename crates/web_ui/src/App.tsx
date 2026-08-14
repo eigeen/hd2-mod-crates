@@ -18,8 +18,8 @@ import {
   buildMigrationVariants,
   configuredMappings as collectConfiguredMappings,
   exceedsWebMappingLimit,
-  MAX_WEB_MAPPINGS_PER_RUN,
-  maxWebVariantsForPatch,
+  MAX_WEB_SINGLE_PATCH_MAPPINGS,
+  maxWebSeparateOutputsForPatch,
   multiTargetEligible as canUseMultiTarget,
   selectTarget,
   singlePatchRequired as mustUseSinglePatch,
@@ -102,8 +102,8 @@ function App() {
   const selectedTargetCount = configuredMappings.length;
   const singlePatchRequired = mustUseSinglePatch(configuredMappings);
   const outputAsSinglePatch = singlePatch || singlePatchRequired;
-  const singlePatchMappingLimit = MAX_WEB_MAPPINGS_PER_RUN;
-  const separateOutputMappingLimit = maxWebVariantsForPatch(
+  const singlePatchMappingLimit = MAX_WEB_SINGLE_PATCH_MAPPINGS;
+  const separateOutputMappingLimit = maxWebSeparateOutputsForPatch(
     patchRef.current ? patchByteLength(patchRef.current) : 0,
   );
   const webMappingLimit = outputAsSinglePatch
@@ -395,6 +395,7 @@ function App() {
               onSourceChange={chooseSource}
               onTargetChange={chooseTarget}
               selectedTargets={activeTargets}
+              separateOutputMappingLimit={separateOutputMappingLimit}
               singlePatch={outputAsSinglePatch}
               singlePatchMappingLimit={singlePatchMappingLimit}
               singlePatchRequired={singlePatchRequired}

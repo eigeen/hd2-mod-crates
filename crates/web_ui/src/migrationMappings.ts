@@ -5,15 +5,16 @@ import type {
   MigrationVariant,
 } from "./types";
 
-export const MAX_WEB_MAPPINGS_PER_RUN = 20;
+export const MAX_WEB_SEPARATE_PATCH_OUTPUTS = 20;
+export const MAX_WEB_SINGLE_PATCH_MAPPINGS = 20;
 const GIB = 1024 * 1024 * 1024;
 export const MAX_WEB_PROJECTED_OUTPUT_BYTES = 2 * GIB;
 
 /** Bound independent outputs by count and projected uncompressed ZIP size. */
-export function maxWebVariantsForPatch(patchByteLength: number): number {
-  if (patchByteLength <= 0) return MAX_WEB_MAPPINGS_PER_RUN;
+export function maxWebSeparateOutputsForPatch(patchByteLength: number): number {
+  if (patchByteLength <= 0) return MAX_WEB_SEPARATE_PATCH_OUTPUTS;
   const sizeLimit = Math.floor(MAX_WEB_PROJECTED_OUTPUT_BYTES / patchByteLength);
-  return Math.max(1, Math.min(MAX_WEB_MAPPINGS_PER_RUN, sizeLimit));
+  return Math.max(1, Math.min(MAX_WEB_SEPARATE_PATCH_OUTPUTS, sizeLimit));
 }
 
 export function configuredMappings(
@@ -54,10 +55,10 @@ export function singlePatchRequired(mappings: MigrationMapping[]): boolean {
   return mappingsBySource(mappings).length > 1;
 }
 
-/** Keep every web run bounded; callers may lower the limit for single-Patch jobs. */
+/** Keep every web run within its output mode's explicit mapping limit. */
 export function exceedsWebMappingLimit(
   mappings: MigrationMapping[],
-  limit = MAX_WEB_MAPPINGS_PER_RUN,
+  limit: number,
 ): boolean {
   return mappings.length > limit;
 }

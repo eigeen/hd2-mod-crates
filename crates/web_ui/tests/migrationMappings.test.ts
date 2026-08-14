@@ -3,8 +3,9 @@ import {
   buildMigrationVariants,
   configuredMappings,
   exceedsWebMappingLimit,
-  MAX_WEB_MAPPINGS_PER_RUN,
-  maxWebVariantsForPatch,
+  MAX_WEB_SEPARATE_PATCH_OUTPUTS,
+  MAX_WEB_SINGLE_PATCH_MAPPINGS,
+  maxWebSeparateOutputsForPatch,
   multiTargetEligible,
   selectTarget,
   singlePatchRequired,
@@ -94,7 +95,7 @@ describe("unified migration mapping state", () => {
 
   test("limits every migration job in the web build", () => {
     const mappings = Array.from(
-      { length: MAX_WEB_MAPPINGS_PER_RUN + 1 },
+      { length: MAX_WEB_SINGLE_PATCH_MAPPINGS + 1 },
       (_, index) => ({
         category: "Armor" as const,
         sourceHash: armor.hash,
@@ -103,15 +104,17 @@ describe("unified migration mapping state", () => {
     );
 
     expect(exceedsWebMappingLimit(
-      mappings.slice(0, MAX_WEB_MAPPINGS_PER_RUN),
+      mappings.slice(0, MAX_WEB_SINGLE_PATCH_MAPPINGS),
+      MAX_WEB_SINGLE_PATCH_MAPPINGS,
     )).toBe(false);
-    expect(exceedsWebMappingLimit(mappings)).toBe(true);
+    expect(exceedsWebMappingLimit(mappings, MAX_WEB_SINGLE_PATCH_MAPPINGS)).toBe(true);
     expect(exceedsWebMappingLimit(mappings.slice(0, 6), 5)).toBe(true);
   });
 
   test("raises the measured 151 MiB fixture from six to thirteen independent outputs", () => {
-    expect(maxWebVariantsForPatch(158_659_188)).toBe(13);
-    expect(maxWebVariantsForPatch(50 * 1024 * 1024)).toBe(20);
+    expect(maxWebSeparateOutputsForPatch(158_659_188)).toBe(13);
+    expect(maxWebSeparateOutputsForPatch(50 * 1024 * 1024))
+      .toBe(MAX_WEB_SEPARATE_PATCH_OUTPUTS);
   });
 
   test("enables multi-target when any source is resolved", () => {
