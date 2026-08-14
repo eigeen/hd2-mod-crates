@@ -3,6 +3,7 @@
 mod api;
 mod data_source;
 mod error;
+mod output_sink;
 mod progress;
 mod zip_store;
 

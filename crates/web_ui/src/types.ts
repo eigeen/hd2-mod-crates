@@ -60,7 +60,7 @@ export interface UnifiedMigrateOptions {
 export type UnmatchedUnitPolicy = "drop" | "keep";
 
 export interface MigrationResult {
-  zipBytes: Uint8Array;
+  zipBlob: Blob;
   summary: MigrationSummary;
 }
 

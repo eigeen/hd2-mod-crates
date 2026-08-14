@@ -67,8 +67,8 @@ export function validatePatchFiles(
   });
 }
 
-export function downloadZip(bytes: Uint8Array, filename: string) {
-  downloadBlob(new Blob([exactBuffer(bytes)], { type: "application/zip" }), filename);
+export function downloadZip(blob: Blob, filename: string) {
+  downloadBlob(blob, filename);
 }
 
 export function downloadRepatchedPatch(
@@ -91,22 +91,42 @@ interface StoreZipEntry {
 }
 
 function storeZip(entries: StoreZipEntry[]): Blob {
-  const parts: BlobPart[] = [];
-  const centralParts: BlobPart[] = [];
-  let offset = 0;
-  let centralSize = 0;
+  const builder = new StoreZipBuilder();
   for (const entry of entries) {
-    const encodedName = new TextEncoder().encode(entry.name);
-    const crc = crc32(entry.bytes);
-    const local = localZipHeader(encodedName, entry.bytes.length, crc);
-    const central = centralZipHeader(encodedName, entry.bytes.length, crc, offset);
-    parts.push(exactBuffer(local), exactBuffer(entry.bytes));
-    centralParts.push(exactBuffer(central));
-    offset += local.length + entry.bytes.length;
-    centralSize += central.length;
+    builder.add(entry.name, entry.bytes);
   }
-  parts.push(...centralParts, exactBuffer(endOfCentralDirectory(entries.length, centralSize, offset)));
-  return new Blob(parts, { type: "application/zip" });
+  return builder.finish();
+}
+
+/** Store output files as Blob-backed ZIP pieces so completed WASM buffers can be released. */
+export class StoreZipBuilder {
+  private readonly fileParts: Blob[] = [];
+  private readonly centralParts: ArrayBuffer[] = [];
+  private offset = 0;
+  private centralSize = 0;
+
+  add(name: string, bytes: Uint8Array): void {
+    const encodedName = new TextEncoder().encode(name);
+    const crc = crc32(bytes);
+    const local = localZipHeader(encodedName, bytes.length, crc);
+    const central = centralZipHeader(encodedName, bytes.length, crc, this.offset);
+    this.fileParts.push(new Blob([exactBuffer(local), exactBuffer(bytes)]));
+    this.centralParts.push(exactBuffer(central));
+    this.offset += local.length + bytes.length;
+    this.centralSize += central.length;
+  }
+
+  finish(): Blob {
+    const end = endOfCentralDirectory(
+      this.centralParts.length,
+      this.centralSize,
+      this.offset,
+    );
+    return new Blob(
+      [...this.fileParts, ...this.centralParts, exactBuffer(end)],
+      { type: "application/zip" },
+    );
+  }
 }
 
 function localZipHeader(name: Uint8Array, size: number, crc: number): Uint8Array {

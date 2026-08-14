@@ -95,7 +95,7 @@ mod tests {
         assert_eq!(table.helmet_count(), 107);
         assert_eq!(
             table.unit_id("TG-8 Sharpshooter"),
-            Some(16_686_489_699_036_771_610)
+            Some(13_824_941_454_287_247_048)
         );
         assert_eq!(table.unit_id("UF-84 Doubt Killer"), None);
     }

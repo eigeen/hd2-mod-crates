@@ -12,8 +12,6 @@ import { useI18n, type Translate } from "./i18n";
 import type { TranslationKey } from "./locales/translationKeys";
 import { LanguageMenu } from "./LanguageMenu";
 import {
-  migrationBatchSize,
-  migrateVariantsToBatchDownloads,
   uniqueOutputFilename,
 } from "./migrationDownloads";
 import {
@@ -21,6 +19,7 @@ import {
   configuredMappings as collectConfiguredMappings,
   exceedsWebMappingLimit,
   MAX_WEB_MAPPINGS_PER_RUN,
+  maxWebVariantsForPatch,
   multiTargetEligible as canUseMultiTarget,
   selectTarget,
   singlePatchRequired as mustUseSinglePatch,
@@ -103,13 +102,13 @@ function App() {
   const selectedTargetCount = configuredMappings.length;
   const singlePatchRequired = mustUseSinglePatch(configuredMappings);
   const outputAsSinglePatch = singlePatch || singlePatchRequired;
-  const singlePatchMappingLimit = Math.min(
-    MAX_WEB_MAPPINGS_PER_RUN,
-    migrationBatchSize(patchRef.current ? patchByteLength(patchRef.current) : 0),
+  const singlePatchMappingLimit = MAX_WEB_MAPPINGS_PER_RUN;
+  const separateOutputMappingLimit = maxWebVariantsForPatch(
+    patchRef.current ? patchByteLength(patchRef.current) : 0,
   );
   const webMappingLimit = outputAsSinglePatch
     ? singlePatchMappingLimit
-    : MAX_WEB_MAPPINGS_PER_RUN;
+    : separateOutputMappingLimit;
   const webMappingLimitExceeded = exceedsWebMappingLimit(
     configuredMappings,
     webMappingLimit,
@@ -194,12 +193,13 @@ function App() {
   }, [multiConfirmed, multiTargetEligible]);
 
   const toggleSinglePatch = useCallback((enabled: boolean) => {
-    if (!enabled || configuredMappings.length <= singlePatchMappingLimit) {
+    const nextLimit = enabled ? singlePatchMappingLimit : separateOutputMappingLimit;
+    if (configuredMappings.length <= nextLimit) {
       setSinglePatch(enabled);
       return;
     }
-    showWebMappingLimitWarning(configuredMappings.length, singlePatchMappingLimit, t);
-  }, [configuredMappings.length, singlePatchMappingLimit, t]);
+    showWebMappingLimitWarning(configuredMappings.length, nextLimit, t);
+  }, [configuredMappings.length, separateOutputMappingLimit, singlePatchMappingLimit, t]);
 
   const chooseSource = useCallback((sourceId: string) => {
     setActiveSourceId(sourceId);
@@ -221,7 +221,7 @@ function App() {
     const nextSinglePatch = singlePatch || mustUseSinglePatch(nextMappings);
     const nextMappingLimit = nextSinglePatch
       ? singlePatchMappingLimit
-      : MAX_WEB_MAPPINGS_PER_RUN;
+      : separateOutputMappingLimit;
     const reducesMappingCount = nextMappings.length < configuredMappings.length;
     if (!reducesMappingCount
       && exceedsWebMappingLimit(nextMappings, nextMappingLimit)) {
@@ -234,6 +234,7 @@ function App() {
     configuredMappings.length,
     singlePatch,
     singlePatchMappingLimit,
+    separateOutputMappingLimit,
     sources,
     t,
     targetsBySource,
@@ -259,27 +260,16 @@ function App() {
     const dataSource = new GameDataSource(gameDir.handle);
     setProgressLabel("");
     await runTask(setBusy, async () => {
-      const summary = variants.length > 1
-        ? await migrateVariantBatches({
-            dataSource,
-            noPadding,
-            options: equipmentOptions,
-            patch,
-            setProgressLabel,
-            t,
-            unmatchedUnitPolicy,
-            variants,
-          })
-        : await migrateCombinedVariant({
-            dataSource,
-            noPadding,
-            options: equipmentOptions,
-            patch,
-            setProgressLabel,
-            t,
-            unmatchedUnitPolicy,
-            variant: variants[0]!,
-          });
+      const summary = await migrateVariants({
+        dataSource,
+        noPadding,
+        options: equipmentOptions,
+        patch,
+        setProgressLabel,
+        t,
+        unmatchedUnitPolicy,
+        variants,
+      });
       showMigrationReport(summary, t);
     }, t);
     setProgressLabel("");
@@ -520,64 +510,36 @@ interface VariantMigrationRequest {
   variants: MigrationVariant[];
 }
 
-/** Process target combinations in batches so multi-source expansion stays memory bounded. */
-async function migrateVariantBatches(
+/** Migrate all selected variants into one incrementally assembled ZIP. */
+async function migrateVariants(
   request: VariantMigrationRequest,
 ): Promise<MigrationSummary> {
-  return migrateVariantsToBatchDownloads({
-    patchByteLength: patchByteLength(request.patch),
-    variants: request.variants,
-    onMultipleDownloads: (downloadCount) => showMultipleDownloadsWarning(downloadCount, request.t),
-    migrateBatch: (batch) => {
-      const mappings = batch.variants.flatMap((variant) => variant.mappings);
-      return migrateEquipmentVariants(
-        request.patch,
-        unifiedOptions(batch.variants, request),
-        request.dataSource,
-        migrationProgress(mappings, request.options, request.setProgressLabel, request.t),
-      );
-    },
-    download: downloadZip,
-  });
-}
-
-interface CombinedMigrationRequest {
-  dataSource: GameDataSource;
-  noPadding: boolean;
-  options: EquipmentOption[];
-  patch: PatchFiles;
-  setProgressLabel: (label: string) => void;
-  t: Translate;
-  unmatchedUnitPolicy: UnmatchedUnitPolicy;
-  variant: MigrationVariant;
-}
-
-async function migrateCombinedVariant(
-  request: CombinedMigrationRequest,
-): Promise<MigrationSummary> {
+  const mappings = request.variants.flatMap((variant) => variant.mappings);
   const result = await migrateEquipmentVariants(
     request.patch,
-    unifiedOptions([request.variant], request),
+    unifiedOptions(request.variants, request),
     request.dataSource,
     migrationProgress(
-      request.variant.mappings,
+      mappings,
       request.options,
       request.setProgressLabel,
       request.t,
     ),
   );
   downloadZip(
-    result.zipBytes,
-    combinedOutputFilename(request.patch, request.variant, request.options),
+    result.zipBlob,
+    migrationOutputFilename(request.patch, request.variants, request.options),
   );
   return result.summary;
 }
 
-function combinedOutputFilename(
+function migrationOutputFilename(
   patch: PatchFiles,
-  variant: MigrationVariant,
+  variants: MigrationVariant[],
   options: EquipmentOption[],
 ): string {
+  const variant = variants.length === 1 ? variants[0] : undefined;
+  if (!variant) return "hd2-migrated-patch.zip";
   const mapping = variant.mappings.length === 1 ? variant.mappings[0] : undefined;
   if (!mapping) return "hd2-migrated-patch.zip";
   return uniqueOutputFilename(
@@ -652,14 +614,6 @@ function showMigrationReport(summary: MigrationSummary, t: Translate): void {
   } else {
     toast.success(title, { description, duration: 6000 });
   }
-}
-
-function showMultipleDownloadsWarning(downloadCount: number, t: Translate): void {
-  toast.warning(t("downloads.multipleTitle", { count: downloadCount }), {
-    closeButton: true,
-    description: t("downloads.multipleDescription"),
-    duration: Infinity,
-  });
 }
 
 function showUnitRepatchReport(summary: UnitRepatchSummary, t: Translate): void {

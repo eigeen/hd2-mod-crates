@@ -23,5 +23,6 @@ pub use repatch::{
     MissingUnitPolicy, UnitRepatchOptions, UnitRepatchResult, UnitRepatchSummary, repatch_units,
 };
 pub use unified_migration::{
-    WebMigrationVariant, WebUnifiedMigrateOptions, migrate_variants_with_source,
+    VariantMigrationCallbacks, WebMigrationVariant, WebUnifiedMigrateOptions,
+    migrate_variants_to_sink, migrate_variants_with_source,
 };

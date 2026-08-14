@@ -32,6 +32,20 @@ pub struct WebUnifiedMigrateOptions {
     pub unmatched_unit_policy: UnmatchedUnitPolicy,
 }
 
+pub struct VariantMigrationCallbacks<'a, F> {
+    progress: Option<&'a dyn mode_a_web::WebProgress>,
+    write_file: F,
+}
+
+impl<'a, F> VariantMigrationCallbacks<'a, F> {
+    pub fn new(progress: Option<&'a dyn mode_a_web::WebProgress>, write_file: F) -> Self {
+        Self {
+            progress,
+            write_file,
+        }
+    }
+}
+
 /// Migrate every mapping from the original patch, then merge their independent outputs.
 pub async fn migrate_variants_with_source<S: DataSource + ?Sized>(
     patch_bytes: PatchBytes,
@@ -39,19 +53,38 @@ pub async fn migrate_variants_with_source<S: DataSource + ?Sized>(
     source: &S,
     progress: Option<&dyn mode_a_web::WebProgress>,
 ) -> crate::Result<WebMigrationBundle> {
+    let mut files = Vec::new();
+    let callbacks = VariantMigrationCallbacks::new(progress, |file| {
+        files.push(file);
+        Ok(())
+    });
+    let summary = migrate_variants_to_sink(patch_bytes, options, source, callbacks).await?;
+    Ok(WebMigrationBundle { files, summary })
+}
+
+/// Migrate variants and release each serialized output after the sink consumes it.
+pub async fn migrate_variants_to_sink<S, F>(
+    patch_bytes: PatchBytes,
+    options: WebUnifiedMigrateOptions,
+    source: &S,
+    mut callbacks: VariantMigrationCallbacks<'_, F>,
+) -> crate::Result<WebMigrationSummary>
+where
+    S: DataSource + ?Sized,
+    F: FnMut(WebOutputFile) -> crate::Result<()>,
+{
     validate_variants(&options.variants)?;
     let unit_plans = unit_plan::build_variant_plans(&options.variants)?;
     let suffix = options
         .patch_suffix
         .as_deref()
         .unwrap_or(super::migration::DEFAULT_PATCH_SUFFIX);
-    let mut files = Vec::new();
     let mut reports = Vec::new();
     let context = VariantMigrationContext {
         original: &patch_bytes,
         options: &options,
         source,
-        progress,
+        progress: callbacks.progress,
     };
     for (variant_index, (variant, unit_plan)) in
         options.variants.iter().zip(unit_plans.iter()).enumerate()
@@ -63,16 +96,15 @@ pub async fn migrate_variants_with_source<S: DataSource + ?Sized>(
             variant_index,
             options.variants.len(),
         );
-        files.extend(output_files(result.patch, &directory, suffix));
+        for file in output_files(result.patch, &directory, suffix) {
+            (callbacks.write_file)(file)?;
+        }
         reports.push(result.report);
     }
-    Ok(WebMigrationBundle {
-        files,
-        summary: WebMigrationSummary {
-            migrated_count: reports.len(),
-            warning_count: reports.iter().map(|report| report.warnings.len()).sum(),
-            reports,
-        },
+    Ok(WebMigrationSummary {
+        migrated_count: reports.len(),
+        warning_count: reports.iter().map(|report| report.warnings.len()).sum(),
+        reports,
     })
 }
 

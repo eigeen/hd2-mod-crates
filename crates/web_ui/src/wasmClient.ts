@@ -1,4 +1,5 @@
 import type { GameDataSource } from "./gameDataSource";
+import { StoreZipBuilder } from "./fileInputs";
 import type {
   EquipmentOption,
   MigrationResult,
@@ -14,6 +15,10 @@ export interface MigrationProgressSink {
   onTargetStart?: (targetName: string, targetHash: string) => void;
   onStage?: (targetName: string, stage: string) => void;
   onTargetFinish?: (targetName: string) => void;
+}
+
+interface MigrationCallbacks extends MigrationProgressSink {
+  onFile: (path: string, bytes: Uint8Array) => void;
 }
 
 export class WasmRuntimeTrapError extends Error {
@@ -88,7 +93,12 @@ export async function migrateEquipmentVariants(
   progress: MigrationProgressSink | null,
 ): Promise<MigrationResult> {
   const wasm = await loadWasm();
-  return callWasm("migrate_equipment_variants", () =>
+  const zip = new StoreZipBuilder();
+  const callbacks: MigrationCallbacks = {
+    ...progress,
+    onFile: (path, bytes) => zip.add(path, bytes),
+  };
+  const result = await callWasm("migrate_equipment_variants", () =>
     wasm.migrate_equipment_variants(
       patch.name,
       patch.toc,
@@ -96,9 +106,10 @@ export async function migrateEquipmentVariants(
       patch.stream,
       options,
       dataSource,
-      progress ?? null,
+      callbacks,
     ),
-  ) as Promise<MigrationResult>;
+  ) as { summary: MigrationResult["summary"] };
+  return { zipBlob: zip.finish(), summary: result.summary };
 }
 
 export async function repatchUnits(

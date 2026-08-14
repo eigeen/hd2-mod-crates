@@ -1,5 +1,6 @@
 use crate::data_source::JsDataSource;
 use crate::error::{WasmResult, js_error};
+use crate::output_sink::JsOutputSink;
 use crate::progress::JsProgress;
 use crate::zip_store::zip_store;
 use hd2_migrator_io::{
@@ -144,22 +145,28 @@ pub async fn migrate_equipment_variants(
     stream: Vec<u8>,
     options: JsValue,
     data_source: JsValue,
-    progress: JsValue,
+    callbacks: JsValue,
 ) -> WasmResult<JsValue> {
     let request: web::WebUnifiedMigrateOptions =
         serde_wasm_bindgen::from_value(options).map_err(js_error)?;
     let source = JsDataSource::from_js(data_source)?;
-    let progress_sink = JsProgress::from_js(progress)?;
+    let progress_sink = JsProgress::from_js(callbacks.clone())?;
+    let output_sink = JsOutputSink::from_js(callbacks)?;
     let patch = PatchBytes {
         name: patch_name,
         toc,
         gpu,
         stream,
     };
-    let bundle = web::migrate_variants_with_source(patch, request, &source, Some(&progress_sink))
+    let callbacks = web::VariantMigrationCallbacks::new(Some(&progress_sink), |file| {
+        output_sink
+            .write(file)
+            .map_err(|_| eyre::eyre!("web output sink rejected a file"))
+    });
+    let summary = web::migrate_variants_to_sink(patch, request, &source, callbacks)
         .await
         .map_err(js_error)?;
-    migration_result(zip_store(&bundle.files), bundle.summary)
+    summary_result(summary)
 }
 
 /// Repatch Unit resources using the latest Unit structures from game data.
@@ -198,6 +205,16 @@ fn migration_result(zip_bytes: Vec<u8>, summary: WebMigrationSummary) -> WasmRes
     let result = Object::new();
     let zip = Uint8Array::from(zip_bytes.as_slice());
     Reflect::set(&result, &JsValue::from_str("zipBytes"), &zip)?;
+    Reflect::set(
+        &result,
+        &JsValue::from_str("summary"),
+        &serde_wasm_bindgen::to_value(&summary).map_err(js_error)?,
+    )?;
+    Ok(result.into())
+}
+
+fn summary_result(summary: WebMigrationSummary) -> WasmResult<JsValue> {
+    let result = Object::new();
     Reflect::set(
         &result,
         &JsValue::from_str("summary"),

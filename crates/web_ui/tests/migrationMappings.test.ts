@@ -4,6 +4,7 @@ import {
   configuredMappings,
   exceedsWebMappingLimit,
   MAX_WEB_MAPPINGS_PER_RUN,
+  maxWebVariantsForPatch,
   multiTargetEligible,
   selectTarget,
   singlePatchRequired,
@@ -106,6 +107,11 @@ describe("unified migration mapping state", () => {
     )).toBe(false);
     expect(exceedsWebMappingLimit(mappings)).toBe(true);
     expect(exceedsWebMappingLimit(mappings.slice(0, 6), 5)).toBe(true);
+  });
+
+  test("raises the measured 151 MiB fixture from six to thirteen independent outputs", () => {
+    expect(maxWebVariantsForPatch(158_659_188)).toBe(13);
+    expect(maxWebVariantsForPatch(50 * 1024 * 1024)).toBe(20);
   });
 
   test("enables multi-target when any source is resolved", () => {
