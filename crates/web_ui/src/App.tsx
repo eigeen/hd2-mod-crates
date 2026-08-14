@@ -244,10 +244,6 @@ function App() {
     setActiveSourceTargets(selectTarget(activeTargets, hash, multiTarget));
   }, [activeTargets, multiTarget, setActiveSourceTargets]);
 
-  const chooseTargetBatch = useCallback((hashes: string[]) => {
-    setActiveSourceTargets(hashes);
-  }, [setActiveSourceTargets]);
-
   const runMigration = useCallback(async () => {
     const patch = patchRef.current;
     if (!patch) return;
@@ -388,7 +384,6 @@ function App() {
               equipmentOptions={equipmentOptions}
               multiTarget={multiTarget}
               multiTargetEligible={multiTargetEligible}
-              onBatchSelect={chooseTargetBatch}
               onResolveSource={resolveSource}
               onMultiTargetChange={toggleMultiTarget}
               onSinglePatchChange={toggleSinglePatch}

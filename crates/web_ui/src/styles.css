@@ -301,17 +301,6 @@ textarea {
   letter-spacing: 0.0625rem;
 }
 
-.quickSelectMenuBtn.MuiIconButton-root {
-  color: var(--color-hd2-faint);
-  border-radius: 0 !important;
-  padding: 0.25rem !important;
-}
-
-.quickSelectMenuBtn.MuiIconButton-root:hover {
-  color: var(--color-hd2-yellow);
-  background: rgba(254, 231, 15, 0.06) !important;
-}
-
 .headerIconBtn.MuiIconButton-root {
   color: var(--color-hd2-text);
   border-radius: 0 !important;

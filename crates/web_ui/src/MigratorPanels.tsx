@@ -1,5 +1,4 @@
 import ArchiveIcon from "@mui/icons-material/Archive";
-import MenuIcon from "@mui/icons-material/Menu";
 import CompareArrowsIcon from "@mui/icons-material/CompareArrows";
 import DescriptionIcon from "@mui/icons-material/Description";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutlined";
@@ -11,8 +10,6 @@ import {
   Checkbox,
   FormControlLabel,
   InputAdornment,
-  IconButton,
-  Menu,
   MenuItem,
   Radio,
   Switch,
@@ -86,7 +83,6 @@ interface TargetPanelProps {
   equipmentOptions: EquipmentOption[];
   multiTarget: boolean;
   multiTargetEligible: boolean;
-  onBatchSelect: (hashes: string[]) => void;
   onMultiTargetChange: (enabled: boolean) => void;
   onSinglePatchChange: (enabled: boolean) => void;
   onResolveSource: (sourceId: string, hash: string) => void;
@@ -148,7 +144,6 @@ export function TargetPanel(props: TargetPanelProps) {
         activeSourceId={props.activeSourceId}
         equipmentOptions={props.equipmentOptions}
         multiTarget={props.multiTarget}
-        onBatchSelect={props.onBatchSelect}
         onResolveSource={props.onResolveSource}
         onSourceChange={props.onSourceChange}
         onTargetChange={props.onTargetChange}
@@ -166,7 +161,6 @@ interface MappingGridProps {
   activeSourceId: string;
   equipmentOptions: EquipmentOption[];
   multiTarget: boolean;
-  onBatchSelect: (hashes: string[]) => void;
   onResolveSource: (sourceId: string, hash: string) => void;
   onSourceChange: (hash: string) => void;
   onTargetChange: (hash: string) => void;
@@ -216,8 +210,8 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
         <div className="mb-2">
           <MappingSectionLabel inline>{t("mapping.target")}</MappingSectionLabel>
         </div>
-        {/* Row 2: search + quick-select menu */}
-        <div className="mb-3 flex items-center gap-2">
+        {/* Row 2: search */}
+        <div className="mb-3">
           <TextField
             className="targetSearchField"
             onChange={(event) => setTargetQuery(event.target.value)}
@@ -227,13 +221,6 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
             value={targetQuery}
             variant="standard"
           />
-          <QuickSelectMenu
-            multiTarget={props.multiTarget}
-            filteredTargets={filteredTargets}
-            onBatchSelect={props.onBatchSelect}
-            selectedTargets={props.selectedTargets}
-          />
-          <HelpHint title={t("mapping.quickSelectHelp")} />
         </div>
         <div className="hd2-scroll flex max-h-[22.5rem] flex-1 flex-col overflow-auto">
           {!props.activeSourceId || !props.targetSelectionEnabled ? (
@@ -443,53 +430,6 @@ export function PerformanceDialog(props: PerformanceDialogProps) {
         <Button onClick={props.onConfirm} variant="contained">{t("dialog.continue")}</Button>
       </Hd2DialogActions>
     </Hd2Dialog>
-  );
-}
-
-interface QuickSelectMenuProps {
-  multiTarget: boolean;
-  filteredTargets: EquipmentOption[];
-  onBatchSelect: (hashes: string[]) => void;
-  selectedTargets: string[];
-}
-
-function QuickSelectMenu({ multiTarget, filteredTargets, onBatchSelect, selectedTargets }: QuickSelectMenuProps) {
-  const { t } = useI18n();
-  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
-  const close = () => setAnchor(null);
-
-  const selectFiltered = () => {
-    const eligible = filteredTargets.filter((t) => !t.excluded).map((t) => t.hash);
-    const merged = [...new Set([...selectedTargets, ...eligible])];
-    onBatchSelect(merged);
-    close();
-  };
-
-  const selectAll = () => {
-    onBatchSelect(filteredTargets.filter((t) => !t.excluded).map((t) => t.hash));
-    close();
-  };
-
-  const clearAll = () => {
-    onBatchSelect([]);
-    close();
-  };
-
-  return (
-    <>
-      <IconButton
-        className="quickSelectMenuBtn"
-        onClick={(e) => setAnchor(e.currentTarget)}
-        size="small"
-      >
-        <MenuIcon fontSize="small" />
-      </IconButton>
-      <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={close}>
-        <MenuItem disabled={!multiTarget} onClick={selectFiltered}>{t("mapping.quickSelect")}</MenuItem>
-        <MenuItem disabled={!multiTarget} onClick={selectAll}>{t("mapping.selectAll")}</MenuItem>
-        <MenuItem onClick={clearAll}>{t("mapping.clearAll")}</MenuItem>
-      </Menu>
-    </>
   );
 }
 
