@@ -94,6 +94,7 @@ interface TargetPanelProps {
   onTargetChange: (hash: string) => void;
   selectedTargets: string[];
   singlePatch: boolean;
+  singlePatchMappingLimit: number;
   singlePatchRequired: boolean;
   sources: DetectedSource[];
   targetOptions: EquipmentOption[];
@@ -131,6 +132,7 @@ export function TargetPanel(props: TargetPanelProps) {
             props.singlePatchRequired
               ? "mapping.singlePatchForcedHelp"
               : "mapping.singlePatchHelp",
+            { max: props.singlePatchMappingLimit },
           )} />
         </>}
       </div>

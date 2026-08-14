@@ -16,6 +16,17 @@ export interface MigrationProgressSink {
   onTargetFinish?: (targetName: string) => void;
 }
 
+export class WasmRuntimeTrapError extends Error {
+  constructor() {
+    super("WebAssembly execution stopped unexpectedly");
+    this.name = "WasmRuntimeTrapError";
+  }
+}
+
+export function isWasmRuntimeTrapError(error: unknown): error is WasmRuntimeTrapError {
+  return error instanceof WasmRuntimeTrapError;
+}
+
 let ready: Promise<typeof import("./wasm/hd2_migrator_wasm/hd2_migrator_wasm.js")> | null = null;
 
 export function loadWasm() {
@@ -104,11 +115,46 @@ export async function repatchUnits(
 
 async function callWasm<T>(label: string, fn: () => T | Promise<T>): Promise<T> {
   try {
-    return await fn();
+    return await runWithWasmTrapBoundary(fn);
   } catch (error) {
     console.error(`[hd2-migrator] wasm.${label} threw:`, error);
     throw normalizeWasmError(error);
   }
+}
+
+/** Convert async WASM traps, which can bypass Promise rejection, into a normal failure. */
+function runWithWasmTrapBoundary<T>(fn: () => T | Promise<T>): Promise<T> {
+  if (typeof window === "undefined") return Promise.resolve().then(fn);
+  return new Promise<T>((resolve, reject) => {
+    const cleanup = () => {
+      window.removeEventListener("error", onWindowError);
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+    };
+    const rejectTrap = (error: unknown, event: Event) => {
+      if (!isWasmRuntimeTrap(error)) return;
+      event.preventDefault();
+      cleanup();
+      reject(new WasmRuntimeTrapError());
+    };
+    const onWindowError = (event: ErrorEvent) => {
+      rejectTrap(event.error, event);
+    };
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      rejectTrap(event.reason, event);
+    };
+    window.addEventListener("error", onWindowError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    Promise.resolve().then(fn).then(
+      (value) => { cleanup(); resolve(value); },
+      (error) => { cleanup(); reject(error); },
+    );
+  });
+}
+
+function isWasmRuntimeTrap(error: unknown): boolean {
+  if (error instanceof WebAssembly.RuntimeError) return true;
+  if (!(error instanceof Error) || error.name !== "RuntimeError") return false;
+  return error.stack?.includes(".wasm") ?? false;
 }
 
 function normalizeWasmError(error: unknown): Error {

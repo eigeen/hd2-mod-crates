@@ -6,6 +6,8 @@ export const translationKeys = [
   "app.blockerGameData",
   "app.blockerPatch",
   "app.blockerTarget",
+  "app.blockerWebMappingLimit",
+  "app.wasmRuntimeError",
   "mode.migrate",
   "mode.repatch",
   "github.openRepository",

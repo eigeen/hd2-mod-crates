@@ -15,10 +15,10 @@ const targets = makeTargets(25);
 describe("migrationBatchSize", () => {
   test.each([
     [25, 20],
-    [50, 10],
-    [100, 5],
-    [151, 3],
-    [200, 2],
+    [50, 20],
+    [100, 10],
+    [151, 6],
+    [200, 5],
     [600, 1],
   ])("uses %i MiB patches in batches of %i", (patchMiB, expected) => {
     expect(migrationBatchSize(patchMiB * MIB)).toBe(expected);
@@ -29,23 +29,23 @@ test("partitions targets without reordering them", () => {
   const hashes = targets.slice(0, 23).map((target) => target.hash);
   const batches = planMigrationBatches(hashes, 50 * MIB);
 
-  expect(batches.map((batch) => batch.targetHashes.length)).toEqual([10, 10, 3]);
+  expect(batches.map((batch) => batch.targetHashes.length)).toEqual([20, 3]);
   expect(batches.flatMap((batch) => batch.targetHashes)).toEqual(hashes);
-  expect(batches.map((batch) => batch.targetOffset)).toEqual([0, 10, 20]);
+  expect(batches.map((batch) => batch.targetOffset)).toEqual([0, 20]);
 });
 
-test("splits the measured 151 MiB patch into safe three-variant batches", () => {
+test("splits the measured 151 MiB patch into safe six-variant batches", () => {
   const hashes = targets.slice(0, 7).map((target) => target.hash);
   const batches = planMigrationBatches(hashes, 158_659_188);
 
-  expect(batches.map((batch) => batch.targetHashes.length)).toEqual([3, 3, 1]);
+  expect(batches.map((batch) => batch.targetHashes.length)).toEqual([6, 1]);
 });
 
 test("partitions combined variants without changing their order", () => {
   const variants = makeVariants(5);
   const batches = planMigrationVariantBatches(variants, 256 * MIB);
 
-  expect(batches.map((batch) => batch.variants.length)).toEqual([2, 2, 1]);
+  expect(batches.map((batch) => batch.variants.length)).toEqual([4, 1]);
   expect(batches.flatMap((batch) => batch.variants)).toEqual(variants);
 });
 
@@ -68,9 +68,8 @@ describe("batchZipFilename", () => {
   test("numbers output batches rather than individual targets", () => {
     const batches = planMigrationBatches(targets.slice(0, 5).map((target) => target.hash), 256 * MIB);
     expect(batches.map((batch) => batchZipFilename(batch, targets, "Original Mod"))).toEqual([
-      "hd2-patch-part-001-of-003.zip",
-      "hd2-patch-part-002-of-003.zip",
-      "hd2-patch-part-003-of-003.zip",
+      "hd2-patch-part-001-of-002.zip",
+      "hd2-patch-part-002-of-002.zip",
     ]);
   });
 });
@@ -94,16 +93,13 @@ test("migrates, downloads, and summarizes batches sequentially", async () => {
   });
 
   expect(events).toEqual([
-    "start:hash-0,hash-1",
-    "finish:hash-0,hash-1",
-    "multiple:3",
-    "download:hd2-patch-part-001-of-003.zip",
-    "start:hash-2,hash-3",
-    "finish:hash-2,hash-3",
-    "download:hd2-patch-part-002-of-003.zip",
+    "start:hash-0,hash-1,hash-2,hash-3",
+    "finish:hash-0,hash-1,hash-2,hash-3",
+    "multiple:2",
+    "download:hd2-patch-part-001-of-002.zip",
     "start:hash-4",
     "finish:hash-4",
-    "download:hd2-patch-part-003-of-003.zip",
+    "download:hd2-patch-part-002-of-002.zip",
   ]);
   expect(summary.migratedCount).toBe(5);
   expect(summary.warningCount).toBe(1);
@@ -125,11 +121,10 @@ test("migrates combined variants in numbered memory-bounded batches", async () =
   });
 
   expect(downloads).toEqual([
-    "hd2-patch-part-001-of-003.zip",
-    "hd2-patch-part-002-of-003.zip",
-    "hd2-patch-part-003-of-003.zip",
+    "hd2-patch-part-001-of-002.zip",
+    "hd2-patch-part-002-of-002.zip",
   ]);
-  expect(multipleDownloadNotices).toEqual([3]);
+  expect(multipleDownloadNotices).toEqual([2]);
   expect(summary.migratedCount).toBe(5);
 });
 

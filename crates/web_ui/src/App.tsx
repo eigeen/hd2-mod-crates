@@ -12,12 +12,15 @@ import { useI18n, type Translate } from "./i18n";
 import type { TranslationKey } from "./locales/translationKeys";
 import { LanguageMenu } from "./LanguageMenu";
 import {
+  migrationBatchSize,
   migrateVariantsToBatchDownloads,
   uniqueOutputFilename,
 } from "./migrationDownloads";
 import {
   buildMigrationVariants,
   configuredMappings as collectConfiguredMappings,
+  exceedsWebMappingLimit,
+  MAX_WEB_MAPPINGS_PER_RUN,
   multiTargetEligible as canUseMultiTarget,
   selectTarget,
   singlePatchRequired as mustUseSinglePatch,
@@ -46,6 +49,7 @@ import type {
 import {
   builtinEquipmentOptions,
   inspectEquipmentContents,
+  isWasmRuntimeTrapError,
   migrateEquipmentVariants,
   repatchUnits,
   type MigrationProgressSink,
@@ -99,10 +103,25 @@ function App() {
   const selectedTargetCount = configuredMappings.length;
   const singlePatchRequired = mustUseSinglePatch(configuredMappings);
   const outputAsSinglePatch = singlePatch || singlePatchRequired;
+  const singlePatchMappingLimit = Math.min(
+    MAX_WEB_MAPPINGS_PER_RUN,
+    migrationBatchSize(patchRef.current ? patchByteLength(patchRef.current) : 0),
+  );
+  const webMappingLimit = outputAsSinglePatch
+    ? singlePatchMappingLimit
+    : MAX_WEB_MAPPINGS_PER_RUN;
+  const webMappingLimitExceeded = exceedsWebMappingLimit(
+    configuredMappings,
+    webMappingLimit,
+  );
   const multiTargetEligible = canUseMultiTarget(sources);
   const crossArchiveReady = gameDir !== null && gameDir.status.kind !== "empty";
   const canMigrate = Boolean(
-    equipmentOptions.length && patchInfo && selectedTargetCount && crossArchiveReady,
+    equipmentOptions.length
+      && patchInfo
+      && selectedTargetCount
+      && crossArchiveReady
+      && !webMappingLimitExceeded,
   );
   const canRepatch = Boolean(patchInfo && crossArchiveReady);
   const canRun = toolMode === "migrate" ? canMigrate : canRepatch;
@@ -110,6 +129,8 @@ function App() {
     crossArchiveReady,
     patchInfo,
     selectedTargetCount: toolMode === "migrate" ? selectedTargetCount : 1,
+    webMappingLimit,
+    webMappingLimitExceeded: toolMode === "migrate" && webMappingLimitExceeded,
   }, t);
   const patchMessages = useMemo(() => patchFileMessages(t), [t]);
 
@@ -144,8 +165,8 @@ function App() {
       setTargetsBySource({});
       setMultiTarget(canUseMultiTarget(inspection.sources));
       setSinglePatch(false);
-    });
-  }, [gameDir]);
+    }, t);
+  }, [gameDir, t]);
 
   const importPatchFiles = useCallback(
     async (files: FileList | File[] | null, originalName?: string) => {
@@ -153,9 +174,9 @@ function App() {
       await runTask(setBusy, async () => {
         const nextPatch = await patchFilesFromList(files, patchMessages, originalName);
         await applyPatch(nextPatch);
-      });
+      }, t);
     },
-    [applyPatch, patchMessages],
+    [applyPatch, patchMessages, t],
   );
 
   const toggleMultiTarget = useCallback((enabled: boolean) => {
@@ -172,6 +193,14 @@ function App() {
     }
   }, [multiConfirmed, multiTargetEligible]);
 
+  const toggleSinglePatch = useCallback((enabled: boolean) => {
+    if (!enabled || configuredMappings.length <= singlePatchMappingLimit) {
+      setSinglePatch(enabled);
+      return;
+    }
+    showWebMappingLimitWarning(configuredMappings.length, singlePatchMappingLimit, t);
+  }, [configuredMappings.length, singlePatchMappingLimit, t]);
+
   const chooseSource = useCallback((sourceId: string) => {
     setActiveSourceId(sourceId);
   }, []);
@@ -185,25 +214,46 @@ function App() {
     setMultiTarget(canUseMultiTarget(resolvedSources));
   }, [sources]);
 
-  const chooseTarget = useCallback(
-    (hash: string) => {
-      if (!activeSource) return;
-      setTargetsBySource((current) => ({
-        ...current,
-        [activeSource.id]: selectTarget(current[activeSource.id] ?? [], hash, multiTarget),
-      }));
-    },
-    [activeSource, multiTarget],
-  );
+  const setActiveSourceTargets = useCallback((targets: string[]) => {
+    if (!activeSource) return;
+    const nextTargetsBySource = { ...targetsBySource, [activeSource.id]: targets };
+    const nextMappings = collectConfiguredMappings(sources, nextTargetsBySource);
+    const nextSinglePatch = singlePatch || mustUseSinglePatch(nextMappings);
+    const nextMappingLimit = nextSinglePatch
+      ? singlePatchMappingLimit
+      : MAX_WEB_MAPPINGS_PER_RUN;
+    const reducesMappingCount = nextMappings.length < configuredMappings.length;
+    if (!reducesMappingCount
+      && exceedsWebMappingLimit(nextMappings, nextMappingLimit)) {
+      showWebMappingLimitWarning(nextMappings.length, nextMappingLimit, t);
+      return;
+    }
+    setTargetsBySource(nextTargetsBySource);
+  }, [
+    activeSource,
+    configuredMappings.length,
+    singlePatch,
+    singlePatchMappingLimit,
+    sources,
+    t,
+    targetsBySource,
+  ]);
+
+  const chooseTarget = useCallback((hash: string) => {
+    setActiveSourceTargets(selectTarget(activeTargets, hash, multiTarget));
+  }, [activeTargets, multiTarget, setActiveSourceTargets]);
 
   const chooseTargetBatch = useCallback((hashes: string[]) => {
-    if (!activeSource) return;
-    setTargetsBySource((current) => ({ ...current, [activeSource.id]: hashes }));
-  }, [activeSource]);
+    setActiveSourceTargets(hashes);
+  }, [setActiveSourceTargets]);
 
   const runMigration = useCallback(async () => {
     const patch = patchRef.current;
     if (!patch) return;
+    if (webMappingLimitExceeded) {
+      showWebMappingLimitWarning(selectedTargetCount, webMappingLimit, t);
+      return;
+    }
     const variants = buildMigrationVariants(configuredMappings, outputAsSinglePatch);
     if (!gameDir) return;
     const dataSource = new GameDataSource(gameDir.handle);
@@ -231,7 +281,7 @@ function App() {
             variant: variants[0]!,
           });
       showMigrationReport(summary, t);
-    });
+    }, t);
     setProgressLabel("");
   }, [
     gameDir,
@@ -239,6 +289,10 @@ function App() {
     equipmentOptions,
     noPadding,
     outputAsSinglePatch,
+    selectedTargetCount,
+    webMappingLimit,
+    webMappingLimitExceeded,
+    singlePatchMappingLimit,
     t,
     unmatchedUnitPolicy,
   ]);
@@ -255,7 +309,7 @@ function App() {
       );
       downloadRepatchedPatch(patch, output.tocBytes, "hd2-repatched-mod.zip");
       showUnitRepatchReport(output.summary, t);
-    });
+    }, t);
     setProgressLabel("");
   }, [gameDir, missingUnitPolicy, t]);
 
@@ -347,11 +401,12 @@ function App() {
               onBatchSelect={chooseTargetBatch}
               onResolveSource={resolveSource}
               onMultiTargetChange={toggleMultiTarget}
-              onSinglePatchChange={setSinglePatch}
+              onSinglePatchChange={toggleSinglePatch}
               onSourceChange={chooseSource}
               onTargetChange={chooseTarget}
               selectedTargets={activeTargets}
               singlePatch={outputAsSinglePatch}
+              singlePatchMappingLimit={singlePatchMappingLimit}
               singlePatchRequired={singlePatchRequired}
               sources={sources}
               targetOptions={targetOptions}
@@ -433,13 +488,25 @@ interface BlockerHintInput {
   crossArchiveReady: boolean;
   patchInfo: PatchInfo | null;
   selectedTargetCount: number;
+  webMappingLimit: number;
+  webMappingLimitExceeded: boolean;
 }
 
 function nextBlockerHint(input: BlockerHintInput, t: Translate): string {
   if (!input.crossArchiveReady) return t("app.blockerGameData");
   if (!input.patchInfo) return t("app.blockerPatch");
   if (!input.selectedTargetCount) return t("app.blockerTarget");
+  if (input.webMappingLimitExceeded) {
+    return t("app.blockerWebMappingLimit", {
+      count: input.selectedTargetCount,
+      max: input.webMappingLimit,
+    });
+  }
   return "";
+}
+
+function showWebMappingLimitWarning(count: number, max: number, t: Translate): void {
+  toast.warning(t("app.blockerWebMappingLimit", { count, max }));
 }
 
 interface VariantMigrationRequest {
@@ -615,13 +682,14 @@ function showUnitRepatchReport(summary: UnitRepatchSummary, t: Translate): void 
 async function runTask(
   setBusy: (value: boolean) => void,
   task: () => Promise<void>,
+  t: Translate,
 ) {
   setBusy(true);
   try {
     await task();
   } catch (error) {
     console.error("[hd2-migrator] task failed:", error);
-    toast.error(errorMessage(error));
+    toast.error(isWasmRuntimeTrapError(error) ? t("app.wasmRuntimeError") : errorMessage(error));
   } finally {
     setBusy(false);
   }

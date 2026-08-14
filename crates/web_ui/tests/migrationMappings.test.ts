@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   buildMigrationVariants,
   configuredMappings,
+  exceedsWebMappingLimit,
+  MAX_WEB_MAPPINGS_PER_RUN,
   multiTargetEligible,
   selectTarget,
   singlePatchRequired,
@@ -87,6 +89,23 @@ describe("unified migration mapping state", () => {
     expect(buildMigrationVariants(multipleSources, true)).toEqual([{
       mappings: multipleSources,
     }]);
+  });
+
+  test("limits every migration job in the web build", () => {
+    const mappings = Array.from(
+      { length: MAX_WEB_MAPPINGS_PER_RUN + 1 },
+      (_, index) => ({
+        category: "Armor" as const,
+        sourceHash: armor.hash,
+        targetHash: `armor-target-${index}`,
+      }),
+    );
+
+    expect(exceedsWebMappingLimit(
+      mappings.slice(0, MAX_WEB_MAPPINGS_PER_RUN),
+    )).toBe(false);
+    expect(exceedsWebMappingLimit(mappings)).toBe(true);
+    expect(exceedsWebMappingLimit(mappings.slice(0, 6), 5)).toBe(true);
   });
 
   test("enables multi-target when any source is resolved", () => {

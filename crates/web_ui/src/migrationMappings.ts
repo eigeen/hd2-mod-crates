@@ -5,6 +5,8 @@ import type {
   MigrationVariant,
 } from "./types";
 
+export const MAX_WEB_MAPPINGS_PER_RUN = 10;
+
 export function configuredMappings(
   sources: DetectedSource[],
   targetsBySource: Record<string, string[]>,
@@ -41,6 +43,14 @@ export function buildMigrationVariants(
 /** Multiple configured sources must share one output to avoid Cartesian expansion. */
 export function singlePatchRequired(mappings: MigrationMapping[]): boolean {
   return mappingsBySource(mappings).length > 1;
+}
+
+/** Keep every web run bounded; callers may lower the limit for single-Patch jobs. */
+export function exceedsWebMappingLimit(
+  mappings: MigrationMapping[],
+  limit = MAX_WEB_MAPPINGS_PER_RUN,
+): boolean {
+  return mappings.length > limit;
 }
 
 export function targetsForSource(

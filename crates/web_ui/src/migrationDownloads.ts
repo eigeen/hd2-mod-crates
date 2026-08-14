@@ -6,7 +6,7 @@ import type {
 } from "./types";
 
 const MIB = 1024 * 1024;
-export const SAFE_BATCH_BYTES = 512 * MIB;
+export const SAFE_BATCH_BYTES = 1024 * MIB;
 export const MAX_VARIANTS_PER_BATCH = 20;
 
 export interface MigrationBatch {
@@ -84,7 +84,7 @@ function notifyMultipleDownloads(
   if (downloadIndex === 0 && downloadCount > 1) notify?.(downloadCount);
 }
 
-/** Limit each batch to 512 MiB of source-size-equivalent work and at most 20 variants. */
+/** Limit each batch to 1 GiB of source-size-equivalent work and at most 20 variants. */
 export function migrationBatchSize(patchByteLength: number): number {
   const safeLength = Math.max(1, Math.floor(patchByteLength));
   const sizeBound = Math.floor(SAFE_BATCH_BYTES / safeLength);
