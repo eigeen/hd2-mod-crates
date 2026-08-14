@@ -18,7 +18,7 @@ export interface MigrationProgressSink {
 }
 
 interface MigrationCallbacks extends MigrationProgressSink {
-  onFile: (path: string, bytes: Uint8Array) => void;
+  onFile: (path: string, bytes: Uint8Array, crc32: number) => void;
 }
 
 export class WasmRuntimeTrapError extends Error {
@@ -96,7 +96,7 @@ export async function migrateEquipmentVariants(
   const zip = new StoreZipBuilder();
   const callbacks: MigrationCallbacks = {
     ...progress,
-    onFile: (path, bytes) => zip.add(path, bytes),
+    onFile: (path, bytes, crc32) => zip.add(path, bytes, crc32),
   };
   const result = await callWasm("migrate_equipment_variants", () =>
     wasm.migrate_equipment_variants(

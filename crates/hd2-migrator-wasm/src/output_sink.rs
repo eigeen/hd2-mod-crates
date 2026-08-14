@@ -24,9 +24,15 @@ impl JsOutputSink {
     }
 
     pub fn write(&self, file: WebOutputFile) -> Result<(), JsValue> {
+        let crc = crc32fast::hash(&file.bytes);
         let bytes = js_sys::Uint8Array::from(file.bytes.as_slice());
         self.on_file
-            .call2(&self.target, &JsValue::from_str(&file.path), &bytes)
+            .call3(
+                &self.target,
+                &JsValue::from_str(&file.path),
+                &bytes,
+                &JsValue::from_f64(crc as f64),
+            )
             .map(|_| ())
     }
 }

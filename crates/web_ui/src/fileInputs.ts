@@ -105,9 +105,9 @@ export class StoreZipBuilder {
   private offset = 0;
   private centralSize = 0;
 
-  add(name: string, bytes: Uint8Array): void {
+  add(name: string, bytes: Uint8Array, precomputedCrc?: number): void {
     const encodedName = new TextEncoder().encode(name);
-    const crc = crc32(bytes);
+    const crc = precomputedCrc ?? crc32(bytes);
     const local = localZipHeader(encodedName, bytes.length, crc);
     const central = centralZipHeader(encodedName, bytes.length, crc, this.offset);
     this.fileParts.push(new Blob([exactBuffer(local), exactBuffer(bytes)]));

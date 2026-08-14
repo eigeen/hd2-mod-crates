@@ -125,6 +125,9 @@ async fn migrate_variant<S: DataSource + ?Sized>(
     variant: &WebMigrationVariant,
     unit_plan: &unit_plan::VariantUnitPlan,
 ) -> crate::Result<VariantResult> {
+    if variant.mappings.len() == 1 {
+        return migrate_single_mapping_variant(context, variant, unit_plan).await;
+    }
     let original_patch = parse_patch(context.original)?;
     let mut builder = VariantPatchBuilder::new(&original_patch);
     let mut report = empty_report(variant);
@@ -133,6 +136,28 @@ async fn migrate_variant<S: DataSource + ?Sized>(
         builder.merge_mapping(&original_patch, mapping, authoritative_edges, &mut result)?;
         merge_report(&mut report, result.report);
     }
+    report.mappings = variant.mappings.clone();
+    let patch = builder.finish(&original_patch, context.options.unmatched_unit_policy);
+    Ok(VariantResult { patch, report })
+}
+
+async fn migrate_single_mapping_variant<S: DataSource + ?Sized>(
+    context: &VariantMigrationContext<'_, S>,
+    variant: &WebMigrationVariant,
+    unit_plan: &unit_plan::VariantUnitPlan,
+) -> crate::Result<VariantResult> {
+    let [mapping] = variant.mappings.as_slice() else {
+        eyre::bail!("single-mapping migration received multiple mappings");
+    };
+    let [mapping_edges] = unit_plan.mapping_edges.as_slice() else {
+        eyre::bail!("single-mapping migration received multiple Unit plans");
+    };
+    let mut result = migrate_mapping(context, mapping).await?;
+    let original_patch = parse_patch(context.original)?;
+    let mut builder = VariantPatchBuilder::new(&original_patch);
+    builder.merge_mapping(&original_patch, mapping, mapping_edges, &mut result)?;
+    let mut report = empty_report(variant);
+    merge_report(&mut report, result.report);
     report.mappings = variant.mappings.clone();
     let patch = builder.finish(&original_patch, context.options.unmatched_unit_policy);
     Ok(VariantResult { patch, report })
@@ -195,8 +220,11 @@ impl VariantPatchBuilder {
     fn new(original: &StreamToc) -> Self {
         Self {
             output: StreamToc {
+                types: original.types.clone(),
                 entries: Vec::new(),
-                ..original.clone()
+                unknown: original.unknown,
+                unk4_data: original.unk4_data,
+                name: original.name.clone(),
             },
             claimed_source_units: HashSet::new(),
             claimed_target_units: HashMap::new(),
