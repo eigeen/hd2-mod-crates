@@ -22,6 +22,7 @@ use std::collections::{HashMap, HashSet};
 pub struct TargetBuildArtifact {
     pub patch: StreamToc,
     pub report: MigrationReport,
+    pub unit_mappings: Vec<(u64, u64)>,
 }
 
 /// Inputs common to all targets in a single migration run.
@@ -234,10 +235,30 @@ pub fn compute_migrated_target<F: Fn(&str)>(
         type_counts: plan.type_counts.clone(),
         warnings,
     };
+    let unit_mappings = collect_unit_mappings(&unit_remap.expanded_remap, &empty_remap);
     Ok(TargetBuildArtifact {
         patch: new_patch,
         report,
+        unit_mappings,
     })
+}
+
+fn collect_unit_mappings(
+    expanded_remap: &HashMap<u64, Vec<u64>>,
+    empty_remap: &HashMap<u64, u64>,
+) -> Vec<(u64, u64)> {
+    let mut mappings = expanded_remap
+        .iter()
+        .flat_map(|(source, targets)| targets.iter().map(|target| (*source, *target)))
+        .chain(
+            empty_remap
+                .iter()
+                .map(|(source, target)| (*source, *target)),
+        )
+        .collect::<Vec<_>>();
+    mappings.sort_unstable();
+    mappings.dedup();
+    mappings
 }
 
 // ---------- entry-rewrite helpers ---------------------------------------

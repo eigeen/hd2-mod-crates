@@ -50,6 +50,7 @@ pub struct WebTargetResult {
     pub patch: StreamToc,
     pub report: MigrationReport,
     pub(crate) source_unit_ids: HashSet<u64>,
+    pub(crate) unit_mappings: Vec<(u64, u64)>,
 }
 
 /// Run the async cross-archive migration. Returns one [`WebTargetResult`]
@@ -331,6 +332,7 @@ fn finish_target_result(
         patch: artifact.patch,
         report: artifact.report,
         source_unit_ids: prepared.source_unit_ids.clone(),
+        unit_mappings: artifact.unit_mappings,
     }
 }
 

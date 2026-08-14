@@ -49,7 +49,11 @@ pub fn compute_migrated_target(
         rewritten.skipped_units,
         (unit_file_ids(inputs.patch).len(), target_unit_ids.len()),
     );
-    Ok(TargetBuildArtifact { patch, report })
+    Ok(TargetBuildArtifact {
+        patch,
+        report,
+        unit_mappings: vec![(matched.source_file_id, matched.target_file_id)],
+    })
 }
 
 fn mapped_helmet_match(

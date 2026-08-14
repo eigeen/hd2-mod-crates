@@ -12,6 +12,10 @@ use crate::web::migration::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+mod unit_plan;
+
+use unit_plan::UnitMappingEdge;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WebMigrationVariant {
@@ -36,6 +40,7 @@ pub async fn migrate_variants_with_source<S: DataSource + ?Sized>(
     progress: Option<&dyn mode_a_web::WebProgress>,
 ) -> crate::Result<WebMigrationBundle> {
     validate_variants(&options.variants)?;
+    let unit_plans = unit_plan::build_variant_plans(&options.variants)?;
     let suffix = options
         .patch_suffix
         .as_deref()
@@ -48,8 +53,10 @@ pub async fn migrate_variants_with_source<S: DataSource + ?Sized>(
         source,
         progress,
     };
-    for (variant_index, variant) in options.variants.iter().enumerate() {
-        let result = migrate_variant(&context, variant).await?;
+    for (variant_index, (variant, unit_plan)) in
+        options.variants.iter().zip(unit_plans.iter()).enumerate()
+    {
+        let result = migrate_variant(&context, variant, unit_plan).await?;
         let directory = variant_directory(
             variant,
             &result.report.target_name,
@@ -84,13 +91,14 @@ struct VariantMigrationContext<'a, S: DataSource + ?Sized> {
 async fn migrate_variant<S: DataSource + ?Sized>(
     context: &VariantMigrationContext<'_, S>,
     variant: &WebMigrationVariant,
+    unit_plan: &unit_plan::VariantUnitPlan,
 ) -> crate::Result<VariantResult> {
     let original_patch = parse_patch(context.original)?;
     let mut builder = VariantPatchBuilder::new(&original_patch);
     let mut report = empty_report(variant);
-    for mapping in &variant.mappings {
+    for (mapping, authoritative_edges) in variant.mappings.iter().zip(&unit_plan.mapping_edges) {
         let mut result = migrate_mapping(context, mapping).await?;
-        builder.merge_mapping(&original_patch, mapping, &mut result)?;
+        builder.merge_mapping(&original_patch, mapping, authoritative_edges, &mut result)?;
         merge_report(&mut report, result.report);
     }
     report.mappings = variant.mappings.clone();
@@ -129,7 +137,26 @@ fn parse_patch(patch: &PatchBytes) -> crate::Result<StreamToc> {
 struct VariantPatchBuilder {
     output: StreamToc,
     claimed_source_units: HashSet<u64>,
+    claimed_target_units: HashMap<u64, UnitClaim>,
     preserved_source_units: HashSet<u64>,
+}
+
+struct UnitClaim {
+    source_file_id: u64,
+    category: EquipmentCategory,
+    source_hash: String,
+    target_hash: String,
+}
+
+impl UnitClaim {
+    fn new(mapping: &WebMigrationMapping, source_file_id: u64) -> Self {
+        Self {
+            source_file_id,
+            category: mapping.category,
+            source_hash: mapping.source_hash.clone(),
+            target_hash: mapping.target_hash.clone(),
+        }
+    }
 }
 
 impl VariantPatchBuilder {
@@ -140,6 +167,7 @@ impl VariantPatchBuilder {
                 ..original.clone()
             },
             claimed_source_units: HashSet::new(),
+            claimed_target_units: HashMap::new(),
             preserved_source_units: HashSet::new(),
         }
     }
@@ -148,12 +176,54 @@ impl VariantPatchBuilder {
         &mut self,
         original: &StreamToc,
         mapping: &WebMigrationMapping,
+        authoritative_edges: &[UnitMappingEdge],
         result: &mut mode_a_web::WebTargetResult,
     ) -> crate::Result<()> {
         let mut output_units = target_unit_ids(mapping, &result.patch)?;
         output_units.extend(changed_unit_ids(original, &result.patch));
+        let unit_edges = effective_unit_edges(authoritative_edges, mapping, result, &output_units);
+        self.remove_redundant_unit_outputs(mapping, &mut output_units, &unit_edges)?;
         let output = std::mem::take(&mut result.patch);
         self.merge_selected_output(&result.source_unit_ids, &output_units, output)
+    }
+
+    fn remove_redundant_unit_outputs(
+        &mut self,
+        mapping: &WebMigrationMapping,
+        output_units: &mut HashSet<u64>,
+        unit_edges: &[UnitMappingEdge],
+    ) -> crate::Result<()> {
+        for edge in unit_edges {
+            if output_units.contains(&edge.target_file_id)
+                && !self.claim_unit_edge(mapping, edge)?
+            {
+                output_units.remove(&edge.target_file_id);
+            }
+        }
+        Ok(())
+    }
+
+    fn claim_unit_edge(
+        &mut self,
+        mapping: &WebMigrationMapping,
+        edge: &UnitMappingEdge,
+    ) -> crate::Result<bool> {
+        let Some(previous) = self.claimed_target_units.get(&edge.target_file_id) else {
+            self.claimed_target_units.insert(
+                edge.target_file_id,
+                UnitClaim::new(mapping, edge.source_file_id),
+            );
+            return Ok(true);
+        };
+        if claims_are_compatible(previous, mapping, edge) {
+            return Ok(false);
+        }
+        eyre::bail!(
+            "combined migration maps different source Units to target FileID 0x{:016x}: source 0x{:016x} conflicts with source 0x{:016x}",
+            edge.target_file_id,
+            previous.source_file_id,
+            edge.source_file_id,
+        )
     }
 
     fn merge_selected_output(
@@ -193,6 +263,17 @@ impl VariantPatchBuilder {
         }
         self.output
     }
+}
+
+fn claims_are_compatible(
+    previous: &UnitClaim,
+    mapping: &WebMigrationMapping,
+    edge: &UnitMappingEdge,
+) -> bool {
+    previous.source_file_id == edge.source_file_id
+        || (previous.category == mapping.category
+            && previous.source_hash == mapping.source_hash
+            && previous.target_hash != mapping.target_hash)
 }
 
 fn validate_variants(variants: &[WebMigrationVariant]) -> crate::Result<()> {
@@ -255,6 +336,71 @@ fn merge_output_entries(output: &mut StreamToc, candidate: &StreamToc) -> crate:
         output.entries.push(entry.clone());
     }
     Ok(())
+}
+
+fn effective_unit_edges(
+    authoritative_edges: &[UnitMappingEdge],
+    mapping: &WebMigrationMapping,
+    result: &mode_a_web::WebTargetResult,
+    output_units: &HashSet<u64>,
+) -> Vec<UnitMappingEdge> {
+    let mut edges = authoritative_edges.to_vec();
+    edges.extend(runtime_unit_edges(authoritative_edges, mapping, result));
+    edges.extend(retained_unit_edges(mapping, output_units, &edges));
+    edges
+}
+
+fn runtime_unit_edges(
+    authoritative_edges: &[UnitMappingEdge],
+    mapping: &WebMigrationMapping,
+    result: &mode_a_web::WebTargetResult,
+) -> Vec<UnitMappingEdge> {
+    let covered_targets = unit_edge_target_ids(authoritative_edges);
+    result
+        .unit_mappings
+        .iter()
+        .filter(|(_, target_file_id)| !covered_targets.contains(target_file_id))
+        .map(|(source_file_id, target_file_id)| {
+            UnitMappingEdge::described(
+                *source_file_id,
+                *target_file_id,
+                format!(
+                    "{} {} -> {}",
+                    mapping.category.as_str(),
+                    mapping.source_hash,
+                    result.target_name,
+                ),
+            )
+        })
+        .collect()
+}
+
+fn retained_unit_edges(
+    mapping: &WebMigrationMapping,
+    output_units: &HashSet<u64>,
+    covered_edges: &[UnitMappingEdge],
+) -> Vec<UnitMappingEdge> {
+    let covered_targets = unit_edge_target_ids(covered_edges);
+    output_units
+        .difference(&covered_targets)
+        .map(|file_id| identity_unit_edge(mapping, *file_id))
+        .collect()
+}
+
+fn unit_edge_target_ids(edges: &[UnitMappingEdge]) -> HashSet<u64> {
+    edges.iter().map(|edge| edge.target_file_id).collect()
+}
+
+fn identity_unit_edge(mapping: &WebMigrationMapping, file_id: u64) -> UnitMappingEdge {
+    UnitMappingEdge::described(
+        file_id,
+        file_id,
+        format!(
+            "{} {} retained Unit",
+            mapping.category.as_str(),
+            mapping.source_hash,
+        ),
+    )
 }
 
 fn changed_unit_ids(before: &StreamToc, after: &StreamToc) -> HashSet<u64> {
@@ -503,6 +649,70 @@ mod tests {
     }
 
     #[test]
+    fn repeated_unit_mapping_edge_is_emitted_only_once() {
+        let mut builder = VariantPatchBuilder::new(&archive(&[]));
+        let first_mapping = mapping_with_hashes(EquipmentCategory::Armor, "source", "target-a");
+        let repeated_mapping = mapping_with_hashes(EquipmentCategory::Armor, "source", "target-b");
+        let first_edge = UnitMappingEdge::test_edge(1, 9);
+        let repeated_edge = UnitMappingEdge::test_edge(2, 9);
+        let mut first_output = HashSet::from([9]);
+        let mut repeated_output = HashSet::from([9]);
+        let first = archive(&[entry(9, vec![1])]);
+        let repeated = archive(&[entry(9, vec![2])]);
+
+        builder
+            .remove_redundant_unit_outputs(
+                &first_mapping,
+                &mut first_output,
+                std::slice::from_ref(&first_edge),
+            )
+            .unwrap();
+        builder
+            .merge_selected_output(&HashSet::from([1]), &first_output, first)
+            .unwrap();
+        builder
+            .remove_redundant_unit_outputs(
+                &repeated_mapping,
+                &mut repeated_output,
+                &[repeated_edge],
+            )
+            .unwrap();
+        builder
+            .merge_selected_output(&HashSet::from([1]), &repeated_output, repeated)
+            .unwrap();
+
+        assert_eq!(first_output, HashSet::from([9]));
+        assert!(repeated_output.is_empty());
+        assert_eq!(builder.output.find(9, UNIT_ID).unwrap().toc_data, vec![1]);
+    }
+
+    #[test]
+    fn different_source_equipment_unit_edges_conflict() {
+        let mut builder = VariantPatchBuilder::new(&archive(&[]));
+        let first_mapping = mapping_with_hashes(EquipmentCategory::Armor, "source-a", "target-a");
+        let second_mapping = mapping_with_hashes(EquipmentCategory::Armor, "source-b", "target-b");
+        let mut first_output = HashSet::from([9]);
+        let mut second_output = HashSet::from([9]);
+
+        builder
+            .remove_redundant_unit_outputs(
+                &first_mapping,
+                &mut first_output,
+                &[UnitMappingEdge::test_edge(1, 9)],
+            )
+            .unwrap();
+        let error = builder
+            .remove_redundant_unit_outputs(
+                &second_mapping,
+                &mut second_output,
+                &[UnitMappingEdge::test_edge(2, 9)],
+            )
+            .unwrap_err();
+
+        assert!(error.to_string().contains("different source Units"));
+    }
+
+    #[test]
     fn combines_independent_outputs_from_sources_that_share_units() {
         let original = archive(&[
             entry(1, vec![1]),
@@ -552,10 +762,18 @@ mod tests {
     }
 
     fn mapping(category: EquipmentCategory) -> WebMigrationMapping {
+        mapping_with_hashes(category, "source", "target")
+    }
+
+    fn mapping_with_hashes(
+        category: EquipmentCategory,
+        source_hash: &str,
+        target_hash: &str,
+    ) -> WebMigrationMapping {
         WebMigrationMapping {
             category,
-            source_hash: "source".to_string(),
-            target_hash: "target".to_string(),
+            source_hash: source_hash.to_string(),
+            target_hash: target_hash.to_string(),
         }
     }
 }
