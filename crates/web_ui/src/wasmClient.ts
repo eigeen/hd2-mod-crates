@@ -1,7 +1,9 @@
 import type { GameDataSource } from "./gameDataSource";
 import { StoreZipBuilder } from "./fileInputs";
-import { TaskError, normalizeTaskError, type TaskErrorCode } from "./taskError";
-import type {
+import {
+  TaskError,
+  normalizeTaskError,
+  type TaskErrorCode,
   EquipmentOption,
   MigrationResult,
   PatchFiles,
@@ -10,7 +12,7 @@ import type {
   UnitRepatchOptions,
   UnitRepatchResult,
   UnifiedMigrateOptions,
-} from "./types";
+} from "@hd2-mod-tools/migrator-ui";
 
 export interface MigrationProgressSink {
   onTargetStart?: (targetName: string, targetHash: string) => void;

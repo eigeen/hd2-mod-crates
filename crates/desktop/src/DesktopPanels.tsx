@@ -5,7 +5,7 @@ import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import { Button, Tooltip } from "@mui/material";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutlined";
-import { useI18n } from "../../web_ui/src/i18n";
+import { useI18n } from "@hd2-mod-tools/migrator-ui";
 import type { PatchDescriptor } from "./types";
 
 const panelClass = "flex flex-1 flex-col p-6";

@@ -8,13 +8,13 @@ export type {
   UnmatchedUnitPolicy,
   UnitRepatchSummary,
   UnifiedMigrateOptions,
-} from "../../web_ui/src/types";
+} from "@hd2-mod-tools/migrator-ui";
 
 import type {
   DetectedSource,
   UnifiedMigrateOptions,
   UnitRepatchOptions,
-} from "../../web_ui/src/types";
+} from "@hd2-mod-tools/migrator-ui";
 
 export interface PatchDescriptor {
   path: string;

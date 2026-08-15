@@ -1,4 +1,4 @@
-import type { PatchFiles } from "./types";
+import type { PatchFiles } from "@hd2-mod-tools/migrator-ui";
 
 const GPU_SUFFIX = ".gpu_resources";
 const STREAM_SUFFIX = ".stream";

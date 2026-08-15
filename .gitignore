@@ -1,5 +1,6 @@
 /target
 /test_files
+node_modules/
 /crates/web_ui/dist
 /crates/web_ui/node_modules
 /crates/web_ui/public/assets/armor_mappings.merged.json

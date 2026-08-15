@@ -2,12 +2,15 @@
   "name": "hd2-mod-crates",
   "version": "0.1.0",
   "private": true,
+  "workspaces": ["crates/*"],
   "packageManager": "bun@1.3.13",
   "scripts": {
     "rust:build": "cargo build --workspace --release",
     "web:dev": "bun run --cwd crates/web_ui dev",
     "web:build": "bun run --cwd crates/web_ui build",
     "web:wasm": "bun run --cwd crates/web_ui wasm",
+    "ui:typecheck": "bun run --cwd crates/migrator_ui typecheck",
+    "ui:test": "bun test crates/migrator_ui/tests crates/web_ui/tests",
     "desktop:build": "bun run --cwd crates/desktop desktop build"
   }
 }

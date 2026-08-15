@@ -5,49 +5,47 @@ import GitHubIcon from "@mui/icons-material/GitHub";
 import { Button, CircularProgress, IconButton, Tab, Tabs, Tooltip } from "@mui/material";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast, Toaster } from "sonner";
+import {
+  LanguageMenu,
+  MAX_WEB_SINGLE_PATCH_MAPPINGS,
+  OptionsPanel,
+  PatchPanel,
+  PerformanceDialog,
+  ResultReportDialog,
+  TargetPanel,
+  ToolIntro,
+  UnitUpdaterPanel,
+  backgroundUrl,
+  buildMigrationVariants,
+  configuredMappings as collectConfiguredMappings,
+  exceedsWebMappingLimit,
+  maxWebSeparateOutputsForPatch,
+  multiTargetEligible as canUseMultiTarget,
+  normalizeTaskError,
+  selectTarget,
+  singlePatchRequired as mustUseSinglePatch,
+  targetsForSource,
+  throwIfTaskCancelled,
+  titleUrl,
+  uniqueOutputFilename,
+  useI18n,
+  type CompletedTaskReport,
+  type DetectedSource,
+  type EquipmentOption,
+  type MissingUnitPolicy,
+  type MigrationMapping,
+  type MigrationSummary,
+  type MigrationVariant,
+  type PatchFiles,
+  type PatchInfo,
+  type Translate,
+  type TranslationKey,
+  type UnmatchedUnitPolicy,
+} from "@hd2-mod-tools/migrator-ui";
 import { downloadRepatchedPatch, downloadZip, patchFilesFromList } from "./fileInputs";
 import { FrequentlyAskedQuestions } from "./FrequentlyAskedQuestions";
 import { GameDataDirPanel, type GameDirSelection } from "./GameDataDirPanel";
 import { GameDataSource } from "./gameDataSource";
-import { useI18n, type Translate } from "./i18n";
-import type { TranslationKey } from "./locales/translationKeys";
-import { LanguageMenu } from "./LanguageMenu";
-import {
-  uniqueOutputFilename,
-} from "./migrationDownloads";
-import {
-  buildMigrationVariants,
-  configuredMappings as collectConfiguredMappings,
-  exceedsWebMappingLimit,
-  MAX_WEB_SINGLE_PATCH_MAPPINGS,
-  maxWebSeparateOutputsForPatch,
-  multiTargetEligible as canUseMultiTarget,
-  selectTarget,
-  singlePatchRequired as mustUseSinglePatch,
-  targetsForSource,
-} from "./migrationMappings";
-import {
-  OptionsPanel,
-  PatchPanel,
-  PerformanceDialog,
-  TargetPanel,
-} from "./MigratorPanels";
-import { UnitUpdaterPanel } from "./UnitUpdaterPanel";
-import { ToolIntro } from "./ToolIntro";
-import { ResultReportDialog, type CompletedTaskReport } from "./ResultReportDialog";
-import { normalizeTaskError, throwIfTaskCancelled } from "./taskError";
-import type {
-  DetectedSource,
-  EquipmentOption,
-  MissingUnitPolicy,
-  MigrationMapping,
-  MigrationSummary,
-  MigrationVariant,
-  PatchFiles,
-  PatchInfo,
-  UnmatchedUnitPolicy,
-  UnitRepatchSummary,
-} from "./types";
 import {
   builtinEquipmentOptions,
   inspectEquipmentContents,
@@ -348,7 +346,7 @@ function App() {
     <div className="min-h-screen">
       <div
         className="fixed inset-0 z-0 bg-center bg-cover"
-        style={{ backgroundImage: "url(/background.webp)", filter: "brightness(0.4)" }}
+        style={{ backgroundImage: `url(${backgroundUrl})`, filter: "brightness(0.4)" }}
       />
 
       <Toaster position="top-center" theme="dark" />
@@ -375,9 +373,9 @@ function App() {
                 </div>
               </Tooltip>
               <div className="flex min-w-0 flex-1 items-center justify-center gap-3">
-              <img alt="" className="hidden min-[40rem]:block" draggable={false} src="/title.svg" style={{ height: "2rem", transform: "scaleX(-1)" }} />
+              <img alt="" className="hidden min-[40rem]:block" draggable={false} src={titleUrl} style={{ height: "2rem", transform: "scaleX(-1)" }} />
               <h1 className="m-0 text-center text-lg font-bold text-hd2-yellow min-[35rem]:text-xl min-[51.25rem]:text-2xl">{t("app.title")}</h1>
-              <img alt="" className="hidden min-[40rem]:block" draggable={false} src="/title.svg" style={{ height: "2rem" }} />
+              <img alt="" className="hidden min-[40rem]:block" draggable={false} src={titleUrl} style={{ height: "2rem" }} />
               </div>
               <div className="flex w-[4.75rem] shrink-0 items-center justify-end min-[35rem]:w-24">
                 <Tooltip title={t("github.openRepository")}>

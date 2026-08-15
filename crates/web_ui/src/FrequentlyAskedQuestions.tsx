@@ -2,9 +2,8 @@ import CloseIcon from "@mui/icons-material/Close";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutlined";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import { IconButton } from "@mui/material";
+import { useI18n, type LanguageCode, type TranslationKey } from "@hd2-mod-tools/migrator-ui";
 import { useEffect, useRef } from "react";
-import { useI18n, type LanguageCode } from "./i18n";
-import type { TranslationKey } from "./locales/translationKeys";
 
 interface FaqEntry {
   answer: TranslationKey;

@@ -5,8 +5,8 @@ migration, and Unit repatching in native Rust instead of WebAssembly.
 
 ## Architecture
 
-- Shared Web UI components, theme, mapping rules, and translations are imported
-  from `crates/web_ui/src`.
+- Shared components, theme, assets, mapping rules, and translations come from
+  the `@hd2-mod-tools/migrator-ui` workspace package in `crates/migrator_ui`.
 - `src/desktopClient.ts` is the small native IPC adapter.
 - `src-tauri/src/migration.rs` owns the desktop commands.
 - `src-tauri/src/migration/patch.rs` loads and validates a patch trio.

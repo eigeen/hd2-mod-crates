@@ -4,27 +4,29 @@ import GitHubIcon from "@mui/icons-material/GitHub";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { Button, CircularProgress, IconButton, Tab, Tabs, Tooltip } from "@mui/material";
 import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast, Toaster } from "sonner";
-import { LanguageMenu } from "../../web_ui/src/LanguageMenu";
 import {
+  LanguageMenu,
+  OptionsPanel,
+  ResultReportDialog,
+  TargetPanel,
+  ToolIntro,
+  UnitUpdaterPanel,
+  backgroundUrl,
   buildMigrationVariants,
   configuredMappings as collectConfiguredMappings,
   multiTargetEligible as canUseMultiTarget,
+  normalizeTaskError,
   selectTarget,
   singlePatchRequired as mustUseSinglePatch,
   targetsForSource,
-} from "../../web_ui/src/migrationMappings";
-import { OptionsPanel, TargetPanel } from "../../web_ui/src/MigratorPanels";
-import { ToolIntro } from "../../web_ui/src/ToolIntro";
-import { UnitUpdaterPanel } from "../../web_ui/src/UnitUpdaterPanel";
-import { useI18n, type Translate } from "../../web_ui/src/i18n";
-import { uniqueOutputFilename } from "../../web_ui/src/migrationDownloads";
-import {
-  ResultReportDialog,
+  titleUrl,
+  uniqueOutputFilename,
+  useI18n,
   type CompletedTaskReport,
-} from "../../web_ui/src/ResultReportDialog";
-import { normalizeTaskError } from "../../web_ui/src/taskError";
+  type Translate,
+} from "@hd2-mod-tools/migrator-ui";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast, Toaster } from "sonner";
 import { DesktopGameDataPanel, DesktopPatchPanel } from "./DesktopPanels";
 import { dropZoneFromPhysicalPosition, type DropZone } from "./dropTarget";
 import {
@@ -243,7 +245,7 @@ function App() {
 
   return (
     <div className="min-h-screen">
-      <div className="fixed inset-0 z-0 bg-center bg-cover" style={{ backgroundImage: "url(/background.webp)", filter: "brightness(0.4)" }} />
+      <div className="fixed inset-0 z-0 bg-center bg-cover" style={{ backgroundImage: `url(${backgroundUrl})`, filter: "brightness(0.4)" }} />
       <Toaster position="top-center" theme="dark" />
       <ResultReportDialog
         equipmentOptions={equipmentOptions}
@@ -335,9 +337,9 @@ function Header() {
           </div>
         </Tooltip>
         <div className="flex min-w-0 flex-1 items-center justify-center gap-3">
-          <img alt="" className="hidden min-[40rem]:block" draggable={false} src="/title.svg" style={{ height: "2rem", transform: "scaleX(-1)" }} />
+          <img alt="" className="hidden min-[40rem]:block" draggable={false} src={titleUrl} style={{ height: "2rem", transform: "scaleX(-1)" }} />
           <h1 className="m-0 text-center text-lg font-bold text-hd2-yellow min-[35rem]:text-xl min-[51.25rem]:text-2xl">{t("app.title")}</h1>
-          <img alt="" className="hidden min-[40rem]:block" draggable={false} src="/title.svg" style={{ height: "2rem" }} />
+          <img alt="" className="hidden min-[40rem]:block" draggable={false} src={titleUrl} style={{ height: "2rem" }} />
         </div>
         <div className="flex w-[4.75rem] shrink-0 items-center justify-end min-[35rem]:w-24">
           <Tooltip title={t("github.openRepository")}>

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@source "./**/*.{ts,tsx}";
 
 @theme {
   --font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
@@ -103,7 +104,7 @@ textarea {
 /* HD2 signature diagonal-stripe header accent */
 .hd2-stripes-accent {
   background-color: var(--color-hd2-stripe);
-  background-image: url(/stripes_background.svg);
+  background-image: url("./assets/stripes_background.svg");
   background-size: 250%;
 }
 

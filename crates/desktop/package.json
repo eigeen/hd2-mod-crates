@@ -10,6 +10,7 @@
     "desktop": "tauri"
   },
   "dependencies": {
+    "@hd2-mod-tools/migrator-ui": "workspace:*",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^9.3.1",

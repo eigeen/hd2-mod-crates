@@ -1,4 +1,4 @@
-import type { AuthorityMappings } from "./types";
+import type { AuthorityMappings } from "@hd2-mod-tools/migrator-ui";
 
 const AUTHORITY_MAPPINGS_URL = "/assets/armor_mappings.merged.json";
 

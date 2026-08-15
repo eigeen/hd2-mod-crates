@@ -2,9 +2,8 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import FolderOffIcon from "@mui/icons-material/FolderOff";
 import { Alert, Button } from "@mui/material";
+import { useDropZone, useI18n } from "@hd2-mod-tools/migrator-ui";
 import { useCallback, useEffect, useState } from "react";
-import { useI18n } from "./i18n";
-import { useDropZone } from "./useDropZone";
 import {
   droppedGameDirectory,
   ensureReadPermission,
