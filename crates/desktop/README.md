@@ -23,7 +23,9 @@ bun run desktop build
 bun run smoke
 ```
 
-`bun run smoke` launches the packaged release executable, verifies the rendered
+`bun run desktop build` generates the packaged release executable without an
+installer because `bundle.active` is disabled by default. `bun run smoke`
+launches that executable, verifies the rendered
 WebView, native IPC against the real-data fixture, and single-instance behavior,
 then closes the process it started. Run `bun run desktop build` first; a plain
 `cargo build --release` keeps Tauri's development URL and is not a packaged app.
@@ -36,5 +38,4 @@ cargo clippy -p hd2_migrator_desktop --all-targets --no-deps
 ```
 
 The release executable is written to
-`target/release/hd2_migrator_desktop.exe`. The Windows installer is written to
-`target/release/bundle/nsis/HD2 Mod Tools Desktop_<version>_x64-setup.exe`.
+`target/release/hd2_migrator_desktop.exe`.
