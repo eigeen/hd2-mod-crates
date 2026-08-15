@@ -4,6 +4,7 @@ use super::{HEADER_BASE, TOC_ENTRY_SIZE, TOC_FILE_TYPE_SIZE, TocFileType};
 use crate::constants::LEGACY_MAGIC;
 use byteorder::{ByteOrder, LittleEndian as LE};
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 
 #[derive(Debug, Clone)]
 pub struct TocOnlyEntry {
@@ -56,21 +57,41 @@ impl TocOnlyPackage {
 
     /// Rebuild only the TOC. GPU/stream offsets and sizes stay unchanged.
     pub fn serialize(&self) -> crate::Result<Vec<u8>> {
+        let mut output = Vec::with_capacity(self.serialized_len());
+        self.write_to(&mut output)?;
+        Ok(output)
+    }
+
+    pub fn serialized_len(&self) -> usize {
+        let groups = group_entries(&self.entries);
+        let type_count = refresh_types(&self.types, &groups).len();
+        let header_size =
+            HEADER_BASE + type_count * TOC_FILE_TYPE_SIZE + self.entries.len() * TOC_ENTRY_SIZE;
+        let body_size = self
+            .entries
+            .iter()
+            .map(|entry| entry.toc_data.len())
+            .sum::<usize>();
+        (header_size + body_size).max(256 * self.entries.len())
+    }
+
+    /// Rebuild the TOC directly into a writer while preserving sidecar offsets.
+    pub fn write_to<W: Write>(&self, writer: &mut W) -> crate::Result<()> {
         let groups = group_entries(&self.entries);
         let types = refresh_types(&self.types, &groups);
         let header_size =
             HEADER_BASE + types.len() * TOC_FILE_TYPE_SIZE + self.entries.len() * TOC_ENTRY_SIZE;
-        let mut output = serialize_header(self, &types);
+        write_header(writer, self, &types)?;
         let mut body_offset = header_size as u64;
         for (entry_index, entry) in ordered_entries(&groups, &self.entries).enumerate() {
-            write_entry_header(&mut output, entry, body_offset, entry_index)?;
+            write_entry_header(writer, entry, body_offset, entry_index)?;
             body_offset += entry.toc_data.len() as u64;
         }
         for entry in ordered_entries(&groups, &self.entries) {
-            output.extend_from_slice(&entry.toc_data);
+            writer.write_all(&entry.toc_data)?;
         }
-        output.resize(output.len().max(256 * self.entries.len()), 0);
-        Ok(output)
+        let written = usize::try_from(body_offset)?;
+        write_zeroes(writer, self.serialized_len().saturating_sub(written))
     }
 }
 
@@ -229,25 +250,26 @@ fn ordered_entries<'a>(
         .flat_map(|(_, indices)| indices.iter().map(|index| &entries[*index]))
 }
 
-fn serialize_header(package: &TocOnlyPackage, types: &[TocFileType]) -> Vec<u8> {
-    let capacity =
-        HEADER_BASE + types.len() * TOC_FILE_TYPE_SIZE + package.entries.len() * TOC_ENTRY_SIZE;
-    let mut output = Vec::with_capacity(capacity);
-    output.extend_from_slice(&LEGACY_MAGIC.to_le_bytes());
-    output.extend_from_slice(&(types.len() as u32).to_le_bytes());
-    output.extend_from_slice(&(package.entries.len() as u32).to_le_bytes());
-    output.extend_from_slice(&package.unknown.to_le_bytes());
-    output.extend_from_slice(&package.unk4_data);
+fn write_header<W: Write>(
+    writer: &mut W,
+    package: &TocOnlyPackage,
+    types: &[TocFileType],
+) -> crate::Result<()> {
+    writer.write_all(&LEGACY_MAGIC.to_le_bytes())?;
+    writer.write_all(&(types.len() as u32).to_le_bytes())?;
+    writer.write_all(&(package.entries.len() as u32).to_le_bytes())?;
+    writer.write_all(&package.unknown.to_le_bytes())?;
+    writer.write_all(&package.unk4_data)?;
     for file_type in types {
         let mut raw = [0u8; TOC_FILE_TYPE_SIZE];
         file_type.pack_into(&mut raw);
-        output.extend_from_slice(&raw);
+        writer.write_all(&raw)?;
     }
-    output
+    Ok(())
 }
 
-fn write_entry_header(
-    output: &mut Vec<u8>,
+fn write_entry_header<W: Write>(
+    writer: &mut W,
     entry: &TocOnlyEntry,
     toc_offset: u64,
     entry_index: usize,
@@ -266,7 +288,17 @@ fn write_entry_header(
     LE::write_u32(&mut raw[68..72], entry.unknown3);
     LE::write_u32(&mut raw[72..76], entry.unknown4);
     LE::write_u32(&mut raw[76..80], u32::try_from(entry_index + 1)?);
-    output.extend_from_slice(&raw);
+    writer.write_all(&raw)?;
+    Ok(())
+}
+
+fn write_zeroes<W: Write>(writer: &mut W, mut count: usize) -> crate::Result<()> {
+    const ZEROES: [u8; 8192] = [0; 8192];
+    while count > 0 {
+        let chunk_size = count.min(ZEROES.len());
+        writer.write_all(&ZEROES[..chunk_size])?;
+        count -= chunk_size;
+    }
     Ok(())
 }
 
@@ -293,5 +325,23 @@ mod tests {
             .expect("parse with original sidecars");
         assert_eq!(full.entries[0].gpu_data, vec![2; 11]);
         assert_eq!(full.entries[0].stream_data, vec![3; 13]);
+    }
+
+    #[test]
+    fn writer_matches_buffered_serialization() {
+        let mut entry = TocEntry::new(7, UNIT_ID);
+        entry.toc_data = vec![1; 513];
+        let mut original = StreamToc {
+            entries: vec![entry],
+            ..Default::default()
+        };
+        let (toc, _, _) = original.serialize();
+        let package = TocOnlyPackage::parse(&toc).expect("parse TOC-only");
+        let mut streamed = Vec::new();
+
+        package.write_to(&mut streamed).expect("stream TOC-only");
+
+        assert_eq!(streamed, package.serialize().expect("serialize TOC-only"));
+        assert_eq!(streamed.len(), package.serialized_len());
     }
 }

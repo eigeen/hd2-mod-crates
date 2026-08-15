@@ -1,7 +1,10 @@
 mod output;
 mod patch;
 
-use self::output::{PatchZipContext, create_zip, finish_zip, write_patch_to_zip, write_zip_entry};
+use self::output::{
+    PatchZipContext, RepatchTocSource, create_zip, finish_zip, write_patch_to_zip,
+    write_repatch_toc_to_zip, write_zip_entry_with_progress,
+};
 use self::patch::{LoadedPatch, PatchDescriptor, load_patch};
 use crate::command_error::CommandError;
 use crate::task::TaskRegistry;
@@ -191,7 +194,7 @@ async fn repatch_mod_blocking(
 ) -> Result<web::UnitRepatchSummary, String> {
     validate_output_request(&request.data_dir, &request.output_path)?;
     let patch = load_patch(&request.patch_paths)?;
-    let result = web::repatch_units_with_progress(
+    let result = web::repatch_units_plan_with_progress(
         patch.name(),
         &patch.bytes().toc,
         request.options,
@@ -200,32 +203,54 @@ async fn repatch_mod_blocking(
     )
     .await
     .map_err(display_error)?;
-    write_repatched_zip(&request.output_path, &patch, result.toc)?;
+    write_repatched_zip(
+        &request.output_path,
+        &patch,
+        result.patch.as_ref(),
+        progress,
+    )?;
     Ok(result.summary)
 }
 
 fn write_repatched_zip(
     output_path: &Path,
     patch: &LoadedPatch,
-    toc: Vec<u8>,
+    updated: Option<&hd2_migrator_io::archive::toc_only::TocOnlyPackage>,
+    progress: Option<&DesktopProgress>,
 ) -> Result<(), String> {
     let mut zip = create_zip(output_path)?;
-    write_zip_entry(&mut zip, patch.name(), &toc).map_err(display_error)?;
-    write_sidecar(&mut zip, patch, ".gpu_resources", &patch.bytes().gpu)?;
-    write_sidecar(&mut zip, patch, ".stream", &patch.bytes().stream)?;
+    let output_progress = progress.map(|value| value as &dyn output::OutputProgress);
+    let toc = match updated {
+        Some(package) => RepatchTocSource::Rebuilt(package),
+        None => RepatchTocSource::Original(&patch.bytes().toc),
+    };
+    write_repatch_toc_to_zip(&mut zip, patch.name(), toc, output_progress)
+        .map_err(display_error)?;
+    write_sidecar(
+        &mut zip,
+        &format!("{}.gpu_resources", patch.name()),
+        &patch.bytes().gpu,
+        output_progress,
+    )?;
+    write_sidecar(
+        &mut zip,
+        &format!("{}.stream", patch.name()),
+        &patch.bytes().stream,
+        output_progress,
+    )?;
     finish_zip(zip)
 }
 
 fn write_sidecar(
     zip: &mut output::OutputZip,
-    patch: &LoadedPatch,
-    suffix: &str,
+    path: &str,
     bytes: &[u8],
+    progress: Option<&dyn output::OutputProgress>,
 ) -> Result<(), String> {
     if bytes.is_empty() {
         return Ok(());
     }
-    write_zip_entry(zip, &format!("{}{suffix}", patch.name()), bytes).map_err(display_error)
+    write_zip_entry_with_progress(zip, path, bytes, progress).map_err(display_error)
 }
 
 fn validate_output_request(data_dir: &Path, output_path: &Path) -> Result<(), String> {

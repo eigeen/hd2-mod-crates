@@ -45,6 +45,12 @@ pub struct UnitRepatchResult {
     pub summary: UnitRepatchSummary,
 }
 
+#[derive(Debug, Clone)]
+pub struct UnitRepatchPlan {
+    pub patch: Option<TocOnlyPackage>,
+    pub summary: UnitRepatchSummary,
+}
+
 pub async fn repatch_units<S: DataSource + ?Sized>(
     patch_name: &str,
     patch_toc: &[u8],
@@ -61,42 +67,53 @@ pub async fn repatch_units_with_progress<S: DataSource + ?Sized>(
     source: &S,
     progress: Option<&dyn WebProgress>,
 ) -> crate::Result<UnitRepatchResult> {
+    let plan =
+        repatch_units_plan_with_progress(patch_name, patch_toc, options, source, progress).await?;
+    let toc = match plan.patch {
+        Some(patch) => patch.serialize().wrap_err("serialize updated patch TOC")?,
+        None => patch_toc.to_vec(),
+    };
+    Ok(UnitRepatchResult {
+        toc,
+        summary: plan.summary,
+    })
+}
+
+pub async fn repatch_units_plan_with_progress<S: DataSource + ?Sized>(
+    patch_name: &str,
+    patch_toc: &[u8],
+    options: UnitRepatchOptions,
+    source: &S,
+    progress: Option<&dyn WebProgress>,
+) -> crate::Result<UnitRepatchPlan> {
     let mut patch = TocOnlyPackage::parse(patch_toc).wrap_err("parse patch TOC")?;
     let wanted = patch_unit_ids(&patch);
     if wanted.is_empty() {
-        return Ok(no_units_result(patch_toc));
+        return Ok(UnitRepatchPlan {
+            patch: None,
+            summary: no_units_summary(),
+        });
     }
     let mut lookup = LatestUnitLookup::new(wanted, patch_name);
     lookup.load(source, progress).await?;
     enforce_missing_policy(&lookup.missing, options.missing_unit_policy)?;
     let summary = apply_latest_units(&mut patch, lookup, options.missing_unit_policy);
-    let toc = serialize_if_changed(&patch, patch_toc, &summary)?;
-    Ok(UnitRepatchResult { toc, summary })
+    let changed = summary.updated_units > 0 || summary.removed_units > 0;
+    Ok(UnitRepatchPlan {
+        patch: changed.then_some(patch),
+        summary,
+    })
 }
 
-fn serialize_if_changed(
-    patch: &TocOnlyPackage,
-    original: &[u8],
-    summary: &UnitRepatchSummary,
-) -> crate::Result<Vec<u8>> {
-    if summary.updated_units == 0 && summary.removed_units == 0 {
-        return Ok(original.to_vec());
-    }
-    patch.serialize().wrap_err("serialize updated patch TOC")
-}
-
-fn no_units_result(patch_toc: &[u8]) -> UnitRepatchResult {
-    UnitRepatchResult {
-        toc: patch_toc.to_vec(),
-        summary: UnitRepatchSummary {
-            unit_count: 0,
-            updated_units: 0,
-            already_current_units: 0,
-            removed_units: 0,
-            failed_units: 0,
-            scanned_archives: 0,
-            warnings: vec!["patch contains no Unit resources".to_string()],
-        },
+fn no_units_summary() -> UnitRepatchSummary {
+    UnitRepatchSummary {
+        unit_count: 0,
+        updated_units: 0,
+        already_current_units: 0,
+        removed_units: 0,
+        failed_units: 0,
+        scanned_archives: 0,
+        warnings: vec!["patch contains no Unit resources".to_string()],
     }
 }
 

@@ -20,8 +20,8 @@ pub use migration::{
     migrate_many_with_source,
 };
 pub use repatch::{
-    MissingUnitPolicy, UnitRepatchOptions, UnitRepatchResult, UnitRepatchSummary, repatch_units,
-    repatch_units_with_progress,
+    MissingUnitPolicy, UnitRepatchOptions, UnitRepatchPlan, UnitRepatchResult, UnitRepatchSummary,
+    repatch_units, repatch_units_plan_with_progress, repatch_units_with_progress,
 };
 pub use unified_migration::{
     VariantMigrationCallbacks, VariantPatchCallbacks, VariantPatchOutput, WebMigrationVariant,

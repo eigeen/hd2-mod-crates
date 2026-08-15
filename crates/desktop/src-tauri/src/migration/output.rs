@@ -1,3 +1,4 @@
+use hd2_migrator_io::archive::toc_only::TocOnlyPackage;
 use hd2_migrator_io::archive::{SerializedPart, StreamToc};
 use std::fs::File;
 use std::io::{self, Write};
@@ -41,16 +42,52 @@ pub fn create_zip(path: &Path) -> Result<OutputZip, String> {
     })
 }
 
-pub fn write_zip_entry(
+pub fn write_zip_entry_with_progress(
     zip: &mut OutputZip,
     path: &str,
     bytes: &[u8],
+    progress: Option<&dyn OutputProgress>,
 ) -> hd2_migrator_io::Result<()> {
-    validate_entry_path(path)?;
-    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
-    zip.writer.start_file(path.replace('\\', "/"), options)?;
-    zip.writer.write_all(bytes)?;
-    Ok(())
+    let normalized = path.replace('\\', "/");
+    write_zip_content(
+        zip,
+        ZipEntryContext {
+            path: &normalized,
+            progress,
+            total: bytes.len() as u64,
+        },
+        |writer| writer.write_all(bytes).map_err(Into::into),
+    )
+}
+
+#[derive(Clone, Copy)]
+pub enum RepatchTocSource<'a> {
+    Original(&'a [u8]),
+    Rebuilt(&'a TocOnlyPackage),
+}
+
+pub fn write_repatch_toc_to_zip(
+    zip: &mut OutputZip,
+    path: &str,
+    source: RepatchTocSource<'_>,
+    progress: Option<&dyn OutputProgress>,
+) -> hd2_migrator_io::Result<()> {
+    let total = match source {
+        RepatchTocSource::Original(bytes) => bytes.len(),
+        RepatchTocSource::Rebuilt(package) => package.serialized_len(),
+    } as u64;
+    write_zip_content(
+        zip,
+        ZipEntryContext {
+            path,
+            progress,
+            total,
+        },
+        |writer| match source {
+            RepatchTocSource::Original(bytes) => writer.write_all(bytes).map_err(Into::into),
+            RepatchTocSource::Rebuilt(package) => package.write_to(writer),
+        },
+    )
 }
 
 pub fn write_patch_to_zip(
@@ -102,15 +139,40 @@ fn write_serialized_entry(
     serializer: &hd2_migrator_io::archive::StreamTocSerializer<'_>,
     context: SerializedEntryContext<'_>,
 ) -> hd2_migrator_io::Result<()> {
+    let total = serializer.part_len(context.part) as u64;
+    write_zip_content(
+        zip,
+        ZipEntryContext {
+            path: context.path,
+            progress: context.progress,
+            total,
+        },
+        |writer| serializer.write_part(context.part, writer),
+    )
+}
+
+struct ZipEntryContext<'a> {
+    path: &'a str,
+    progress: Option<&'a dyn OutputProgress>,
+    total: u64,
+}
+
+fn write_zip_content<F>(
+    zip: &mut OutputZip,
+    context: ZipEntryContext<'_>,
+    write: F,
+) -> hd2_migrator_io::Result<()>
+where
+    F: FnOnce(&mut ProgressWriter<'_, ZipWriter<File>>) -> hd2_migrator_io::Result<()>,
+{
     validate_entry_path(context.path)?;
     ensure_active(context.progress)?;
-    let total = serializer.part_len(context.part) as u64;
-    report_bytes(context.progress, 0, total)?;
+    report_bytes(context.progress, 0, context.total)?;
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
     zip.writer.start_file(context.path, options)?;
-    let mut writer = ProgressWriter::new(&mut zip.writer, context.progress, total);
-    serializer.write_part(context.part, &mut writer)?;
-    report_bytes(context.progress, writer.completed, total)?;
+    let mut writer = ProgressWriter::new(&mut zip.writer, context.progress, context.total);
+    write(&mut writer)?;
+    report_bytes(context.progress, writer.completed, context.total)?;
     Ok(())
 }
 
@@ -249,7 +311,8 @@ mod tests {
         let directory = tempfile::tempdir().expect("temp directory");
         let output = directory.path().join("output.zip");
         let mut zip = create_zip(&output).expect("create ZIP");
-        write_zip_entry(&mut zip, "variant/example.patch_0", b"toc").expect("write entry");
+        write_zip_entry_with_progress(&mut zip, "variant/example.patch_0", b"toc", None)
+            .expect("write entry");
         finish_zip(zip).expect("finish ZIP");
 
         let file = File::open(output).expect("open ZIP");
@@ -272,7 +335,8 @@ mod tests {
         let output = directory.path().join("output.zip");
         std::fs::write(&output, b"previous valid output").expect("write previous output");
         let mut zip = create_zip(&output).expect("create ZIP");
-        write_zip_entry(&mut zip, "replacement.patch_0", b"new").expect("write entry");
+        write_zip_entry_with_progress(&mut zip, "replacement.patch_0", b"new", None)
+            .expect("write entry");
 
         finish_zip(zip).expect("replace ZIP");
 
@@ -290,7 +354,8 @@ mod tests {
         let output = directory.path().join("output.zip");
         let mut zip = create_zip(&output).expect("create ZIP");
         let temporary_path = zip.temporary.path().to_path_buf();
-        write_zip_entry(&mut zip, "partial.patch_0", b"partial").expect("write entry");
+        write_zip_entry_with_progress(&mut zip, "partial.patch_0", b"partial", None)
+            .expect("write entry");
 
         drop(zip);
 
@@ -350,6 +415,31 @@ mod tests {
 
         assert_eq!(error.to_string(), "task cancelled");
         assert_eq!(output.len() as u64, PROGRESS_INTERVAL);
+    }
+
+    #[test]
+    fn streams_a_rebuilt_repatch_toc_into_the_zip() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let output = directory.path().join("repatch.zip");
+        let mut source = sample_patch();
+        let (toc, _, _) = source.serialize();
+        let package = TocOnlyPackage::parse(&toc).expect("parse TOC-only");
+        let expected = package.serialize().expect("serialize expected TOC");
+        let progress = TestProgress::active();
+        let mut zip = create_zip(&output).expect("create ZIP");
+
+        write_repatch_toc_to_zip(
+            &mut zip,
+            "example.patch_0",
+            RepatchTocSource::Rebuilt(&package),
+            Some(&progress),
+        )
+        .expect("stream rebuilt TOC");
+        finish_zip(zip).expect("finish ZIP");
+
+        let mut archive =
+            zip::ZipArchive::new(File::open(output).expect("open ZIP")).expect("read ZIP");
+        assert_eq!(read_zip_entry(&mut archive, "example.patch_0"), expected);
     }
 
     fn sample_patch() -> StreamToc {
