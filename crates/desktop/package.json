@@ -7,6 +7,7 @@
     "dev": "bunx --bun vite",
     "build": "bunx --bun tsc && bunx --bun vite build",
     "preview": "bunx --bun vite preview",
+    "smoke": "bun run scripts/runtime-smoke.ts",
     "desktop": "tauri"
   },
   "dependencies": {
