@@ -20,7 +20,17 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": ["'self'"],
+        "base-uri": ["'self'"],
+        "connect-src": ["ipc:", "http://ipc.localhost"],
+        "font-src": ["'self'", "data:"],
+        "frame-ancestors": ["'none'"],
+        "img-src": ["'self'", "data:"],
+        "object-src": ["'none'"],
+        "script-src": ["'self'"],
+        "style-src": ["'self'", "'unsafe-inline'"]
+      }
     }
   },
   "bundle": {
