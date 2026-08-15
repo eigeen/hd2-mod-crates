@@ -3,6 +3,9 @@ name = "hd2_migrator_desktop"
 version = "0.1.0"
 description = "Native desktop application for HD2 Mod Tools"
 edition = "2024"
+license.workspace = true
+homepage = "https://github.com/eigeen/hd2-mod-crates"
+repository = "https://github.com/eigeen/hd2-mod-crates"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
