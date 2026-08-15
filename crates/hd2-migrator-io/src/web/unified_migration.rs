@@ -37,6 +37,26 @@ pub struct VariantMigrationCallbacks<'a, F> {
     write_file: F,
 }
 
+pub struct VariantPatchOutput {
+    pub patch: StreamToc,
+    pub directory: String,
+    pub suffix: String,
+}
+
+pub struct VariantPatchCallbacks<'a, F> {
+    progress: Option<&'a dyn mode_a_web::WebProgress>,
+    write_patch: F,
+}
+
+impl<'a, F> VariantPatchCallbacks<'a, F> {
+    pub fn new(progress: Option<&'a dyn mode_a_web::WebProgress>, write_patch: F) -> Self {
+        Self {
+            progress,
+            write_patch,
+        }
+    }
+}
+
 impl<'a, F> VariantMigrationCallbacks<'a, F> {
     pub fn new(progress: Option<&'a dyn mode_a_web::WebProgress>, write_file: F) -> Self {
         Self {
@@ -73,6 +93,27 @@ where
     S: DataSource + ?Sized,
     F: FnMut(WebOutputFile) -> crate::Result<()>,
 {
+    let patch_callbacks =
+        VariantPatchCallbacks::new(callbacks.progress, |output: VariantPatchOutput| {
+            for file in output_files(output.patch, &output.directory, &output.suffix) {
+                (callbacks.write_file)(file)?;
+            }
+            Ok(())
+        });
+    migrate_variants_to_patch_sink(patch_bytes, options, source, patch_callbacks).await
+}
+
+/// Migrate variants and hand each native archive to a sink before processing the next variant.
+pub async fn migrate_variants_to_patch_sink<S, F>(
+    patch_bytes: PatchBytes,
+    options: WebUnifiedMigrateOptions,
+    source: &S,
+    mut callbacks: VariantPatchCallbacks<'_, F>,
+) -> crate::Result<WebMigrationSummary>
+where
+    S: DataSource + ?Sized,
+    F: FnMut(VariantPatchOutput) -> crate::Result<()>,
+{
     validate_variants(&options.variants)?;
     let unit_plans = unit_plan::build_variant_plans(&options.variants)?;
     let suffix = options
@@ -96,9 +137,11 @@ where
             variant_index,
             options.variants.len(),
         );
-        for file in output_files(result.patch, &directory, suffix) {
-            (callbacks.write_file)(file)?;
-        }
+        (callbacks.write_patch)(VariantPatchOutput {
+            patch: result.patch,
+            directory,
+            suffix: suffix.to_owned(),
+        })?;
         reports.push(result.report);
     }
     Ok(WebMigrationSummary {
@@ -694,6 +737,21 @@ mod tests {
             ],
         };
         assert!(validate_variants(&[variant]).is_ok());
+    }
+
+    #[test]
+    fn core_accepts_more_variants_than_the_web_ui_limit() {
+        let variants = (0..64)
+            .map(|_| WebMigrationVariant {
+                mappings: vec![WebMigrationMapping {
+                    category: EquipmentCategory::Helmet,
+                    source_hash: "13f9269d08e52cf2".to_string(),
+                    target_hash: "a856edff49cfdd95".to_string(),
+                }],
+            })
+            .collect::<Vec<_>>();
+
+        assert!(validate_variants(&variants).is_ok());
     }
 
     #[test]

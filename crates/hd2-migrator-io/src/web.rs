@@ -24,6 +24,7 @@ pub use repatch::{
     repatch_units_with_progress,
 };
 pub use unified_migration::{
-    VariantMigrationCallbacks, WebMigrationVariant, WebUnifiedMigrateOptions,
-    migrate_variants_to_sink, migrate_variants_with_source,
+    VariantMigrationCallbacks, VariantPatchCallbacks, VariantPatchOutput, WebMigrationVariant,
+    WebUnifiedMigrateOptions, migrate_variants_to_patch_sink, migrate_variants_to_sink,
+    migrate_variants_with_source,
 };

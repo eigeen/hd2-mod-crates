@@ -1,14 +1,14 @@
 mod output;
 mod patch;
 
-use self::output::{create_zip, finish_zip, write_zip_entry};
+use self::output::{create_zip, finish_zip, write_patch_to_zip, write_zip_entry};
 use self::patch::{LoadedPatch, PatchDescriptor, load_patch};
 use crate::command_error::CommandError;
 use crate::task::TaskRegistry;
 use hd2_migrator_io::io::NativeDataSource;
 use hd2_migrator_io::web::{
-    self, UnitRepatchOptions, VariantMigrationCallbacks, WebEquipmentInspection,
-    WebEquipmentOption, WebMigrationSummary, WebOutputFile, WebProgress, WebUnifiedMigrateOptions,
+    self, UnitRepatchOptions, VariantPatchCallbacks, VariantPatchOutput, WebEquipmentInspection,
+    WebEquipmentOption, WebMigrationSummary, WebProgress, WebUnifiedMigrateOptions,
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -158,13 +158,22 @@ async fn migrate_equipment_blocking(
     let patch = load_patch(&request.patch_paths)?;
     let source = NativeDataSource::new(request.data_dir);
     let mut zip = create_zip(&request.output_path)?;
-    let callbacks = VariantMigrationCallbacks::new(progress, |file: WebOutputFile| {
-        write_zip_entry(&mut zip, &file.path, &file.bytes)
+    let callbacks = VariantPatchCallbacks::new(progress, |mut output: VariantPatchOutput| {
+        write_patch_to_zip(
+            &mut zip,
+            &mut output.patch,
+            &output.directory,
+            &output.suffix,
+        )
     });
-    let summary =
-        web::migrate_variants_to_sink(patch.into_bytes(), request.options, &source, callbacks)
-            .await
-            .map_err(display_error)?;
+    let summary = web::migrate_variants_to_patch_sink(
+        patch.into_bytes(),
+        request.options,
+        &source,
+        callbacks,
+    )
+    .await
+    .map_err(display_error)?;
     finish_zip(zip)?;
     Ok(summary)
 }

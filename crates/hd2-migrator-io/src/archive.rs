@@ -23,11 +23,12 @@ pub mod toc_only;
 
 pub use bundle::BundleIndex;
 
-use crate::constants::{align_up, GPU_ALIGN, LEGACY_MAGIC, STREAM_ALIGN};
+use crate::constants::{GPU_ALIGN, LEGACY_MAGIC, STREAM_ALIGN, align_up};
 use crate::error::MigratorError;
 use byteorder::{ByteOrder, LittleEndian as LE};
 use eyre::WrapErr;
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 const TOC_FILE_TYPE_SIZE: usize = 32;
@@ -115,6 +116,236 @@ struct EntryLayout {
     stream_size: u32,
     gpu_size: u32,
     entry_index: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SerializedPart {
+    Toc,
+    Gpu,
+    Stream,
+}
+
+struct SerializationPlan {
+    header_size: usize,
+    layouts: Vec<EntryLayout>,
+    ordered_indexes: Vec<usize>,
+}
+
+pub struct StreamTocSerializer<'a> {
+    archive: &'a StreamToc,
+    plan: SerializationPlan,
+}
+
+impl StreamTocSerializer<'_> {
+    /// Writes one serialized archive part without allocating a full output buffer.
+    pub fn write_part<W: Write>(&self, part: SerializedPart, writer: &mut W) -> crate::Result<()> {
+        match part {
+            SerializedPart::Toc => self.write_toc(writer),
+            SerializedPart::Gpu => self.write_resource(writer, SerializedPart::Gpu),
+            SerializedPart::Stream => self.write_resource(writer, SerializedPart::Stream),
+        }
+    }
+
+    fn write_toc<W: Write>(&self, writer: &mut W) -> crate::Result<()> {
+        write_toc_header(writer, self.archive, &self.plan)?;
+        for &index in &self.plan.ordered_indexes {
+            writer.write_all(&self.archive.entries[index].toc_data)?;
+        }
+        let written = self.plan.header_size
+            + self
+                .plan
+                .ordered_indexes
+                .iter()
+                .map(|&index| self.archive.entries[index].toc_data.len())
+                .sum::<usize>();
+        write_zeroes(
+            writer,
+            (256 * self.archive.entries.len()).saturating_sub(written),
+        )
+    }
+
+    fn write_resource<W: Write>(&self, writer: &mut W, part: SerializedPart) -> crate::Result<()> {
+        let mut cursor = 0usize;
+        for &index in &self.plan.ordered_indexes {
+            let entry = &self.archive.entries[index];
+            let layout = self.plan.layouts[index];
+            let (offset, bytes) = resource_part(entry, layout, part);
+            if bytes.is_empty() {
+                continue;
+            }
+            write_zeroes(writer, offset.saturating_sub(cursor))?;
+            writer.write_all(bytes)?;
+            cursor = offset + bytes.len();
+        }
+        Ok(())
+    }
+}
+
+fn prepare_serialization(archive: &mut StreamToc) -> SerializationPlan {
+    let groups = group_entry_indexes(&archive.entries);
+    archive.types = groups
+        .iter()
+        .map(|(type_id, indexes)| TocFileType::new(*type_id, indexes.len() as u32))
+        .collect();
+    let ordered_indexes = groups
+        .into_iter()
+        .flat_map(|(_, indexes)| indexes)
+        .collect::<Vec<_>>();
+    let header_size = HEADER_BASE
+        + archive.types.len() * TOC_FILE_TYPE_SIZE
+        + archive.entries.len() * TOC_ENTRY_SIZE;
+    let layouts = layout_entries(&archive.entries, &ordered_indexes, header_size);
+    apply_entry_indexes(&mut archive.entries, &layouts);
+    SerializationPlan {
+        header_size,
+        layouts,
+        ordered_indexes,
+    }
+}
+
+fn group_entry_indexes(entries: &[TocEntry]) -> Vec<(u64, Vec<usize>)> {
+    let mut groups: Vec<(u64, Vec<usize>)> = Vec::new();
+    for (index, entry) in entries.iter().enumerate() {
+        match groups
+            .iter_mut()
+            .find(|(type_id, _)| *type_id == entry.type_id)
+        {
+            Some((_, indexes)) => indexes.push(index),
+            None => groups.push((entry.type_id, vec![index])),
+        }
+    }
+    groups
+}
+
+fn layout_entries(
+    entries: &[TocEntry],
+    ordered_indexes: &[usize],
+    header_size: usize,
+) -> Vec<EntryLayout> {
+    let mut layouts = vec![EntryLayout::default(); entries.len()];
+    let mut toc_cursor = header_size as u64;
+    let mut gpu_cursor = 0u64;
+    let mut stream_cursor = 0u64;
+    for (position, &index) in ordered_indexes.iter().enumerate() {
+        let entry = &entries[index];
+        let mut layout = toc_entry_layout(entry, position, toc_cursor);
+        toc_cursor += entry.toc_data.len() as u64;
+        layout_gpu(entry, &mut layout, &mut gpu_cursor);
+        layout_stream(entry, &mut layout, &mut stream_cursor);
+        layouts[index] = layout;
+    }
+    layouts
+}
+
+fn toc_entry_layout(entry: &TocEntry, position: usize, offset: u64) -> EntryLayout {
+    EntryLayout {
+        toc_data_offset: offset,
+        toc_size: entry.toc_data.len() as u32,
+        entry_index: (position + 1) as u32,
+        ..Default::default()
+    }
+}
+
+fn layout_gpu(entry: &TocEntry, layout: &mut EntryLayout, cursor: &mut u64) {
+    if entry.gpu_data.is_empty() {
+        return;
+    }
+    *cursor = align_up(*cursor as usize, GPU_ALIGN) as u64;
+    layout.gpu_offset = *cursor;
+    layout.gpu_size = entry.gpu_data.len() as u32;
+    *cursor += entry.gpu_data.len() as u64;
+}
+
+fn layout_stream(entry: &TocEntry, layout: &mut EntryLayout, cursor: &mut u64) {
+    if entry.stream_data.is_empty() {
+        return;
+    }
+    *cursor = align_up(*cursor as usize, STREAM_ALIGN) as u64;
+    layout.stream_offset = *cursor;
+    layout.stream_size = entry.stream_data.len() as u32;
+    *cursor += entry.stream_data.len() as u64;
+}
+
+fn apply_entry_indexes(entries: &mut [TocEntry], layouts: &[EntryLayout]) {
+    for (entry, layout) in entries.iter_mut().zip(layouts) {
+        entry.entry_index = layout.entry_index;
+    }
+}
+
+fn write_toc_header<W: Write>(
+    writer: &mut W,
+    archive: &StreamToc,
+    plan: &SerializationPlan,
+) -> crate::Result<()> {
+    write_archive_header(writer, archive)?;
+    write_type_headers(writer, &archive.types)?;
+    for &index in &plan.ordered_indexes {
+        write_entry_header(writer, &archive.entries[index], plan.layouts[index])?;
+    }
+    Ok(())
+}
+
+fn write_archive_header<W: Write>(writer: &mut W, archive: &StreamToc) -> crate::Result<()> {
+    writer.write_all(&LEGACY_MAGIC.to_le_bytes())?;
+    writer.write_all(&(archive.types.len() as u32).to_le_bytes())?;
+    writer.write_all(&(archive.entries.len() as u32).to_le_bytes())?;
+    writer.write_all(&archive.unknown.to_le_bytes())?;
+    writer.write_all(&archive.unk4_data)?;
+    Ok(())
+}
+
+fn write_type_headers<W: Write>(writer: &mut W, types: &[TocFileType]) -> crate::Result<()> {
+    for file_type in types {
+        let mut bytes = [0u8; TOC_FILE_TYPE_SIZE];
+        file_type.pack_into(&mut bytes);
+        writer.write_all(&bytes)?;
+    }
+    Ok(())
+}
+
+fn write_entry_header<W: Write>(
+    writer: &mut W,
+    entry: &TocEntry,
+    layout: EntryLayout,
+) -> crate::Result<()> {
+    let mut bytes = [0u8; TOC_ENTRY_SIZE];
+    LE::write_u64(&mut bytes[0..8], entry.file_id);
+    LE::write_u64(&mut bytes[8..16], entry.type_id);
+    LE::write_u64(&mut bytes[16..24], layout.toc_data_offset);
+    LE::write_u64(&mut bytes[24..32], layout.stream_offset);
+    LE::write_u64(&mut bytes[32..40], layout.gpu_offset);
+    write_entry_header_tail(&mut bytes, entry, layout);
+    writer.write_all(&bytes)?;
+    Ok(())
+}
+
+fn write_entry_header_tail(bytes: &mut [u8], entry: &TocEntry, layout: EntryLayout) {
+    LE::write_u64(&mut bytes[40..48], entry.unknown1);
+    LE::write_u64(&mut bytes[48..56], entry.unknown2);
+    LE::write_u32(&mut bytes[56..60], layout.toc_size);
+    LE::write_u32(&mut bytes[60..64], layout.stream_size);
+    LE::write_u32(&mut bytes[64..68], layout.gpu_size);
+    LE::write_u32(&mut bytes[68..72], entry.unknown3);
+    LE::write_u32(&mut bytes[72..76], entry.unknown4);
+    LE::write_u32(&mut bytes[76..80], layout.entry_index);
+}
+
+fn resource_part(entry: &TocEntry, layout: EntryLayout, part: SerializedPart) -> (usize, &[u8]) {
+    match part {
+        SerializedPart::Gpu => (layout.gpu_offset as usize, &entry.gpu_data),
+        SerializedPart::Stream => (layout.stream_offset as usize, &entry.stream_data),
+        SerializedPart::Toc => unreachable!("TOC is not a sidecar resource"),
+    }
+}
+
+fn write_zeroes<W: Write>(writer: &mut W, mut count: usize) -> crate::Result<()> {
+    const ZEROES: [u8; 8192] = [0; 8192];
+    while count > 0 {
+        let chunk_size = count.min(ZEROES.len());
+        writer.write_all(&ZEROES[..chunk_size])?;
+        count -= chunk_size;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -273,146 +504,31 @@ impl StreamToc {
         Ok(())
     }
 
-    /// Refresh the type table from `entries`, lay out offsets, and produce
-    /// (toc, gpu, stream) byte buffers ready to write.
+    /// Prepares a reusable layout for writing archive parts directly to output streams.
+    pub fn serializer(&mut self) -> StreamTocSerializer<'_> {
+        let plan = prepare_serialization(self);
+        StreamTocSerializer {
+            archive: self,
+            plan,
+        }
+    }
+
+    /// Refresh the archive layout and return its three serialized byte buffers.
     pub fn serialize(&mut self) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
-        // Refresh type table in first-seen-order over entries.
-        let mut by_type: BTreeMap<u64, Vec<usize>> = BTreeMap::new(); // type_id -> entry indices, but order matters
-        let mut type_order: Vec<u64> = Vec::new();
-        let mut groups: Vec<(u64, Vec<usize>)> = Vec::new();
-        for (idx, e) in self.entries.iter().enumerate() {
-            if !type_order.contains(&e.type_id) {
-                type_order.push(e.type_id);
-                groups.push((e.type_id, Vec::new()));
-            }
-            let g = groups
-                .iter_mut()
-                .find(|(t, _)| *t == e.type_id)
-                .expect("group");
-            g.1.push(idx);
-        }
-        // by_type is now redundant; keep type_order/groups only.
-        let _ = &mut by_type;
-        self.types = groups
-            .iter()
-            .map(|(tid, idxs)| TocFileType::new(*tid, idxs.len() as u32))
-            .collect();
-
-        // ordered entry index list: type-major, source-order within a type
-        let ordered_idx: Vec<usize> = groups.iter().flat_map(|(_, v)| v.iter().copied()).collect();
-        let num_types = self.types.len();
-        let num_files = self.entries.len();
-
-        // Pass 1: layout
-        let header_size = HEADER_BASE + num_types * TOC_FILE_TYPE_SIZE + num_files * TOC_ENTRY_SIZE;
-        let mut data_cursor = header_size as u64;
-        let mut gpu_cursor: u64 = 0;
-        let mut stream_cursor: u64 = 0;
-        let mut layouts: Vec<EntryLayout> = vec![EntryLayout::default(); num_files];
-
-        for (pos, &eidx) in ordered_idx.iter().enumerate() {
-            let e = &self.entries[eidx];
-            let mut lay = EntryLayout {
-                entry_index: (pos + 1) as u32,
-                toc_data_offset: data_cursor,
-                toc_size: e.toc_data.len() as u32,
-                ..Default::default()
-            };
-            data_cursor += e.toc_data.len() as u64;
-
-            if !e.gpu_data.is_empty() {
-                gpu_cursor = align_up(gpu_cursor as usize, GPU_ALIGN) as u64;
-                lay.gpu_offset = gpu_cursor;
-                lay.gpu_size = e.gpu_data.len() as u32;
-                gpu_cursor += e.gpu_data.len() as u64;
-            }
-            if !e.stream_data.is_empty() {
-                stream_cursor = align_up(stream_cursor as usize, STREAM_ALIGN) as u64;
-                lay.stream_offset = stream_cursor;
-                lay.stream_size = e.stream_data.len() as u32;
-                stream_cursor += e.stream_data.len() as u64;
-            }
-            layouts[eidx] = lay;
-        }
-
-        // Pass 2: serialize
-        let mut toc_buf: Vec<u8> = Vec::with_capacity(header_size);
-        toc_buf.extend_from_slice(&LEGACY_MAGIC.to_le_bytes());
-        toc_buf.extend_from_slice(&(num_types as u32).to_le_bytes());
-        toc_buf.extend_from_slice(&(num_files as u32).to_le_bytes());
-        toc_buf.extend_from_slice(&self.unknown.to_le_bytes());
-        toc_buf.extend_from_slice(&self.unk4_data);
-        for t in &self.types {
-            let mut buf = [0u8; TOC_FILE_TYPE_SIZE];
-            t.pack_into(&mut buf);
-            toc_buf.extend_from_slice(&buf);
-        }
-        for &eidx in &ordered_idx {
-            let e = &self.entries[eidx];
-            let lay = layouts[eidx];
-            let mut hdr = [0u8; TOC_ENTRY_SIZE];
-            LE::write_u64(&mut hdr[0..8], e.file_id);
-            LE::write_u64(&mut hdr[8..16], e.type_id);
-            LE::write_u64(&mut hdr[16..24], lay.toc_data_offset);
-            LE::write_u64(&mut hdr[24..32], lay.stream_offset);
-            LE::write_u64(&mut hdr[32..40], lay.gpu_offset);
-            LE::write_u64(&mut hdr[40..48], e.unknown1);
-            LE::write_u64(&mut hdr[48..56], e.unknown2);
-            LE::write_u32(&mut hdr[56..60], lay.toc_size);
-            LE::write_u32(&mut hdr[60..64], lay.stream_size);
-            LE::write_u32(&mut hdr[64..68], lay.gpu_size);
-            LE::write_u32(&mut hdr[68..72], e.unknown3);
-            LE::write_u32(&mut hdr[72..76], e.unknown4);
-            LE::write_u32(&mut hdr[76..80], lay.entry_index);
-            toc_buf.extend_from_slice(&hdr);
-        }
-        debug_assert_eq!(toc_buf.len(), header_size);
-        // Bodies, in `ordered_idx` order. We asserted alignment in layout pass.
-        for &eidx in &ordered_idx {
-            debug_assert_eq!(toc_buf.len() as u64, layouts[eidx].toc_data_offset);
-            toc_buf.extend_from_slice(&self.entries[eidx].toc_data);
-        }
-
-        // SDK minimum: 256 bytes per file.
-        let min_size = 256 * num_files;
-        if toc_buf.len() < min_size {
-            toc_buf.resize(min_size, 0);
-        }
-
-        let mut gpu_buf: Vec<u8> = Vec::new();
-        for &eidx in &ordered_idx {
-            let e = &self.entries[eidx];
-            if e.gpu_data.is_empty() {
-                continue;
-            }
-            let off = layouts[eidx].gpu_offset as usize;
-            let end = off + e.gpu_data.len();
-            if gpu_buf.len() < end {
-                gpu_buf.resize(end, 0);
-            }
-            gpu_buf[off..end].copy_from_slice(&e.gpu_data);
-        }
-
-        let mut stream_buf: Vec<u8> = Vec::new();
-        for &eidx in &ordered_idx {
-            let e = &self.entries[eidx];
-            if e.stream_data.is_empty() {
-                continue;
-            }
-            let off = layouts[eidx].stream_offset as usize;
-            let end = off + e.stream_data.len();
-            if stream_buf.len() < end {
-                stream_buf.resize(end, 0);
-            }
-            stream_buf[off..end].copy_from_slice(&e.stream_data);
-        }
-
-        // Persist layouts back into entries for downstream consumers.
-        for (eidx, lay) in layouts.iter().enumerate() {
-            self.entries[eidx].entry_index = lay.entry_index;
-        }
-
-        (toc_buf, gpu_buf, stream_buf)
+        let serializer = self.serializer();
+        let mut toc = Vec::new();
+        let mut gpu = Vec::new();
+        let mut stream = Vec::new();
+        serializer
+            .write_part(SerializedPart::Toc, &mut toc)
+            .expect("writing TOC to memory cannot fail");
+        serializer
+            .write_part(SerializedPart::Gpu, &mut gpu)
+            .expect("writing GPU data to memory cannot fail");
+        serializer
+            .write_part(SerializedPart::Stream, &mut stream)
+            .expect("writing stream data to memory cannot fail");
+        (toc, gpu, stream)
     }
 
     pub fn find(&self, file_id: u64, type_id: u64) -> Option<&TocEntry> {

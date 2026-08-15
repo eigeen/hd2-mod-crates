@@ -1,3 +1,4 @@
+use hd2_migrator_io::archive::{SerializedPart, StreamToc};
 use std::fs::File;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -41,6 +42,33 @@ pub fn write_zip_entry(
     Ok(())
 }
 
+pub fn write_patch_to_zip(
+    zip: &mut OutputZip,
+    patch: &mut StreamToc,
+    directory: &str,
+    suffix: &str,
+) -> hd2_migrator_io::Result<()> {
+    let serializer = patch.serializer();
+    let toc_path = format!("{directory}/{suffix}");
+    write_serialized_entry(zip, &serializer, &toc_path, SerializedPart::Toc)?;
+    let gpu_path = format!("{toc_path}.gpu_resources");
+    write_serialized_entry(zip, &serializer, &gpu_path, SerializedPart::Gpu)?;
+    let stream_path = format!("{toc_path}.stream");
+    write_serialized_entry(zip, &serializer, &stream_path, SerializedPart::Stream)
+}
+
+fn write_serialized_entry(
+    zip: &mut OutputZip,
+    serializer: &hd2_migrator_io::archive::StreamTocSerializer<'_>,
+    path: &str,
+    part: SerializedPart,
+) -> hd2_migrator_io::Result<()> {
+    validate_entry_path(path)?;
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+    zip.writer.start_file(path, options)?;
+    serializer.write_part(part, &mut zip.writer)
+}
+
 pub fn finish_zip(zip: OutputZip) -> Result<(), String> {
     let OutputZip {
         writer,
@@ -77,6 +105,8 @@ fn validate_entry_path(value: &str) -> hd2_migrator_io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hd2_migrator_io::archive::TocEntry;
+    use std::io::Read;
 
     #[test]
     fn writes_stored_zip_entry() {
@@ -130,5 +160,54 @@ mod tests {
 
         assert!(!temporary_path.exists());
         assert!(!output.exists());
+    }
+
+    #[test]
+    fn streams_archive_parts_directly_into_zip_entries() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let output = directory.path().join("output.zip");
+        let mut patch = sample_patch();
+        let (expected_toc, expected_gpu, expected_stream) = patch.clone().serialize();
+        let mut zip = create_zip(&output).expect("create ZIP");
+
+        write_patch_to_zip(&mut zip, &mut patch, "variant", "example.patch_0")
+            .expect("stream patch");
+        finish_zip(zip).expect("finish ZIP");
+
+        let mut archive =
+            zip::ZipArchive::new(File::open(output).expect("open ZIP")).expect("read ZIP");
+        assert_eq!(
+            read_zip_entry(&mut archive, "variant/example.patch_0"),
+            expected_toc
+        );
+        assert_eq!(
+            read_zip_entry(&mut archive, "variant/example.patch_0.gpu_resources"),
+            expected_gpu
+        );
+        assert_eq!(
+            read_zip_entry(&mut archive, "variant/example.patch_0.stream"),
+            expected_stream
+        );
+    }
+
+    fn sample_patch() -> StreamToc {
+        let mut entry = TocEntry::new(1, 2);
+        entry.toc_data = b"toc body".to_vec();
+        entry.gpu_data = b"gpu body".to_vec();
+        entry.stream_data = b"stream body".to_vec();
+        StreamToc {
+            entries: vec![entry],
+            ..StreamToc::default()
+        }
+    }
+
+    fn read_zip_entry(archive: &mut zip::ZipArchive<File>, name: &str) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        archive
+            .by_name(name)
+            .expect("ZIP entry")
+            .read_to_end(&mut bytes)
+            .expect("read entry");
+        bytes
     }
 }
