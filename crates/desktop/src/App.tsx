@@ -262,7 +262,11 @@ function App() {
       <div className="relative z-[1]">
         <main className="mx-auto w-full max-w-[56rem] px-4 py-6 min-[51.25rem]:px-6 min-[51.25rem]:py-10">
           <div className="overflow-hidden border-2 border-hd2-border bg-black/60">
-            <Header onOpenReport={reportHistory.openReport} reports={reportHistory.history} />
+            <Header
+              onClearReports={reportHistory.clearHistory}
+              onOpenReport={reportHistory.openReport}
+              reports={reportHistory.history}
+            />
             <Tabs centered onChange={(_, value: ToolMode) => setToolMode(value)} value={toolMode}>
               <Tab label={t("mode.migrate")} value="migrate" />
               <Tab label={t("mode.repatch")} value="repatch" />
@@ -334,6 +338,7 @@ function App() {
 }
 
 interface HeaderProps {
+  onClearReports: () => void;
   onOpenReport: (id: string) => void;
   reports: CompletedTaskReport[];
 }
@@ -359,7 +364,11 @@ function Header(props: HeaderProps) {
               <GitHubIcon fontSize="small" />
             </IconButton>
           </Tooltip>
-          <TaskReportHistoryButton onSelect={props.onOpenReport} reports={props.reports} />
+          <TaskReportHistoryButton
+            onClear={props.onClearReports}
+            onSelect={props.onOpenReport}
+            reports={props.reports}
+          />
           <LanguageMenu />
         </div>
       </div>

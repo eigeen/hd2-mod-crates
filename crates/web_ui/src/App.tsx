@@ -395,6 +395,7 @@ function App() {
                   </IconButton>
                 </Tooltip>
                 <TaskReportHistoryButton
+                  onClear={reportHistory.clearHistory}
                   onSelect={reportHistory.openReport}
                   reports={reportHistory.history}
                 />

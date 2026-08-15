@@ -143,5 +143,6 @@ export const zhCN = {
   "result.archives": "扫描 Archive",
   "result.warningDetails": "警告详情",
   "result.history": "最近结果",
+  "result.clearHistory": "清空最近结果",
   "result.revealOutput": "在文件夹中显示",
 } satisfies TranslationResources;

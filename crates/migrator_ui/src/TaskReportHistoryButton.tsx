@@ -1,10 +1,12 @@
 import HistoryIcon from "@mui/icons-material/History";
-import { Badge, IconButton, Menu, MenuItem, Tooltip } from "@mui/material";
+import DeleteSweepIcon from "@mui/icons-material/DeleteSweep";
+import { Badge, Divider, IconButton, ListItemIcon, Menu, MenuItem, Tooltip } from "@mui/material";
 import { useState } from "react";
 import { useI18n } from "./i18n";
 import type { CompletedTaskReport } from "./taskReportHistory";
 
 interface TaskReportHistoryButtonProps {
+  onClear: () => void;
   onSelect: (id: string) => void;
   reports: CompletedTaskReport[];
 }
@@ -46,6 +48,16 @@ export function TaskReportHistoryButton(props: TaskReportHistoryButtonProps) {
             </div>
           </MenuItem>
         ))}
+        <Divider />
+        <MenuItem
+          onClick={() => {
+            props.onClear();
+            setAnchor(null);
+          }}
+        >
+          <ListItemIcon><DeleteSweepIcon fontSize="small" /></ListItemIcon>
+          {t("result.clearHistory")}
+        </MenuItem>
       </Menu>
     </>
   );

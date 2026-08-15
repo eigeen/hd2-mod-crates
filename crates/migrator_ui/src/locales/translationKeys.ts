@@ -141,6 +141,7 @@ export const translationKeys = [
   "result.archives",
   "result.warningDetails",
   "result.history",
+  "result.clearHistory",
   "result.revealOutput",
 ] as const;
 

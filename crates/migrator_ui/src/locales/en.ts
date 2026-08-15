@@ -143,5 +143,6 @@ export const en = {
   "result.archives": "Archives scanned",
   "result.warningDetails": "Warning details",
   "result.history": "Recent results",
+  "result.clearHistory": "Clear recent results",
   "result.revealOutput": "Show in folder",
 } satisfies TranslationResources;
