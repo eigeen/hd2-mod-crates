@@ -12,6 +12,7 @@ import {
   PatchPanel,
   PerformanceDialog,
   ResultReportDialog,
+  TaskReportHistoryButton,
   TargetPanel,
   ToolIntro,
   UnitUpdaterPanel,
@@ -29,7 +30,7 @@ import {
   titleUrl,
   uniqueOutputFilename,
   useI18n,
-  type CompletedTaskReport,
+  useTaskReportHistory,
   type DetectedSource,
   type EquipmentOption,
   type MissingUnitPolicy,
@@ -82,7 +83,7 @@ function App() {
   const [missingUnitPolicy, setMissingUnitPolicy] = useState<MissingUnitPolicy>("drop");
   const [faqOpen, setFaqOpen] = useState(false);
   const [faqAttention, setFaqAttention] = useState<TranslationKey | null>(null);
-  const [completedReport, setCompletedReport] = useState<CompletedTaskReport | null>(null);
+  const reportHistory = useTaskReportHistory();
   const activeTaskRef = useRef<AbortController | null>(null);
 
   const runCancellableTask = useCallback(async (
@@ -295,7 +296,7 @@ function App() {
         unmatchedUnitPolicy,
         variants,
       });
-      setCompletedReport({ kind: "migration", output: result.output, summary: result.summary });
+      reportHistory.recordReport({ kind: "migration", output: result.output, summary: result.summary });
     });
     setProgressLabel("");
   }, [
@@ -311,6 +312,7 @@ function App() {
     t,
     unmatchedUnitPolicy,
     runCancellableTask,
+    reportHistory.recordReport,
   ]);
 
   const runUnitRepatch = useCallback(async () => {
@@ -331,14 +333,14 @@ function App() {
       );
       throwIfTaskCancelled(signal);
       downloadRepatchedPatch(patch, output.tocBytes, "hd2-repatched-mod.zip");
-      setCompletedReport({
+      reportHistory.recordReport({
         kind: "repatch",
         output: "hd2-repatched-mod.zip",
         summary: output.summary,
       });
     });
     setProgressLabel("");
-  }, [gameDir, missingUnitPolicy, runCancellableTask, t]);
+  }, [gameDir, missingUnitPolicy, reportHistory.recordReport, runCancellableTask, t]);
 
   const runSelectedTool = toolMode === "migrate" ? runMigration : runUnitRepatch;
 
@@ -352,8 +354,8 @@ function App() {
       <Toaster position="top-center" theme="dark" />
       <ResultReportDialog
         equipmentOptions={equipmentOptions}
-        onClose={() => setCompletedReport(null)}
-        report={completedReport}
+        onClose={reportHistory.closeReport}
+        report={reportHistory.activeReport}
       />
 
       <div className="relative z-[1]">
@@ -391,6 +393,10 @@ function App() {
                     <GitHubIcon fontSize="small" />
                   </IconButton>
                 </Tooltip>
+                <TaskReportHistoryButton
+                  onSelect={reportHistory.openReport}
+                  reports={reportHistory.history}
+                />
                 <LanguageMenu />
               </div>
             </div>

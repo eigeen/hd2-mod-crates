@@ -129,4 +129,6 @@ export const zhCN = {
   "result.failed": "失败 Unit",
   "result.archives": "扫描 Archive",
   "result.warningDetails": "警告详情",
+  "result.history": "最近结果",
+  "result.revealOutput": "在文件夹中显示",
 } satisfies TranslationResources;

@@ -14,14 +14,12 @@ import type {
   MigrationSummary,
   UnitRepatchSummary,
 } from "./types";
-
-export type CompletedTaskReport =
-  | { kind: "migration"; output: string; summary: MigrationSummary }
-  | { kind: "repatch"; output: string; summary: UnitRepatchSummary };
+import type { CompletedTaskReport } from "./taskReportHistory";
 
 interface ResultReportDialogProps {
   equipmentOptions: EquipmentOption[];
   onClose: () => void;
+  onRevealOutput?: (output: string) => void;
   report: CompletedTaskReport | null;
 }
 
@@ -51,6 +49,11 @@ export function ResultReportDialog(props: ResultReportDialogProps) {
         )}
       </Hd2DialogContent>
       <Hd2DialogActions>
+        {props.report && props.onRevealOutput && (
+          <Button onClick={() => props.onRevealOutput?.(props.report!.output)} variant="outlined">
+            {t("result.revealOutput")}
+          </Button>
+        )}
         <Button onClick={props.onClose} variant="contained">{t("result.close")}</Button>
       </Hd2DialogActions>
     </Hd2Dialog>

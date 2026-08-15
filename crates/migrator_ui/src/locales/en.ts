@@ -129,4 +129,6 @@ export const en = {
   "result.failed": "Units failed",
   "result.archives": "Archives scanned",
   "result.warningDetails": "Warning details",
+  "result.history": "Recent results",
+  "result.revealOutput": "Show in folder",
 } satisfies TranslationResources;

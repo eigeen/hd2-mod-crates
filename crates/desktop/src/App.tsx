@@ -4,10 +4,12 @@ import GitHubIcon from "@mui/icons-material/GitHub";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { Button, CircularProgress, IconButton, Tab, Tabs, Tooltip } from "@mui/material";
 import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   LanguageMenu,
   OptionsPanel,
   ResultReportDialog,
+  TaskReportHistoryButton,
   TargetPanel,
   ToolIntro,
   UnitUpdaterPanel,
@@ -22,6 +24,7 @@ import {
   titleUrl,
   uniqueOutputFilename,
   useI18n,
+  useTaskReportHistory,
   type CompletedTaskReport,
   type Translate,
 } from "@hd2-mod-tools/migrator-ui";
@@ -74,7 +77,7 @@ function App() {
   const [cancelling, setCancelling] = useState(false);
   const [progressLabel, setProgressLabel] = useState("");
   const [hoveredDropZone, setHoveredDropZone] = useState<DropZone | null>(null);
-  const [completedReport, setCompletedReport] = useState<CompletedTaskReport | null>(null);
+  const reportHistory = useTaskReportHistory();
   const hoveredDropZoneRef = useRef<DropZone | null>(null);
   const activeTaskRef = useRef<DesktopTask<unknown> | null>(null);
 
@@ -200,10 +203,10 @@ function App() {
       }, (event) => setProgressLabel(progressText(event, t)));
       activeTaskRef.current = task;
       const summary = await task.result;
-      setCompletedReport({ kind: "migration", output: outputPath, summary });
+      reportHistory.recordReport({ kind: "migration", output: outputPath, summary });
     });
     setProgressLabel("");
-  }, [configuredMappings, equipmentOptions, gameDir, noPadding, outputAsSinglePatch, patch, patchPaths, t, unmatchedUnitPolicy]);
+  }, [configuredMappings, equipmentOptions, gameDir, noPadding, outputAsSinglePatch, patch, patchPaths, reportHistory.recordReport, t, unmatchedUnitPolicy]);
 
   const runRepatch = useCallback(async () => {
     if (!gameDir || !patch) return;
@@ -219,10 +222,10 @@ function App() {
       }, (event) => setProgressLabel(progressText(event, t)));
       activeTaskRef.current = task;
       const summary = await task.result;
-      setCompletedReport({ kind: "repatch", output: outputPath, summary });
+      reportHistory.recordReport({ kind: "repatch", output: outputPath, summary });
     });
     setProgressLabel("");
-  }, [gameDir, missingUnitPolicy, patch, patchPaths, t]);
+  }, [gameDir, missingUnitPolicy, patch, patchPaths, reportHistory.recordReport, t]);
 
   const cancelActiveTask = useCallback(async () => {
     const task = activeTaskRef.current;
@@ -249,13 +252,14 @@ function App() {
       <Toaster position="top-center" theme="dark" />
       <ResultReportDialog
         equipmentOptions={equipmentOptions}
-        onClose={() => setCompletedReport(null)}
-        report={completedReport}
+        onClose={reportHistory.closeReport}
+        onRevealOutput={(output) => void revealItemInDir(output).catch((error) => showError(error, t))}
+        report={reportHistory.activeReport}
       />
       <div className="relative z-[1]">
         <main className="mx-auto w-full max-w-[56rem] px-4 py-6 min-[51.25rem]:px-6 min-[51.25rem]:py-10">
           <div className="overflow-hidden border-2 border-hd2-border bg-black/60">
-            <Header />
+            <Header onOpenReport={reportHistory.openReport} reports={reportHistory.history} />
             <Tabs centered onChange={(_, value: ToolMode) => setToolMode(value)} value={toolMode}>
               <Tab label={t("mode.migrate")} value="migrate" />
               <Tab label={t("mode.repatch")} value="repatch" />
@@ -326,7 +330,12 @@ function App() {
   );
 }
 
-function Header() {
+interface HeaderProps {
+  onOpenReport: (id: string) => void;
+  reports: CompletedTaskReport[];
+}
+
+function Header(props: HeaderProps) {
   const { t } = useI18n();
   return (
     <div className="flex flex-col items-center border-b border-hd2-border bg-hd2-surface/70 px-4 py-5">
@@ -347,6 +356,7 @@ function Header() {
               <GitHubIcon fontSize="small" />
             </IconButton>
           </Tooltip>
+          <TaskReportHistoryButton onSelect={props.onOpenReport} reports={props.reports} />
           <LanguageMenu />
         </div>
       </div>

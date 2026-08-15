@@ -1,7 +1,8 @@
 export { EquipmentCategoryIcon } from "./EquipmentCategoryIcon";
 export { LanguageMenu } from "./LanguageMenu";
 export { OptionsPanel, PatchPanel, PerformanceDialog, TargetPanel } from "./MigratorPanels";
-export { ResultReportDialog, type CompletedTaskReport } from "./ResultReportDialog";
+export { ResultReportDialog } from "./ResultReportDialog";
+export { TaskReportHistoryButton } from "./TaskReportHistoryButton";
 export { ToolIntro } from "./ToolIntro";
 export { UnitUpdaterPanel } from "./UnitUpdaterPanel";
 export { backgroundUrl, titleUrl } from "./assets";
@@ -11,5 +12,6 @@ export * from "./migrationDownloads";
 export * from "./migrationMappings";
 export * from "./taskError";
 export { hd2Theme } from "./theme";
+export { useTaskReportHistory, type CompletedTaskReport, type TaskReportInput } from "./taskReportHistory";
 export type * from "./types";
 export { useDropZone } from "./useDropZone";

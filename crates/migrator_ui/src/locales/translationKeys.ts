@@ -127,6 +127,8 @@ export const translationKeys = [
   "result.failed",
   "result.archives",
   "result.warningDetails",
+  "result.history",
+  "result.revealOutput",
 ] as const;
 
 export type TranslationKey = (typeof translationKeys)[number];
