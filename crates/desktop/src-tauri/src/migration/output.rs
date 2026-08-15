@@ -47,22 +47,17 @@ pub fn finish_zip(zip: OutputZip) -> Result<(), String> {
         temporary,
         output_path,
     } = zip;
-    writer
+    let completed_file = writer
         .finish()
         .map_err(|error| format!("Finish output ZIP: {error}"))?;
-    remove_existing_output(&output_path)?;
+    completed_file
+        .sync_all()
+        .map_err(|error| format!("Flush output ZIP: {error}"))?;
+    drop(completed_file);
     temporary
         .persist(&output_path)
         .map(|_| ())
         .map_err(|error| format!("Move completed ZIP to {}: {error}", output_path.display()))
-}
-
-fn remove_existing_output(path: &Path) -> Result<(), String> {
-    if !path.exists() {
-        return Ok(());
-    }
-    std::fs::remove_file(path)
-        .map_err(|error| format!("Replace existing output ZIP {}: {error}", path.display()))
 }
 
 fn validate_entry_path(value: &str) -> hd2_migrator_io::Result<()> {
@@ -103,5 +98,37 @@ mod tests {
     #[test]
     fn rejects_parent_path_components() {
         assert!(validate_entry_path("../outside").is_err());
+    }
+
+    #[test]
+    fn atomically_replaces_an_existing_output() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let output = directory.path().join("output.zip");
+        std::fs::write(&output, b"previous valid output").expect("write previous output");
+        let mut zip = create_zip(&output).expect("create ZIP");
+        write_zip_entry(&mut zip, "replacement.patch_0", b"new").expect("write entry");
+
+        finish_zip(zip).expect("replace ZIP");
+
+        let file = File::open(output).expect("open replacement ZIP");
+        let mut archive = zip::ZipArchive::new(file).expect("read replacement ZIP");
+        assert_eq!(
+            archive.by_index(0).expect("entry").name(),
+            "replacement.patch_0"
+        );
+    }
+
+    #[test]
+    fn dropping_an_incomplete_zip_removes_its_temporary_file() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let output = directory.path().join("output.zip");
+        let mut zip = create_zip(&output).expect("create ZIP");
+        let temporary_path = zip.temporary.path().to_path_buf();
+        write_zip_entry(&mut zip, "partial.patch_0", b"partial").expect("write entry");
+
+        drop(zip);
+
+        assert!(!temporary_path.exists());
+        assert!(!output.exists());
     }
 }
