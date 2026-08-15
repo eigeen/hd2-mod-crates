@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   TaskError,
   normalizeTaskError,
+  presentTaskError,
   throwIfTaskCancelled,
 } from "../src/taskError";
 
@@ -14,6 +15,17 @@ test("preserves structured desktop command errors", () => {
   expect(error).toBeInstanceOf(TaskError);
   expect(error.code).toBe("migration.failed");
   expect(error.message).toBe("failed to parse patch");
+});
+
+test("presents a localized title while preserving diagnostic details", () => {
+  const presentation = presentTaskError(
+    { code: "migration.failed", message: "failed to parse patch" },
+    (key) => `translated:${key}`,
+  );
+
+  expect(presentation.title).toBe("translated:error.migrationFailed");
+  expect(presentation.description).toBe("failed to parse patch");
+  expect(presentation.diagnostic).toBe("[migration.failed] failed to parse patch");
 });
 
 test("uses the caller fallback code for unstructured WASM errors", () => {

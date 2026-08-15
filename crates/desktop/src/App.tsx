@@ -4,6 +4,7 @@ import GitHubIcon from "@mui/icons-material/GitHub";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { Button, CircularProgress, IconButton, Tab, Tabs, Tooltip } from "@mui/material";
 import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   LanguageMenu,
@@ -17,7 +18,7 @@ import {
   buildMigrationVariants,
   configuredMappings as collectConfiguredMappings,
   multiTargetEligible as canUseMultiTarget,
-  normalizeTaskError,
+  presentTaskError,
   selectTarget,
   singlePatchRequired as mustUseSinglePatch,
   targetsForSource,
@@ -82,7 +83,9 @@ function App() {
   const activeTaskRef = useRef<DesktopTask<unknown> | null>(null);
 
   useEffect(() => {
-    void loadEquipmentOptions().then(setEquipmentOptions).catch(showError);
+    void loadEquipmentOptions()
+      .then(setEquipmentOptions)
+      .catch((error) => showError(error, t));
   }, []);
 
   useEffect(() => {
@@ -123,7 +126,7 @@ function App() {
     void inspectPatch(patchPaths, gameDir).then((result) => {
       if (!cancelled) applyInspection(result);
     }).catch((error) => {
-      if (!cancelled) showError(error);
+      if (!cancelled) showError(error, t);
     }).finally(() => {
       if (!cancelled) setBusy(false);
     });
@@ -520,14 +523,26 @@ async function runTask(
   }
 }
 
-function showError(error: unknown, t?: Translate) {
+function showError(error: unknown, t: Translate) {
   console.error("[hd2-migrator-native] task failed:", error);
-  const taskError = normalizeTaskError(error);
-  if (taskError.code === "task.cancelled") {
-    toast.info(t ? t("task.cancelled") : taskError.message);
+  const presentation = presentTaskError(error, t);
+  if (presentation.error.code === "task.cancelled") {
+    toast.info(t("task.cancelled"));
     return;
   }
-  toast.error(taskError.message);
+  toast.error(presentation.title, {
+    description: presentation.description,
+    action: {
+      label: t("error.copyDiagnostics"),
+      onClick: () => copyDiagnostic(presentation.diagnostic, t),
+    },
+  });
+}
+
+function copyDiagnostic(diagnostic: string, t: Translate): void {
+  void writeText(diagnostic)
+    .then(() => toast.success(t("error.diagnosticsCopied")))
+    .catch(() => toast.error(t("error.diagnosticsCopyFailed")));
 }
 
 export default App;

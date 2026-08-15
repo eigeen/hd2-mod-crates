@@ -16,6 +16,39 @@ export interface StructuredTaskError {
   message: string;
 }
 
+export interface TaskErrorPresentation {
+  error: TaskError;
+  title: string;
+  description: string;
+  diagnostic: string;
+}
+
+type ErrorTranslate = (key: TaskErrorTranslationKey) => string;
+type TaskErrorTranslationKey =
+  | "error.equipmentLoadFailed"
+  | "error.gameDataDiscoveryFailed"
+  | "error.gameDataInvalid"
+  | "error.migrationFailed"
+  | "error.patchInspectFailed"
+  | "error.repatchFailed"
+  | "error.taskConflict"
+  | "error.taskJoinFailed"
+  | "error.wasmRuntime"
+  | "error.unknown";
+
+const ERROR_TITLES: Record<Exclude<TaskErrorCode, "task.cancelled">, TaskErrorTranslationKey> = {
+  "equipment.loadFailed": "error.equipmentLoadFailed",
+  "gameData.discoveryFailed": "error.gameDataDiscoveryFailed",
+  "gameData.invalid": "error.gameDataInvalid",
+  "migration.failed": "error.migrationFailed",
+  "patch.inspectFailed": "error.patchInspectFailed",
+  "repatch.failed": "error.repatchFailed",
+  "task.conflict": "error.taskConflict",
+  "task.joinFailed": "error.taskJoinFailed",
+  "wasm.runtime": "error.wasmRuntime",
+  unknown: "error.unknown",
+};
+
 export class TaskError extends Error implements StructuredTaskError {
   constructor(public readonly code: TaskErrorCode, message: string) {
     super(message);
@@ -39,6 +72,37 @@ export function normalizeTaskError(
   const structured = structuredError(error);
   if (structured) return new TaskError(structured.code, structured.message);
   return new TaskError(fallbackCode, errorMessage(error));
+}
+
+/** Builds the same user-facing summary and copyable diagnostic for both backends. */
+export function presentTaskError(
+  error: unknown,
+  translate: ErrorTranslate,
+  fallbackCode: TaskErrorCode = "unknown",
+): TaskErrorPresentation {
+  const taskError = normalizeTaskError(error, fallbackCode);
+  if (taskError.code === "task.cancelled") {
+    return {
+      error: taskError,
+      title: taskError.message,
+      description: taskError.message,
+      diagnostic: formatTaskErrorDiagnostic(taskError),
+    };
+  }
+  return {
+    error: taskError,
+    title: translate(ERROR_TITLES[taskError.code]),
+    description: taskError.message,
+    diagnostic: formatTaskErrorDiagnostic(taskError),
+  };
+}
+
+export async function copyTaskErrorDiagnostic(diagnostic: string): Promise<void> {
+  await navigator.clipboard.writeText(diagnostic);
+}
+
+function formatTaskErrorDiagnostic(error: TaskError): string {
+  return `[${error.code}] ${error.message}`;
 }
 
 function structuredError(error: unknown): StructuredTaskError | null {

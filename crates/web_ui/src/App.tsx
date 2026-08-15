@@ -19,10 +19,11 @@ import {
   backgroundUrl,
   buildMigrationVariants,
   configuredMappings as collectConfiguredMappings,
+  copyTaskErrorDiagnostic,
   exceedsWebMappingLimit,
   maxWebSeparateOutputsForPatch,
   multiTargetEligible as canUseMultiTarget,
-  normalizeTaskError,
+  presentTaskError,
   selectTarget,
   singlePatchRequired as mustUseSinglePatch,
   targetsForSource,
@@ -681,14 +682,25 @@ async function runTask(
 
 function showTaskError(error: unknown, t: Translate): void {
   console.error("[hd2-migrator] task failed:", error);
-  const taskError = normalizeTaskError(error);
-  if (taskError.code === "task.cancelled") {
+  const fallbackCode = isWasmRuntimeTrapError(error) ? "wasm.runtime" : "unknown";
+  const presentation = presentTaskError(error, t, fallbackCode);
+  if (presentation.error.code === "task.cancelled") {
     toast.info(t("task.cancelled"));
     return;
   }
-  toast.error(isWasmRuntimeTrapError(error) || taskError.code === "wasm.runtime"
-    ? t("app.wasmRuntimeError")
-    : taskError.message);
+  toast.error(presentation.title, {
+    description: presentation.description,
+    action: {
+      label: t("error.copyDiagnostics"),
+      onClick: () => copyDiagnostic(presentation.diagnostic, t),
+    },
+  });
+}
+
+function copyDiagnostic(diagnostic: string, t: Translate): void {
+  void copyTaskErrorDiagnostic(diagnostic)
+    .then(() => toast.success(t("error.diagnosticsCopied")))
+    .catch(() => toast.error(t("error.diagnosticsCopyFailed")));
 }
 
 function patchFileMessages(t: Translate) {
