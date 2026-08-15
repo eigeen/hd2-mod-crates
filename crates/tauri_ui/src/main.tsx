@@ -1,30 +1,31 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { CssBaseline, ThemeProvider, createTheme } from "@mui/material";
+import { I18nProvider } from "../../web_ui/src/i18n";
+import "../../web_ui/src/styles.css";
 import App from "./App";
 
-const theme = createTheme({
+const hd2Theme = createTheme({
   palette: {
-    primary: {
-      main: "#2e6f94",
-    },
-    secondary: {
-      main: "#8a5a24",
-    },
-    background: {
-      default: "#eef2f6",
-    },
+    mode: "dark",
+    primary: { main: "#fee70f", contrastText: "#111820" },
+    warning: { main: "#f59e0b" },
+    background: { default: "#111820", paper: "#0c0c0c" },
+    text: { primary: "#fdfdfd", secondary: "#aaaaaa" },
   },
-  shape: {
-    borderRadius: 8,
+  shape: { borderRadius: 0 },
+  typography: {
+    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif",
   },
 });
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <ThemeProvider theme={theme}>
+    <ThemeProvider theme={hd2Theme}>
       <CssBaseline />
-      <App />
+      <I18nProvider>
+        <App />
+      </I18nProvider>
     </ThemeProvider>
   </React.StrictMode>,
 );

@@ -1,32 +1,40 @@
-import { defineConfig } from "vite";
+import { execFileSync } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
 
-// @ts-expect-error process is a nodejs global
+const here = dirname(fileURLToPath(import.meta.url));
+const workspaceRoot = resolve(here, "../..");
 const host = process.env.TAURI_DEV_HOST;
 
-// https://vite.dev/config/
-export default defineConfig(async () => ({
-  plugins: [react()],
+function gitShortHash(): string {
+  try {
+    return execFileSync("git", ["rev-parse", "--short=7", "HEAD"], {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+    }).trim();
+  } catch {
+    return "unknown";
+  }
+}
 
-  // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
-  //
-  // 1. prevent Vite from obscuring rust errors
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  publicDir: resolve(here, "../web_ui/public"),
+  define: {
+    __GIT_HASH__: JSON.stringify(gitShortHash()),
+  },
+  build: {
+    target: "es2022",
+  },
   clearScreen: false,
-  // 2. tauri expects a fixed port, fail if that port is not available
   server: {
     port: 1420,
     strictPort: true,
     host: host || false,
-    hmr: host
-      ? {
-          protocol: "ws",
-          host,
-          port: 1421,
-        }
-      : undefined,
-    watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
-    },
+    hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
+    watch: { ignored: ["**/src-tauri/**"] },
   },
-}));
+});

@@ -6,8 +6,8 @@ use std::{
 
 #[cfg(windows)]
 use winreg::{
-    enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ},
     RegKey,
+    enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ},
 };
 
 const HELLDIVERS_2_STEAM_APP_ID: u32 = 553850;
@@ -32,6 +32,24 @@ pub async fn detect_game_data_dir() -> Result<GameDataDiscovery, String> {
     tauri::async_runtime::spawn_blocking(discover_game_data_dir)
         .await
         .map_err(|error| format!("Game directory search failed: {error}"))
+}
+
+/// Verify that a manually selected directory contains a supported HD2 data layout.
+#[tauri::command]
+pub async fn validate_game_data_dir(path: PathBuf) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || validate_game_data_dir_blocking(&path))
+        .await
+        .map_err(|error| format!("Game directory validation failed: {error}"))?
+}
+
+fn validate_game_data_dir_blocking(path: &Path) -> Result<(), String> {
+    if is_valid_game_data_dir(path) {
+        return Ok(());
+    }
+    Err(format!(
+        "The selected folder is not a Helldivers 2 data directory: {}",
+        path.display()
+    ))
 }
 
 fn discover_game_data_dir() -> GameDataDiscovery {

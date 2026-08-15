@@ -1,578 +1,502 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import type { UnlistenFn } from "@tauri-apps/api/event";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import type { DragDropEvent } from "@tauri-apps/api/webview";
-import { open } from "@tauri-apps/plugin-dialog";
-import FolderOpenIcon from "@mui/icons-material/FolderOpen";
-import HelpOutlineIcon from "@mui/icons-material/HelpOutlineOutlined";
+import AccountTreeIcon from "@mui/icons-material/AccountTree";
+import GitHubIcon from "@mui/icons-material/GitHub";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
-import SearchIcon from "@mui/icons-material/Search";
-import UploadFileIcon from "@mui/icons-material/UploadFile";
+import { Button, CircularProgress, IconButton, Tab, Tabs, Tooltip } from "@mui/material";
+import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast, Toaster } from "sonner";
+import { LanguageMenu } from "../../web_ui/src/LanguageMenu";
 import {
-  Alert,
-  Box,
-  Button,
-  Checkbox,
-  CircularProgress,
-  Divider,
-  FormControlLabel,
-  IconButton,
-  Stack,
-  Tab,
-  Tabs,
-  TextField,
-  Tooltip,
-  Typography,
-} from "@mui/material";
-import { fieldFromPhysicalPosition } from "./dropTarget";
-import SvdPanel from "./SvdPanel";
-import TargetPicker from "./TargetPicker";
+  buildMigrationVariants,
+  configuredMappings as collectConfiguredMappings,
+  multiTargetEligible as canUseMultiTarget,
+  selectTarget,
+  singlePatchRequired as mustUseSinglePatch,
+  targetsForSource,
+} from "../../web_ui/src/migrationMappings";
+import { OptionsPanel, TargetPanel } from "../../web_ui/src/MigratorPanels";
+import { ToolIntro } from "../../web_ui/src/ToolIntro";
+import { UnitUpdaterPanel } from "../../web_ui/src/UnitUpdaterPanel";
+import { useI18n, type Translate } from "../../web_ui/src/i18n";
+import { uniqueOutputFilename } from "../../web_ui/src/migrationDownloads";
+import { DesktopGameDataPanel, DesktopPatchPanel } from "./DesktopPanels";
+import { dropZoneFromPhysicalPosition, type DropZone } from "./dropTarget";
+import {
+  chooseGameDataDir,
+  chooseOutputZip,
+  choosePatchPaths,
+  detectGameDataDir,
+  inspectPatch,
+  loadEquipmentOptions,
+  migrateEquipment,
+  repatchMod,
+  subscribeToMigrationProgress,
+  validateGameDataDir,
+} from "./nativeClient";
 import type {
-  GameDataDiscovery,
-  MigrationTargetOption,
+  DetectedSource,
+  EquipmentOption,
   MigrationProgressEvent,
-  MigrationRequest,
   MigrationSummary,
-  PathField,
-  PathState,
+  MigrationVariant,
+  MissingUnitPolicy,
+  PatchDescriptor,
+  UnmatchedUnitPolicy,
+  UnitRepatchSummary,
 } from "./types";
-import "./App.css";
 
-type ToolTab = "migration" | "svd";
-
-const initialPaths: PathState = {
-  patchPath: "",
-  dataDir: "",
-  outDir: "",
-};
-
-const pathFieldLabels: Record<PathField, string> = {
-  patchPath: "Patch",
-  dataDir: "Game data",
-  outDir: "Output",
-};
-
-const pathFieldHelp: Record<PathField, string[]> = {
-  patchPath: [
-    "Choose the source mod patch file.",
-    "Example file names: 9ba626afa44a3aa3.patch_0, 9ba626afa44a3aa3.stream, armor_export.xlsx.",
-    "You can also drag the file onto this input.",
-  ],
-  dataDir: [
-    "Choose the Helldivers 2 game data folder.",
-    "Reference folder name: data.",
-    "Typical path: C:\\Program Files (x86)\\Steam\\steamapps\\common\\Helldivers 2\\data.",
-  ],
-  outDir: [
-    "Choose where migrated files should be written.",
-    "Example folder names: migrated_armor, armor_out, mod_output.",
-    "Use a new empty folder when comparing results between runs.",
-  ],
-};
-
-const noPaddingHelp = [
-  "Skip adding padding or empty mesh replacement data.",
-  "Use this when you only want remap changes and want to keep source geometry untouched.",
-  "Reference output: migrated files are written without padded unit replacements.",
-];
-
-const partialRemapHelp = [
-  "Enable experimental partial remapping.",
-  "Use this when only part of a target can be matched safely.",
-  "Reference names: torso, helmet, shoulder, leg, body shadow variants.",
-];
+const PATCH_SUFFIX = "9ba626afa44a3aa3.patch_0";
+const GAME_DATA_STORAGE_KEY = "hd2-migrator-native-game-data";
+type ToolMode = "migrate" | "repatch";
 
 function App() {
-  const [activeTool, setActiveTool] = useState<ToolTab>("migration");
-  const [paths, setPaths] = useState<PathState>(initialPaths);
-  const [targetOptions, setTargetOptions] = useState<MigrationTargetOption[]>([]);
-  const [selectedTargets, setSelectedTargets] = useState<string[]>([]);
-  const [targetSearch, setTargetSearch] = useState("");
-  const [loadingTargets, setLoadingTargets] = useState(false);
-  const [targetLoadError, setTargetLoadError] = useState("");
+  const { t } = useI18n();
+  const [toolMode, setToolMode] = useState<ToolMode>("migrate");
+  const [equipmentOptions, setEquipmentOptions] = useState<EquipmentOption[]>([]);
+  const [patchPaths, setPatchPaths] = useState<string[]>([]);
+  const [patch, setPatch] = useState<PatchDescriptor | null>(null);
+  const [gameDir, setGameDir] = useState<string | null>(null);
+  const [sources, setSources] = useState<DetectedSource[]>([]);
+  const [activeSourceId, setActiveSourceId] = useState("");
+  const [targetsBySource, setTargetsBySource] = useState<Record<string, string[]>>({});
+  const [multiTarget, setMultiTarget] = useState(false);
+  const [singlePatch, setSinglePatch] = useState(false);
   const [noPadding, setNoPadding] = useState(false);
-  const [partialRemap, setPartialRemap] = useState(false);
-  const [hoveredField, setHoveredField] = useState<PathField | null>(null);
-  const [detectingDataDir, setDetectingDataDir] = useState(false);
-  const [running, setRunning] = useState(false);
-  const [status, setStatus] = useState("Ready");
-  const [summary, setSummary] = useState<MigrationSummary | null>(null);
-  const [errorText, setErrorText] = useState("");
-  const hoverRef = useRef<PathField | null>(null);
-  const autoDetectRef = useRef(false);
+  const [unmatchedUnitPolicy, setUnmatchedUnitPolicy] = useState<UnmatchedUnitPolicy>("keep");
+  const [missingUnitPolicy, setMissingUnitPolicy] = useState<MissingUnitPolicy>("drop");
+  const [busy, setBusy] = useState(false);
+  const [progressLabel, setProgressLabel] = useState("");
+  const [hoveredDropZone, setHoveredDropZone] = useState<DropZone | null>(null);
+  const hoveredDropZoneRef = useRef<DropZone | null>(null);
 
-  const setPath = useCallback((field: PathField, value: string) => {
-    setPaths((current) => ({ ...current, [field]: value }));
+  useEffect(() => {
+    void loadEquipmentOptions().then(setEquipmentOptions).catch(showError);
   }, []);
 
-  const choosePath = useCallback(
-    async (field: PathField) => {
-      const selected = await open(dialogOptions(field));
-      if (typeof selected === "string") {
-        setPath(field, selected);
-      }
-    },
-    [setPath],
-  );
+  useEffect(() => {
+    void restoreOrDetectGameDir(setGameDir);
+  }, []);
 
-  const detectGameDataDir = useCallback(
-    async (mode: DetectMode) => {
-      setDetectingDataDir(true);
-      if (mode === "manual") {
-        setErrorText("");
-        setStatus("Searching game data directory");
-      }
-      try {
-        const discovery = await invoke<GameDataDiscovery>("detect_game_data_dir");
-        applyGameDataDiscovery(discovery, mode, { setPath, setPaths, setStatus });
-      } catch (error) {
-        if (mode === "manual") {
-          setErrorText(String(error));
-          setStatus("Game directory search failed");
-        }
-      } finally {
-        setDetectingDataDir(false);
-      }
-    },
-    [setPath],
-  );
+  useEffect(() => {
+    let disposed = false;
+    let unsubscribe: (() => void) | undefined;
+    void subscribeToMigrationProgress((event) => {
+      if (!disposed) setProgressLabel(progressText(event, t));
+    }).then((value) => {
+      if (disposed) value();
+      else unsubscribe = value;
+    });
+    return () => {
+      disposed = true;
+      unsubscribe?.();
+    };
+  }, [t]);
 
-  const loadTargetOptions = useCallback(async () => {
-    setLoadingTargets(true);
-    setTargetLoadError("");
-    try {
-      setTargetOptions(await invoke<MigrationTargetOption[]>("load_migration_targets"));
-    } catch (error) {
-      setTargetLoadError(String(error));
-    } finally {
-      setLoadingTargets(false);
+  const activeSource = sources.find((source) => source.id === activeSourceId) ?? null;
+  const activeTargets = activeSource ? targetsBySource[activeSource.id] ?? [] : [];
+  const configuredMappings = useMemo(
+    () => collectConfiguredMappings(sources, targetsBySource),
+    [sources, targetsBySource],
+  );
+  const singlePatchRequired = mustUseSinglePatch(configuredMappings);
+  const outputAsSinglePatch = singlePatch || singlePatchRequired;
+  const multiTargetEligible = canUseMultiTarget(sources);
+  const targetOptions = useMemo(
+    () => targetsForSource(activeSource, equipmentOptions),
+    [activeSource, equipmentOptions],
+  );
+  const canMigrate = Boolean(gameDir && patch && configuredMappings.length);
+  const canRepatch = Boolean(gameDir && patch);
+  const canRun = toolMode === "migrate" ? canMigrate : canRepatch;
+  const blockerHint = canRun ? "" : nextBlockerHint(gameDir, patch, toolMode, configuredMappings.length, t);
+
+  const applyInspection = useCallback((result: Awaited<ReturnType<typeof inspectPatch>>) => {
+    setPatch(result.patch);
+    setSources(result.inspection.sources);
+    setActiveSourceId(result.inspection.sources[0]?.id ?? "");
+    setTargetsBySource({});
+    setMultiTarget(canUseMultiTarget(result.inspection.sources));
+    setSinglePatch(false);
+  }, []);
+
+  const importPatchPaths = useCallback(async (selected: string[]) => {
+    await runTask(setBusy, async () => {
+      const result = await inspectPatch(selected, gameDir);
+      setPatchPaths(selected);
+      applyInspection(result);
+    });
+  }, [applyInspection, gameDir]);
+
+  const selectPatch = useCallback(async () => {
+    const selected = await choosePatchPaths();
+    if (selected) await importPatchPaths(selected);
+  }, [importPatchPaths]);
+
+  const importGameDir = useCallback(async (selected: string) => {
+    await runTask(setBusy, async () => {
+      await validateGameDataDir(selected);
+      if (patchPaths.length) applyInspection(await inspectPatch(patchPaths, selected));
+      applyGameDir(selected, setGameDir);
+    });
+  }, [applyInspection, patchPaths]);
+
+  const selectGameDir = useCallback(async () => {
+    const selected = await chooseGameDataDir();
+    if (selected) await importGameDir(selected);
+  }, [importGameDir]);
+
+  useEffect(() => subscribeToDesktopDrop({
+    hoveredDropZoneRef,
+    importGameDir,
+    importPatchPaths,
+    setHoveredDropZone,
+  }), [importGameDir, importPatchPaths]);
+
+  const clearGameDir = useCallback(() => {
+    localStorage.removeItem(GAME_DATA_STORAGE_KEY);
+    setGameDir(null);
+  }, []);
+
+  const resolveSource = useCallback((sourceId: string, hash: string) => {
+    const resolved = sources.map((source) => source.id === sourceId ? { ...source, resolvedHash: hash } : source);
+    setSources(resolved);
+    setTargetsBySource((current) => ({ ...current, [sourceId]: [] }));
+    setMultiTarget(canUseMultiTarget(resolved));
+  }, [sources]);
+
+  const chooseTarget = useCallback((hash: string) => {
+    if (!activeSource) return;
+    const targets = selectTarget(activeTargets, hash, multiTarget);
+    setTargetsBySource((current) => ({ ...current, [activeSource.id]: targets }));
+  }, [activeSource, activeTargets, multiTarget]);
+
+  const toggleMultiTarget = useCallback((enabled: boolean) => {
+    if (!multiTargetEligible) return;
+    setMultiTarget(enabled);
+    if (!enabled) {
+      setTargetsBySource((current) => Object.fromEntries(
+        Object.entries(current).map(([sourceId, targets]) => [sourceId, targets.slice(0, 1)]),
+      ));
     }
-  }, []);
-
-  const toggleTarget = useCallback((hash: string) => {
-    setSelectedTargets((current) => toggledTargetList(hash, current));
-  }, []);
-
-  const selectAllTargets = useCallback(() => {
-    setSelectedTargets(targetOptions.map((target) => target.hash));
-  }, [targetOptions]);
+  }, [multiTargetEligible]);
 
   const runMigration = useCallback(async () => {
-    if (selectedTargets.length === 0) {
-      setErrorText("Select at least one target.");
-      setStatus("Select targets");
-      return;
-    }
-    setRunning(true);
-    setSummary(null);
-    setErrorText("");
-    setStatus("Preparing migration");
-    try {
-      const request = requestFromState(paths, selectedTargets, noPadding, partialRemap);
-      setSummary(await invoke<MigrationSummary>("run_migration", { request }));
-      setStatus("Migration complete");
-    } catch (error) {
-      setErrorText(String(error));
-      setStatus("Failed");
-    } finally {
-      setRunning(false);
-    }
-  }, [noPadding, partialRemap, paths, selectedTargets]);
+    if (!gameDir || !patch) return;
+    const variants = buildMigrationVariants(configuredMappings, outputAsSinglePatch);
+    const outputPath = await chooseOutputZip(outputFilename(patch, variants, equipmentOptions));
+    if (!outputPath) return;
+    setProgressLabel("");
+    await runTask(setBusy, async () => {
+      const summary = await migrateEquipment({
+        patchPaths,
+        dataDir: gameDir,
+        outputPath,
+        options: { variants, patchSuffix: PATCH_SUFFIX, noPadding, unmatchedUnitPolicy },
+      });
+      showMigrationReport(summary, t);
+    });
+    setProgressLabel("");
+  }, [configuredMappings, equipmentOptions, gameDir, noPadding, outputAsSinglePatch, patch, patchPaths, t, unmatchedUnitPolicy]);
 
-  useEffect(() => {
-    return subscribeToProgress(setStatus);
-  }, []);
-
-  useEffect(() => {
-    void loadTargetOptions();
-  }, [loadTargetOptions]);
-
-  useEffect(() => {
-    if (autoDetectRef.current) {
-      return;
-    }
-    autoDetectRef.current = true;
-    void detectGameDataDir("auto");
-  }, [detectGameDataDir]);
-
-  useEffect(() => {
-    return subscribeToPathDrop(setHoveredField, hoverRef, setPath);
-  }, [setPath]);
-
-  const reportLines = useMemo(() => formatReports(summary), [summary]);
-  const toolbarTitle = activeTool === "migration" ? "HD2 Migrator" : "Super Variant Dist";
-  const toolbarStatus = activeTool === "migration" ? status : "Compression packer and exporter";
+  const runRepatch = useCallback(async () => {
+    if (!gameDir || !patch) return;
+    const outputPath = await chooseOutputZip("hd2-repatched-mod.zip");
+    if (!outputPath) return;
+    setProgressLabel(t("repatch.progress"));
+    await runTask(setBusy, async () => {
+      const summary = await repatchMod({
+        patchPaths,
+        dataDir: gameDir,
+        outputPath,
+        options: { missingUnitPolicy },
+      });
+      showUnitRepatchReport(summary, t);
+    });
+    setProgressLabel("");
+  }, [gameDir, missingUnitPolicy, patch, patchPaths, t]);
 
   return (
-    <Box className="appShell">
-      <Stack className="toolbar" direction="row" spacing={2}>
-        <Box>
-          <Typography variant="h5" component="h1">
-            {toolbarTitle}
-          </Typography>
-          <Typography className="statusText">{toolbarStatus}</Typography>
-        </Box>
-        <Tabs
-          className="toolTabs"
-          onChange={(_, value: ToolTab) => setActiveTool(value)}
-          value={activeTool}
-        >
-          <Tab label="Migrator" value="migration" />
-          <Tab label="SVD" value="svd" />
-        </Tabs>
-        <Box className="toolbarSpacer" />
-        {activeTool === "migration" && running && <CircularProgress size={24} />}
-        {activeTool === "migration" && (
-          <Button
-            disabled={running}
-            onClick={runMigration}
-            startIcon={<PlayArrowIcon />}
-            variant="contained"
-          >
-            Run
-          </Button>
-        )}
-      </Stack>
-
-      <Stack className="content" spacing={2}>
-        {activeTool === "migration" ? (
-          <>
-            <PathInput
-              field="patchPath"
-              hoveredField={hoveredField}
-              label={pathFieldLabels.patchPath}
-              onBrowse={choosePath}
-              onChange={setPath}
-              value={paths.patchPath}
+    <div className="min-h-screen">
+      <div className="fixed inset-0 z-0 bg-center bg-cover" style={{ backgroundImage: "url(/background.webp)", filter: "brightness(0.4)" }} />
+      <Toaster position="top-center" theme="dark" />
+      <div className="relative z-[1]">
+        <main className="mx-auto w-full max-w-[56rem] px-4 py-6 min-[51.25rem]:px-6 min-[51.25rem]:py-10">
+          <div className="overflow-hidden border-2 border-hd2-border bg-black/60">
+            <Header />
+            <Tabs centered onChange={(_, value: ToolMode) => setToolMode(value)} value={toolMode}>
+              <Tab label={t("mode.migrate")} value="migrate" />
+              <Tab label={t("mode.repatch")} value="repatch" />
+            </Tabs>
+            <ToolIntro mode={toolMode} />
+            <div className="flex flex-col min-[51.25rem]:flex-row">
+              <div className="flex min-w-0 flex-1">
+                <DesktopGameDataPanel
+                  dataDir={gameDir}
+                  dragging={hoveredDropZone === "gameData"}
+                  onChange={() => void selectGameDir()}
+                  onClear={clearGameDir}
+                />
+              </div>
+              <div className="flex min-w-0 flex-1 border-t border-hd2-border min-[51.25rem]:border-t-0 min-[51.25rem]:border-l">
+                <DesktopPatchPanel
+                  dragging={hoveredDropZone === "patch"}
+                  onChoose={() => void selectPatch()}
+                  patch={patch}
+                />
+              </div>
+            </div>
+            <div className="border-t border-hd2-border">
+              {toolMode === "migrate" ? (
+                <TargetPanel
+                  activeSourceId={activeSourceId}
+                  equipmentOptions={equipmentOptions}
+                  multiTarget={multiTarget}
+                  multiTargetEligible={multiTargetEligible}
+                  onMultiTargetChange={toggleMultiTarget}
+                  onResolveSource={resolveSource}
+                  onSinglePatchChange={setSinglePatch}
+                  onSourceChange={setActiveSourceId}
+                  onTargetChange={chooseTarget}
+                  selectedTargets={activeTargets}
+                  separateOutputMappingLimit={0}
+                  showOutputLimits={false}
+                  singlePatch={outputAsSinglePatch}
+                  singlePatchMappingLimit={0}
+                  singlePatchRequired={singlePatchRequired}
+                  sources={sources}
+                  targetOptions={targetOptions}
+                  targetSelectionEnabled={Boolean(activeSource?.resolvedHash)}
+                  targetsBySource={targetsBySource}
+                />
+              ) : (
+                <UnitUpdaterPanel missingUnitPolicy={missingUnitPolicy} onMissingUnitPolicyChange={setMissingUnitPolicy} />
+              )}
+            </div>
+            <ActionRow
+              blockerHint={blockerHint}
+              busy={busy}
+              canRun={canRun}
+              noPadding={noPadding}
+              onRun={toolMode === "migrate" ? runMigration : runRepatch}
+              progressLabel={progressLabel}
+              setNoPadding={setNoPadding}
+              setUnmatchedUnitPolicy={setUnmatchedUnitPolicy}
+              toolMode={toolMode}
+              unmatchedUnitPolicy={unmatchedUnitPolicy}
             />
-            <PathInput
-              field="dataDir"
-              hoveredField={hoveredField}
-              label={pathFieldLabels.dataDir}
-              detectingDataDir={detectingDataDir}
-              onBrowse={choosePath}
-              onChange={setPath}
-              onDetectDataDir={() => void detectGameDataDir("manual")}
-              value={paths.dataDir}
-            />
-            <PathInput
-              field="outDir"
-              hoveredField={hoveredField}
-              label={pathFieldLabels.outDir}
-              onBrowse={choosePath}
-              onChange={setPath}
-              value={paths.outDir}
-            />
-
-            <TargetPicker
-              errorText={targetLoadError}
-              loading={loadingTargets}
-              onClear={() => setSelectedTargets([])}
-              onQueryChange={setTargetSearch}
-              onSelectAll={selectAllTargets}
-              onToggle={toggleTarget}
-              options={targetOptions}
-              query={targetSearch}
-              selectedHashes={selectedTargets}
-            />
-
-            <Stack direction="row" spacing={3}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={noPadding}
-                    onChange={(event) => setNoPadding(event.target.checked)}
-                  />
-                }
-                label={<OptionLabel help={noPaddingHelp} text="No padding" />}
-              />
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={partialRemap}
-                    onChange={(event) => setPartialRemap(event.target.checked)}
-                  />
-                }
-                label={<OptionLabel help={partialRemapHelp} text="Partial remap" />}
-              />
-            </Stack>
-
-            <Divider />
-
-            <SummaryPanel errorText={errorText} summary={summary} />
-            <Box className="logPanel">
-              <pre>{reportLines}</pre>
-            </Box>
-          </>
-        ) : (
-          <SvdPanel />
-        )}
-      </Stack>
-    </Box>
+          </div>
+        </main>
+      </div>
+    </div>
   );
 }
 
-interface PathInputProps {
-  detectingDataDir?: boolean;
-  field: PathField;
-  hoveredField: PathField | null;
-  label: string;
-  onBrowse: (field: PathField) => void;
-  onChange: (field: PathField, value: string) => void;
-  onDetectDataDir?: () => void;
-  value: string;
-}
-
-function PathInput(props: PathInputProps) {
-  const active = props.hoveredField === props.field;
-  const icon = props.field === "patchPath" ? <UploadFileIcon /> : <FolderOpenIcon />;
+function Header() {
+  const { t } = useI18n();
   return (
-    <Box className={active ? "pathRow pathRowActive" : "pathRow"} data-drop-field={props.field}>
-      <TextField
-        className={active ? "pathField pathFieldActive" : "pathField"}
-        fullWidth
-        label={props.label}
-        onChange={(event) => props.onChange(props.field, event.target.value)}
-        size="small"
-        value={props.value}
-      />
-      <HelpTooltip lines={pathFieldHelp[props.field]} title={`${props.label} help`} />
-      {props.onDetectDataDir && (
-        <Tooltip title="Find game data folder">
-          <span>
-            <IconButton disabled={props.detectingDataDir} onClick={props.onDetectDataDir}>
-              {props.detectingDataDir ? <CircularProgress size={20} /> : <SearchIcon />}
-            </IconButton>
-          </span>
+    <div className="flex flex-col items-center border-b border-hd2-border bg-hd2-surface/70 px-4 py-5">
+      <div className="flex w-full items-center gap-3">
+        <Tooltip title={t("github.revision", { hash: __GIT_HASH__ })}>
+          <div className="flex w-[4.75rem] shrink-0 items-center gap-1 font-mono text-[0.625rem] tracking-wide text-hd2-faint min-[35rem]:w-24 min-[35rem]:text-[0.6875rem]">
+            <AccountTreeIcon sx={{ fontSize: "0.875rem" }} /><span>{__GIT_HASH__}</span>
+          </div>
         </Tooltip>
+        <div className="flex min-w-0 flex-1 items-center justify-center gap-3">
+          <img alt="" className="hidden min-[40rem]:block" draggable={false} src="/title.svg" style={{ height: "2rem", transform: "scaleX(-1)" }} />
+          <h1 className="m-0 text-center text-lg font-bold text-hd2-yellow min-[35rem]:text-xl min-[51.25rem]:text-2xl">{t("app.title")}</h1>
+          <img alt="" className="hidden min-[40rem]:block" draggable={false} src="/title.svg" style={{ height: "2rem" }} />
+        </div>
+        <div className="flex w-[4.75rem] shrink-0 items-center justify-end min-[35rem]:w-24">
+          <Tooltip title={t("github.openRepository")}>
+            <IconButton className="headerIconBtn" component="a" href="https://github.com/eigeen/hd2-mod-crates" rel="noreferrer" size="small" target="_blank">
+              <GitHubIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <LanguageMenu />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ActionRowProps {
+  blockerHint: string;
+  busy: boolean;
+  canRun: boolean;
+  noPadding: boolean;
+  onRun: () => Promise<void>;
+  progressLabel: string;
+  setNoPadding: (value: boolean) => void;
+  setUnmatchedUnitPolicy: (value: UnmatchedUnitPolicy) => void;
+  toolMode: ToolMode;
+  unmatchedUnitPolicy: UnmatchedUnitPolicy;
+}
+
+function ActionRow(props: ActionRowProps) {
+  const { t } = useI18n();
+  return (
+    <div className="flex flex-col items-stretch gap-3 border-t border-hd2-border bg-hd2-pit px-5 py-3 min-[51.25rem]:flex-row min-[51.25rem]:items-center min-[51.25rem]:gap-4">
+      {props.toolMode === "migrate" && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 min-[51.25rem]:shrink-0">
+          <OptionsPanel
+            noPadding={props.noPadding}
+            setNoPadding={props.setNoPadding}
+            setUnmatchedUnitPolicy={props.setUnmatchedUnitPolicy}
+            unmatchedUnitPolicy={props.unmatchedUnitPolicy}
+          />
+        </div>
       )}
-      <Tooltip title={`Choose ${props.label}`}>
-        <IconButton onClick={() => props.onBrowse(props.field)}>{icon}</IconButton>
-      </Tooltip>
-    </Box>
+      <div className="flex min-w-0 flex-1 items-center gap-4">
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-2" aria-live="polite">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center">{props.busy && <CircularProgress size="1.25rem" />}</span>
+          <span className="min-w-0 truncate text-xs text-hd2-muted" title={props.busy ? props.progressLabel : props.blockerHint}>
+            {props.busy ? props.progressLabel : props.blockerHint}
+          </span>
+        </div>
+        <Button disabled={!props.canRun || props.busy} onClick={() => void props.onRun()} startIcon={<PlayArrowIcon />} variant="contained">
+          {props.toolMode === "migrate" ? t("app.run") : t("repatch.run")}
+        </Button>
+      </div>
+    </div>
   );
 }
 
-interface HelpTooltipProps {
-  lines: string[];
-  title: string;
+function applyGameDir(path: string, setGameDir: (path: string) => void) {
+  localStorage.setItem(GAME_DATA_STORAGE_KEY, path);
+  setGameDir(path);
 }
 
-function HelpTooltip({ lines, title }: HelpTooltipProps) {
-  return (
-    <Tooltip arrow disableInteractive placement="top" title={<TooltipLines lines={lines} />}>
-      <IconButton aria-label={title} className="helpButton" size="small">
-        <HelpOutlineIcon fontSize="small" />
-      </IconButton>
-    </Tooltip>
-  );
+interface DesktopDropSubscription {
+  hoveredDropZoneRef: { current: DropZone | null };
+  importGameDir: (path: string) => Promise<void>;
+  importPatchPaths: (paths: string[]) => Promise<void>;
+  setHoveredDropZone: (zone: DropZone | null) => void;
 }
 
-interface TooltipLinesProps {
-  lines: string[];
-}
-
-function TooltipLines({ lines }: TooltipLinesProps) {
-  return (
-    <Box className="helpTooltip">
-      {lines.map((line) => (
-        <Typography className="helpTooltipLine" key={line}>
-          {line}
-        </Typography>
-      ))}
-    </Box>
-  );
-}
-
-interface OptionLabelProps {
-  help: string[];
-  text: string;
-}
-
-function OptionLabel({ help, text }: OptionLabelProps) {
-  return (
-    <Box className="optionLabel">
-      <Typography component="span">{text}</Typography>
-      <HelpTooltip lines={help} title={`${text} help`} />
-    </Box>
-  );
-}
-
-interface SummaryPanelProps {
-  errorText: string;
-  summary: MigrationSummary | null;
-}
-
-function SummaryPanel({ errorText, summary }: SummaryPanelProps) {
-  if (errorText) {
-    return <Alert severity="error">{errorText}</Alert>;
-  }
-  if (!summary) {
-    return <Alert severity="info">Ready</Alert>;
-  }
-  return (
-    <Stack className="summaryStrip" direction="row" spacing={3}>
-      <Metric label="Migrated" value={summary.migratedCount} />
-      <Metric label="Warnings" value={summary.warningCount} />
-    </Stack>
-  );
-}
-
-interface MetricProps {
-  label: string;
-  value: number;
-}
-
-function Metric({ label, value }: MetricProps) {
-  return (
-    <Box className="metric">
-      <Typography className="metricValue">{value}</Typography>
-      <Typography className="metricLabel">{label}</Typography>
-    </Box>
-  );
-}
-
-function dialogOptions(field: PathField) {
-  if (field === "patchPath") {
-    return { multiple: false };
-  }
-  return { directory: true, multiple: false };
-}
-
-function requestFromState(
-  paths: PathState,
-  selectedTargets: string[],
-  noPadding: boolean,
-  experimentalPartialRemap: boolean,
-): MigrationRequest {
-  return {
-    ...paths,
-    targetFilter: selectedTargets.join(","),
-    noPadding,
-    experimentalPartialRemap,
+function subscribeToDesktopDrop(subscription: DesktopDropSubscription) {
+  let disposed = false;
+  let unsubscribe: (() => void) | undefined;
+  void getCurrentWebview().onDragDropEvent(({ payload }) => {
+    void handleDesktopDrop(payload, subscription);
+  }).then((value) => {
+    if (disposed) value();
+    else unsubscribe = value;
+  });
+  return () => {
+    disposed = true;
+    unsubscribe?.();
   };
 }
 
-function toggledTargetList(hash: string, selected: string[]) {
-  if (selected.includes(hash)) {
-    return selected.filter((value) => value !== hash);
-  }
-  return [...selected, hash];
-}
-
-type DetectMode = "auto" | "manual";
-
-function applyGameDataDiscovery(
-  discovery: GameDataDiscovery,
-  mode: DetectMode,
-  actions: DiscoveryActions,
-) {
-  const dataDir = discovery.dataDir ?? discovery.candidates[0] ?? "";
-  if (!dataDir) {
-    updateDiscoveryMissStatus(mode, actions.setStatus);
-    return;
-  }
-  setDetectedDataDir(dataDir, mode, actions);
-  actions.setStatus("Game data directory found");
-}
-
-interface DiscoveryActions {
-  setPath: (field: PathField, value: string) => void;
-  setPaths: React.Dispatch<React.SetStateAction<PathState>>;
-  setStatus: (status: string) => void;
-}
-
-function updateDiscoveryMissStatus(mode: DetectMode, setStatus: (status: string) => void) {
-  if (mode === "manual") {
-    setStatus("No game data directory found");
-  }
-}
-
-function setDetectedDataDir(
-  dataDir: string,
-  mode: DetectMode,
-  actions: DiscoveryActions,
-) {
-  if (mode === "manual") {
-    actions.setPath("dataDir", dataDir);
-    return;
-  }
-  actions.setPaths((current) => (current.dataDir ? current : { ...current, dataDir }));
-}
-
-function subscribeToProgress(setStatus: (status: string) => void) {
-  let unlisten: UnlistenFn | undefined;
-  listen<MigrationProgressEvent>("migration://progress", (event) => {
-    setStatus(event.payload.status);
-  }).then((handler) => {
-    unlisten = handler;
-  });
-  return () => unlisten?.();
-}
-
-function subscribeToPathDrop(
-  setHoveredField: (field: PathField | null) => void,
-  hoverRef: React.MutableRefObject<PathField | null>,
-  setPath: (field: PathField, value: string) => void,
-) {
-  let unlisten: UnlistenFn | undefined;
-  getCurrentWebview().onDragDropEvent((event) => {
-    handleDropEvent(event.payload, setHoveredField, hoverRef, setPath);
-  }).then((handler) => {
-    unlisten = handler;
-  });
-  return () => unlisten?.();
-}
-
-function handleDropEvent(
-  event: DragDropEvent,
-  setHoveredField: (field: PathField | null) => void,
-  hoverRef: React.MutableRefObject<PathField | null>,
-  setPath: (field: PathField, value: string) => void,
-) {
+async function handleDesktopDrop(event: DragDropEvent, subscription: DesktopDropSubscription) {
   if (event.type === "leave") {
-    updateHoveredField(null, setHoveredField, hoverRef);
+    updateHoveredDropZone(null, subscription);
     return;
   }
-  const field = fieldFromPhysicalPosition(event.position);
-  updateHoveredField(field, setHoveredField, hoverRef);
-  if (event.type === "drop") {
-    applyDroppedPath(event.paths, hoverRef.current, setPath);
-    updateHoveredField(null, setHoveredField, hoverRef);
-  }
+  const zone = dropZoneFromPhysicalPosition(event.position);
+  updateHoveredDropZone(zone, subscription);
+  if (event.type !== "drop") return;
+  updateHoveredDropZone(null, subscription);
+  if (!zone || event.paths.length === 0) return;
+  if (zone === "gameData") await subscription.importGameDir(event.paths[0]);
+  else await subscription.importPatchPaths(event.paths);
 }
 
-function updateHoveredField(
-  field: PathField | null,
-  setHoveredField: (field: PathField | null) => void,
-  hoverRef: React.MutableRefObject<PathField | null>,
+function updateHoveredDropZone(zone: DropZone | null, subscription: DesktopDropSubscription) {
+  subscription.hoveredDropZoneRef.current = zone;
+  subscription.setHoveredDropZone(zone);
+}
+
+async function restoreOrDetectGameDir(setGameDir: (path: string) => void) {
+  const stored = localStorage.getItem(GAME_DATA_STORAGE_KEY);
+  if (stored) {
+    try {
+      await validateGameDataDir(stored);
+      setGameDir(stored);
+      return;
+    } catch {
+      localStorage.removeItem(GAME_DATA_STORAGE_KEY);
+    }
+  }
+  const discovery = await detectGameDataDir().catch(() => null);
+  if (discovery?.dataDir) applyGameDir(discovery.dataDir, setGameDir);
+}
+
+function nextBlockerHint(
+  gameDir: string | null,
+  patch: PatchDescriptor | null,
+  mode: ToolMode,
+  mappingCount: number,
+  t: Translate,
 ) {
-  hoverRef.current = field;
-  setHoveredField(field);
+  if (!gameDir) return t("app.blockerGameData");
+  if (!patch) return t("app.blockerPatch");
+  if (mode === "migrate" && !mappingCount) return t("app.blockerTarget");
+  return "";
 }
 
-function applyDroppedPath(
-  paths: string[],
-  field: PathField | null,
-  setPath: (field: PathField, value: string) => void,
-) {
-  if (paths.length > 0 && field) {
-    setPath(field, paths[0]);
+function outputFilename(patch: PatchDescriptor, variants: MigrationVariant[], options: EquipmentOption[]) {
+  const mapping = variants.length === 1 && variants[0].mappings.length === 1
+    ? variants[0].mappings[0]
+    : null;
+  if (!mapping) return "hd2-migrated-patch.zip";
+  return uniqueOutputFilename(patch.originalName ?? patch.name, mapping.targetHash, options);
+}
+
+function progressText(event: MigrationProgressEvent, t: Translate) {
+  if (event.kind === "stage") return t("app.progressStage", { name: event.targetName, stage: event.stage });
+  if (event.kind === "targetFinish") return "";
+  return t("app.progressMigrating", { name: event.targetName });
+}
+
+function showMigrationReport(summary: MigrationSummary, t: Translate) {
+  const details = summary.reports.map((report) => reportLine(report, t)).join("\n");
+  const options = { description: <span style={{ whiteSpace: "pre-line" }}>{details}</span>, duration: 8000 };
+  const title = t("report.title", { count: summary.migratedCount });
+  if (summary.warningCount) toast.warning(title, options);
+  else toast.success(title, options);
+}
+
+function reportLine(report: MigrationSummary["reports"][number], t: Translate) {
+  const parts = [report.targetName];
+  if (report.fileIdRemapped) parts.push(t("report.remapped", { count: report.fileIdRemapped }));
+  if (report.paddedUnits) parts.push(t("report.padded", { count: report.paddedUnits }));
+  if (report.skippedEntries) parts.push(t("report.skipped", { count: report.skippedEntries }));
+  if (report.warnings.length) parts.push(t("report.warnings", { count: report.warnings.length }));
+  return parts.join(" · ");
+}
+
+function showUnitRepatchReport(summary: UnitRepatchSummary, t: Translate) {
+  const description = t("repatch.reportDetails", {
+    updated: summary.updatedUnits,
+    current: summary.alreadyCurrentUnits,
+    removed: summary.removedUnits,
+    failed: summary.failedUnits,
+    archives: summary.scannedArchives,
+  });
+  if (summary.warnings.length || summary.failedUnits) toast.warning(t("repatch.reportTitle"), { description });
+  else toast.success(t("repatch.reportTitle"), { description });
+}
+
+async function runTask(setBusy: (value: boolean) => void, task: () => Promise<void>) {
+  setBusy(true);
+  try {
+    await task();
+  } catch (error) {
+    showError(error);
+  } finally {
+    setBusy(false);
   }
 }
 
-function formatReports(summary: MigrationSummary | null) {
-  if (!summary) {
-    return "";
-  }
-  return summary.reports.map(formatReport).join("\n");
+function showError(error: unknown) {
+  console.error("[hd2-migrator-native] task failed:", error);
+  toast.error(errorMessage(error));
 }
 
-function formatReport(report: MigrationSummary["reports"][number]) {
-  const warnings = report.warnings.length > 0 ? ` warnings=${report.warnings.length}` : "";
-  return `${report.targetName}: fileIds=${report.fileIdRemapped} slotIds=${report.slotIdRemapped} padded=${report.paddedUnits}${warnings}`;
+function errorMessage(error: unknown) {
+  if (error && typeof error === "object" && "message" in error) return String(error.message);
+  return String(error);
 }
 
 export default App;

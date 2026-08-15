@@ -1854,9 +1854,11 @@ dependencies = [
 name = "hd2_migrator_tauri_ui"
 version = "0.1.0"
 dependencies = [
+ "eyre",
  "hd2-migrator-core",
  "hd2-migrator-data",
  "hd2-migrator-io",
+ "pollster",
  "serde",
  "serde_json",
  "svd-core",
@@ -1865,7 +1867,9 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tempfile",
+ "walkdir",
  "winreg",
+ "zip",
 ]
 
 [[package]]

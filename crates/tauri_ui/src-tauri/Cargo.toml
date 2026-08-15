@@ -21,14 +21,16 @@ hd2-migrator-io = { path = "../../hd2-migrator-io" }
 hd2-migrator-core = { path = "../../hd2-migrator-core" }
 hd2-migrator-data = { path = "../../hd2-migrator-data" }
 svd-core = { path = "../../svd-core" }
+eyre.workspace = true
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+pollster.workspace = true
+tempfile.workspace = true
+walkdir.workspace = true
+zip.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55.0"
-
-[dev-dependencies]
-tempfile = "3.27.0"

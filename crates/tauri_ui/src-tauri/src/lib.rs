@@ -9,8 +9,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             game_discovery::detect_game_data_dir,
-            migration::load_migration_targets,
-            migration::run_migration,
+            game_discovery::validate_game_data_dir,
+            migration::load_equipment_options,
+            migration::inspect_patch,
+            migration::migrate_equipment,
+            migration::repatch_mod,
             svd::load_svd_package_summary,
             svd::run_svd_export,
             svd::run_svd_pack

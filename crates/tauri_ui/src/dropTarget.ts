@@ -1,29 +1,13 @@
 import type { PhysicalPosition } from "@tauri-apps/api/dpi";
-import type { PathField } from "./types";
 
-const dropFieldAttribute = "data-drop-field";
+export type DropZone = "gameData" | "patch";
 
-/// Resolve a Tauri physical drag position to the path field currently under it.
-export function fieldFromPhysicalPosition(position: PhysicalPosition): PathField | null {
-  const point = clientPointFromPhysicalPosition(position);
-  const element = document.elementFromPoint(point.x, point.y);
-  return fieldFromElement(element);
-}
+const DROP_ZONE_ATTRIBUTE = "data-drop-zone";
 
-function clientPointFromPhysicalPosition(position: PhysicalPosition) {
+/** Resolve Tauri's physical pointer coordinates to a desktop import panel. */
+export function dropZoneFromPhysicalPosition(position: PhysicalPosition): DropZone | null {
   const scale = window.devicePixelRatio || 1;
-  return {
-    x: position.x / scale,
-    y: position.y / scale,
-  };
-}
-
-function fieldFromElement(element: Element | null): PathField | null {
-  const target = element?.closest(`[${dropFieldAttribute}]`);
-  const value = target?.getAttribute(dropFieldAttribute);
-  return isPathField(value) ? value : null;
-}
-
-function isPathField(value: string | null | undefined): value is PathField {
-  return value === "patchPath" || value === "dataDir" || value === "outDir";
+  const element = document.elementFromPoint(position.x / scale, position.y / scale);
+  const value = element?.closest(`[${DROP_ZONE_ATTRIBUTE}]`)?.getAttribute(DROP_ZONE_ATTRIBUTE);
+  return value === "gameData" || value === "patch" ? value : null;
 }

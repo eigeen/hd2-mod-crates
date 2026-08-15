@@ -1,38 +1,31 @@
-export type PathField = "patchPath" | "dataDir" | "outDir";
+export type {
+  DetectedSource,
+  EquipmentOption,
+  MigrationMapping,
+  MigrationSummary,
+  MigrationVariant,
+  MissingUnitPolicy,
+  UnmatchedUnitPolicy,
+  UnitRepatchSummary,
+  UnifiedMigrateOptions,
+} from "../../web_ui/src/types";
 
-export interface PathState {
-  patchPath: string;
-  dataDir: string;
-  outDir: string;
-}
+import type {
+  DetectedSource,
+  UnifiedMigrateOptions,
+  UnitRepatchOptions,
+} from "../../web_ui/src/types";
 
-export interface MigrationRequest extends PathState {
-  targetFilter: string;
-  noPadding: boolean;
-  experimentalPartialRemap: boolean;
-}
-
-export interface MigrationTargetOption {
-  hash: string;
+export interface PatchDescriptor {
+  path: string;
   name: string;
+  originalName: string | null;
+  byteLength: number;
 }
 
-export interface MigrationSummary {
-  migratedCount: number;
-  warningCount: number;
-  reports: MigrationReportRow[];
-}
-
-export interface MigrationReportRow {
-  targetName: string;
-  fileIdRemapped: number;
-  slotIdRemapped: number;
-  paddedUnits: number;
-  warnings: string[];
-}
-
-export interface MigrationProgressEvent {
-  status: string;
+export interface InspectPatchResult {
+  patch: PatchDescriptor;
+  inspection: { sources: DetectedSource[] };
 }
 
 export interface GameDataDiscovery {
@@ -40,35 +33,23 @@ export interface GameDataDiscovery {
   candidates: string[];
 }
 
-export interface SvdPackRequest {
-  inputDir: string;
-  baseVariant: string;
-  outputDir: string;
-  packagePath: string | null;
-  compressionLevel: number;
-  jobs: number | null;
+export interface MigrateRequest {
+  patchPaths: string[];
+  dataDir: string;
+  outputPath: string;
+  options: UnifiedMigrateOptions;
 }
 
-export interface SvdPackSummary {
-  outputDir: string;
-  packagePath: string | null;
+export interface RepatchRequest {
+  patchPaths: string[];
+  dataDir: string;
+  outputPath: string;
+  options: UnitRepatchOptions;
 }
 
-export interface SvdPackageSummary {
-  modName: string | null;
-  baseVariant: string;
-  variants: string[];
-}
-
-export interface SvdExportRequest {
-  packagePath: string;
-  outputZip: string;
-  allVariants: boolean;
-  variants: string[];
-  jobs: number | null;
-}
-
-export interface SvdExportSummary {
-  outputZip: string;
-  variantCount: number;
+export interface MigrationProgressEvent {
+  targetName: string;
+  targetHash: string;
+  stage: string;
+  kind: "targetStart" | "stage" | "targetFinish";
 }
