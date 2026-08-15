@@ -125,15 +125,18 @@ async function evaluateSmokeChecks(client: CdpClient): Promise<unknown> {
       await Promise.all([...document.images].map((image) => image.decode().catch(() => undefined)));
       const shell = document.querySelector("[data-desktop-shell]");
       const shellBounds = shell?.getBoundingClientRect();
+      const rootStyle = getComputedStyle(document.documentElement);
       return {
         bodyHasAppTitle: document.body.innerText.includes("HD2 Mod"),
         equipmentCount: equipment.length,
+        globalScrollbarThemed: document.documentElement.classList.contains("desktop-app")
+          && rootStyle.scrollbarWidth === "thin",
         imagesLoaded: [...document.images].every((image) => image.complete && image.naturalWidth > 0),
         patchName: inspection.patch.name,
         shellFillsViewport: Boolean(shellBounds)
           && Math.abs(shellBounds.left) < 1
           && Math.abs(shellBounds.top) < 1
-          && Math.abs(shellBounds.width - innerWidth) < 1
+          && Math.abs(shellBounds.width - document.documentElement.clientWidth) < 1
           && shellBounds.height >= innerHeight,
         sourceCount: inspection.inspection.sources.length,
         styleSheetCount: document.styleSheets.length,
@@ -155,6 +158,7 @@ function assertSmokeResult(value: unknown): asserts value is Record<string, unkn
   if (!result || result.title !== "HD2 Mod Tools Desktop") throw new Error("Unexpected window document");
   if (!result.bodyHasAppTitle) throw new Error("Application UI did not render");
   if (typeof result.equipmentCount !== "number" || result.equipmentCount === 0) throw new Error("Equipment IPC returned no data");
+  if (!result.globalScrollbarThemed) throw new Error("Desktop global scrollbar theme is unavailable");
   if (!result.imagesLoaded) throw new Error("CSP blocked an application image");
   if (!result.shellFillsViewport) throw new Error("Desktop application shell does not fill the WebView");
   if (typeof result.sourceCount !== "number" || result.sourceCount === 0) throw new Error("Fixture inspection found no sources");

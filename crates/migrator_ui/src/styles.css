@@ -48,6 +48,36 @@ html::-webkit-scrollbar {
   display: none;
 }
 
+/* Desktop uses the document as its primary scroll container. */
+html.desktop-app {
+  scrollbar-color: var(--color-hd2-yellow-dim) var(--color-hd2-pit);
+  scrollbar-width: thin;
+}
+
+html.desktop-app::-webkit-scrollbar {
+  display: block;
+  height: 0.625rem;
+  width: 0.625rem;
+}
+
+html.desktop-app::-webkit-scrollbar-track {
+  background: var(--color-hd2-pit);
+  border-left: 1px solid var(--color-hd2-border);
+}
+
+html.desktop-app::-webkit-scrollbar-thumb {
+  background: var(--color-hd2-yellow-dim);
+  border: 0.1875rem solid var(--color-hd2-pit);
+}
+
+html.desktop-app::-webkit-scrollbar-thumb:hover {
+  background: var(--color-hd2-yellow);
+}
+
+html.desktop-app::-webkit-scrollbar-corner {
+  background: var(--color-hd2-pit);
+}
+
 body {
   margin: 0;
   min-width: 20rem;
