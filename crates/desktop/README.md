@@ -30,4 +30,5 @@ cargo clippy -p hd2_migrator_desktop --all-targets --no-deps
 ```
 
 The release executable is written to
-`target/release/hd2_migrator_desktop.exe`.
+`target/release/hd2_migrator_desktop.exe`. The Windows installer is written to
+`target/release/bundle/nsis/HD2 Mod Tools Desktop_<version>_x64-setup.exe`.
