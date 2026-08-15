@@ -6,14 +6,16 @@ use crate::unit::authority::ArmorMappingTable;
 use crate::unit::helmet_authority::HelmetMappingTable;
 use crate::web::equipment::{EquipmentCategory, WebMigrationMapping};
 use crate::web::migration::{
-    PatchBytes, UnmatchedUnitPolicy, WebMigrateOptions, WebMigrationBundle, WebMigrationReportRow,
+    PatchBytes, UnmatchedUnitPolicy, WebMigrationBundle, WebMigrationReportRow,
     WebMigrationSummary, WebOutputFile,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+mod prepared;
 mod unit_plan;
 
+use prepared::MigrationExecutor;
 use unit_plan::UnitMappingEdge;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,16 +123,18 @@ where
         .as_deref()
         .unwrap_or(super::migration::DEFAULT_PATCH_SUFFIX);
     let mut reports = Vec::new();
-    let context = VariantMigrationContext {
-        original: &patch_bytes,
-        options: &options,
-        source,
-        progress: callbacks.progress,
+    let original = parse_patch(&patch_bytes)?;
+    let executor =
+        MigrationExecutor::new(&original, source, callbacks.progress, options.no_padding).await?;
+    let mut context = VariantMigrationContext {
+        executor,
+        original: &original,
+        unmatched_unit_policy: options.unmatched_unit_policy,
     };
     for (variant_index, (variant, unit_plan)) in
         options.variants.iter().zip(unit_plans.iter()).enumerate()
     {
-        let result = migrate_variant(&context, variant, unit_plan).await?;
+        let result = migrate_variant(&mut context, variant, unit_plan).await?;
         let directory = variant_directory(
             variant,
             &result.report.target_name,
@@ -157,42 +161,37 @@ struct VariantResult {
 }
 
 struct VariantMigrationContext<'a, S: DataSource + ?Sized> {
-    original: &'a PatchBytes,
-    options: &'a WebUnifiedMigrateOptions,
-    source: &'a S,
-    progress: Option<&'a dyn mode_a_web::WebProgress>,
+    executor: MigrationExecutor<'a, S>,
+    original: &'a StreamToc,
+    unmatched_unit_policy: UnmatchedUnitPolicy,
 }
 
 async fn migrate_variant<S: DataSource + ?Sized>(
-    context: &VariantMigrationContext<'_, S>,
+    context: &mut VariantMigrationContext<'_, S>,
     variant: &WebMigrationVariant,
     unit_plan: &unit_plan::VariantUnitPlan,
 ) -> crate::Result<VariantResult> {
     if variant.mappings.len() == 1 {
         return migrate_single_mapping_variant(context, variant, unit_plan).await;
     }
-    let original_patch = parse_patch(context.original)?;
-    let mut builder = VariantPatchBuilder::new(&original_patch);
+    let mut builder = VariantPatchBuilder::new(context.original);
     let mut report = empty_report(variant);
-    report.unmatched_unit_policy = context.options.unmatched_unit_policy;
+    report.unmatched_unit_policy = context.unmatched_unit_policy;
     for (mapping, authoritative_edges) in variant.mappings.iter().zip(&unit_plan.mapping_edges) {
         let mut result = migrate_mapping(context, mapping).await?;
-        builder.merge_mapping(&original_patch, mapping, authoritative_edges, &mut result)?;
+        builder.merge_mapping(context.original, mapping, authoritative_edges, &mut result)?;
         merge_report_totals(&mut report, result.report);
     }
-    report.warnings = combined_variant_warnings(
-        &builder,
-        &original_patch,
-        context.options.unmatched_unit_policy,
-    );
-    report.unmatched_units = builder.unconverted_original_units(&original_patch).len();
+    report.warnings =
+        combined_variant_warnings(&builder, context.original, context.unmatched_unit_policy);
+    report.unmatched_units = builder.unconverted_original_units(context.original).len();
     report.mappings = variant.mappings.clone();
-    let patch = builder.finish(&original_patch, context.options.unmatched_unit_policy);
+    let patch = builder.finish(context.original, context.unmatched_unit_policy);
     Ok(VariantResult { patch, report })
 }
 
 async fn migrate_single_mapping_variant<S: DataSource + ?Sized>(
-    context: &VariantMigrationContext<'_, S>,
+    context: &mut VariantMigrationContext<'_, S>,
     variant: &WebMigrationVariant,
     unit_plan: &unit_plan::VariantUnitPlan,
 ) -> crate::Result<VariantResult> {
@@ -203,40 +202,22 @@ async fn migrate_single_mapping_variant<S: DataSource + ?Sized>(
         eyre::bail!("single-mapping migration received multiple Unit plans");
     };
     let mut result = migrate_mapping(context, mapping).await?;
-    let original_patch = parse_patch(context.original)?;
-    let mut builder = VariantPatchBuilder::new(&original_patch);
-    builder.merge_mapping(&original_patch, mapping, mapping_edges, &mut result)?;
+    let mut builder = VariantPatchBuilder::new(context.original);
+    builder.merge_mapping(context.original, mapping, mapping_edges, &mut result)?;
     let mut report = empty_report(variant);
-    report.unmatched_unit_policy = context.options.unmatched_unit_policy;
+    report.unmatched_unit_policy = context.unmatched_unit_policy;
     merge_report(&mut report, result.report);
-    report.unmatched_units = builder.unconverted_original_units(&original_patch).len();
+    report.unmatched_units = builder.unconverted_original_units(context.original).len();
     report.mappings = variant.mappings.clone();
-    let patch = builder.finish(&original_patch, context.options.unmatched_unit_policy);
+    let patch = builder.finish(context.original, context.unmatched_unit_policy);
     Ok(VariantResult { patch, report })
 }
 
 async fn migrate_mapping<S: DataSource + ?Sized>(
-    context: &VariantMigrationContext<'_, S>,
+    context: &mut VariantMigrationContext<'_, S>,
     mapping: &WebMigrationMapping,
 ) -> crate::Result<mode_a_web::WebTargetResult> {
-    let request = WebMigrateOptions {
-        source_hash: Some(mapping.source_hash.clone()),
-        target_hashes: vec![mapping.target_hash.clone()],
-        patch_suffix: context.options.patch_suffix.clone(),
-        no_padding: context.options.no_padding,
-        unmatched_unit_policy: UnmatchedUnitPolicy::Keep,
-    };
-    let mut results = mode_a_web::run(
-        context.original,
-        &request,
-        context.source,
-        mapping.category.as_str(),
-        context.progress,
-    )
-    .await?;
-    results
-        .pop()
-        .ok_or_else(|| eyre::eyre!("mapping produced no target"))
+    context.executor.migrate(mapping).await
 }
 
 fn parse_patch(patch: &PatchBytes) -> crate::Result<StreamToc> {

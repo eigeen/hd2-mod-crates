@@ -33,6 +33,7 @@ use crate::web::migration::{
     detect_source_via_authority, selectable_archive_entries, unit_file_ids,
 };
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// Async progress callback. Mirrors `migrator::ProgressSink` but does not
 /// require `Sync` (the wasm impl wraps `js_sys::Function` which is `!Send`).
@@ -53,6 +54,78 @@ pub struct WebTargetResult {
     pub(crate) unit_mappings: Vec<(u64, u64)>,
 }
 
+pub(crate) struct MigrationArchiveCache {
+    bundle: Option<BundleSlicer>,
+    source_archives: HashMap<String, Arc<StreamToc>>,
+    unit_indexes: HashMap<String, Arc<StreamToc>>,
+}
+
+impl MigrationArchiveCache {
+    pub(crate) async fn open<S: DataSource + ?Sized>(source: &S) -> crate::Result<Self> {
+        let bundle = if source.exists("bundles.nxa").await? {
+            Some(BundleSlicer::open(source).await?)
+        } else {
+            None
+        };
+        Ok(Self {
+            bundle,
+            source_archives: HashMap::new(),
+            unit_indexes: HashMap::new(),
+        })
+    }
+
+    async fn load_source_archive<S: DataSource + ?Sized>(
+        &mut self,
+        source: &S,
+        hash: &str,
+    ) -> crate::Result<Arc<StreamToc>> {
+        if let Some(archive) = self.source_archives.get(hash) {
+            return Ok(Arc::clone(archive));
+        }
+        let archive = Arc::new(load_archive_async(source, self.bundle.as_ref(), hash).await?);
+        self.source_archives
+            .insert(hash.to_owned(), Arc::clone(&archive));
+        Ok(archive)
+    }
+
+    async fn load_target_archive<S: DataSource + ?Sized>(
+        &self,
+        source: &S,
+        hash: &str,
+    ) -> crate::Result<Arc<StreamToc>> {
+        load_archive_async(source, self.bundle.as_ref(), hash)
+            .await
+            .map(Arc::new)
+    }
+
+    async fn load_unit_index<S: DataSource + ?Sized>(
+        &mut self,
+        source: &S,
+        hash: &str,
+    ) -> crate::Result<Arc<StreamToc>> {
+        if let Some(archive) = self.unit_indexes.get(hash) {
+            return Ok(Arc::clone(archive));
+        }
+        let archive = Arc::new(load_unit_index_async(source, self.bundle.as_ref(), hash).await?);
+        self.unit_indexes
+            .insert(hash.to_owned(), Arc::clone(&archive));
+        Ok(archive)
+    }
+}
+
+pub(crate) struct PreparedMigration {
+    archives: &'static [ArmorEntry],
+    by_hash: HashMap<String, String>,
+    empty_unit_template: Option<EmptyUnitTemplate>,
+    mapping: CategoryMapping,
+    padding_mode: PaddingMode,
+    prepared: PreparedPatch,
+    source_archive: Option<Arc<StreamToc>>,
+    source_hash: String,
+    source_name: String,
+    unmatched_unit_policy: UnmatchedUnitPolicy,
+}
+
 /// Run the async cross-archive migration. Returns one [`WebTargetResult`]
 /// per requested target, in the requested order.
 pub async fn run<S: DataSource + ?Sized>(
@@ -62,135 +135,259 @@ pub async fn run<S: DataSource + ?Sized>(
     category: &str,
     progress: Option<&dyn WebProgress>,
 ) -> crate::Result<Vec<WebTargetResult>> {
-    let archives = ArchiveIndex::builtin()
-        .category(category)
-        .ok_or_else(|| eyre::eyre!("category {category:?} not found in builtin index"))?;
-    let by_hash: HashMap<String, String> = selectable_archive_entries(category)?
-        .into_iter()
-        .map(|a| (a.hash.clone(), a.name.clone()))
-        .collect();
-
     let patch = StreamToc::from_buffers(
         &patch_bytes.toc,
         &patch_bytes.gpu,
         &patch_bytes.stream,
         patch_bytes.name.clone(),
     )?;
-
-    let bundle = if source.exists("bundles.nxa").await? {
-        tracing::info!("loaded Slim bundles.nxa index (async)");
-        Some(BundleSlicer::open(source).await?)
-    } else {
-        None
-    };
-
-    let mapping = CategoryMapping::load(category)?;
-    let source_hash = resolve_source_hash(&patch, options, category, &by_hash)?;
-    ensure_targets_differ_from_source(&options.target_hashes, &source_hash)?;
-    let source_name = by_hash
-        .get(&source_hash)
-        .cloned()
-        .ok_or_else(|| eyre::eyre!("source {source_hash} not in builtin index"))?;
-
-    let source_archive =
-        load_armor_source_archive(source, bundle.as_ref(), &source_hash, &mapping).await?;
-    let model_detection_warning = detect_unclaimed_model_warning(category, &source_name, &patch)?;
-    let mut prepared = prepare_patch(
-        patch,
-        source_archive.as_ref(),
-        &mapping,
-        options.unmatched_unit_policy,
-    );
-    prepared.source_unit_ids = selected_source_unit_ids(
-        &prepared.migration,
-        source_archive.as_ref(),
-        &mapping,
-        &source_name,
-    )?;
-    prepared.model_detection_warning = model_detection_warning;
-
-    let empty_unit_template: Option<EmptyUnitTemplate> = if options.no_padding {
-        None
-    } else {
-        Some(padding::builtin_template())
-    };
-    let padding_mode = if options.no_padding {
-        PaddingMode::Disabled
-    } else {
-        PaddingMode::Sanitized
-    };
-
-    let compute_context = MigrationComputeContext {
-        patch: &prepared.migration,
-        source: source_archive.as_ref(),
-        source_name: &source_name,
-        mapping: &mapping,
-        empty_unit_template: empty_unit_template.as_ref(),
-        padding_mode,
-        unmatched_unit_policy: options.unmatched_unit_policy,
-    };
+    let mut cache = MigrationArchiveCache::open(source).await?;
+    let source_hash = resolve_source_hash_for_options(&patch, options, category)?;
+    let prepared = PreparedMigration::new(
+        &patch,
+        source,
+        &mut cache,
+        PreparedMigrationOptions {
+            category,
+            no_padding: options.no_padding,
+            source_hash: &source_hash,
+            unmatched_unit_policy: options.unmatched_unit_policy,
+        },
+    )
+    .await?;
 
     let mut results = Vec::with_capacity(options.target_hashes.len());
     for target_hash in &options.target_hashes {
-        let target_name = by_hash
-            .get(target_hash)
-            .cloned()
-            .ok_or_else(|| eyre::eyre!("target {target_hash} not in builtin index"))?;
-        if let Some(p) = progress {
-            p.target_started(&target_name, target_hash)?;
-            p.stage(&target_name, "loading target")?;
-        }
-        let load_context = ArchiveLoadContext {
-            source,
-            bundle: bundle.as_ref(),
-            archives,
-        };
-        let loaded =
-            load_migration_target(&load_context, target_hash, &target_name, &mapping).await?;
-        let stage_callback = |stage: &str| -> crate::Result<()> {
-            if let Some(p) = progress {
-                p.stage(&target_name, stage)?;
-            }
-            Ok(())
-        };
-        let identity = TargetIdentity {
-            hash: &loaded.hash,
-            name: &target_name,
-        };
-        let artifact =
-            compute_cross_target(&compute_context, &loaded.archive, &identity, stage_callback)?;
-        let resolved_hash = loaded.hash;
-        let result = finish_target_result(resolved_hash, target_name, artifact, &prepared);
-        if let Some(p) = progress {
-            p.target_finished(&result.target_name)?;
-        }
-        results.push(result);
+        results.push(
+            prepared
+                .migrate_target(source, &mut cache, target_hash, progress)
+                .await?,
+        );
     }
     Ok(results)
 }
 
-fn ensure_targets_differ_from_source(
-    target_hashes: &[String],
-    source_hash: &str,
+pub(crate) struct PreparedMigrationOptions<'a> {
+    pub(crate) category: &'a str,
+    pub(crate) no_padding: bool,
+    pub(crate) source_hash: &'a str,
+    pub(crate) unmatched_unit_policy: UnmatchedUnitPolicy,
+}
+
+impl PreparedMigration {
+    pub(crate) async fn new<S: DataSource + ?Sized>(
+        patch: &StreamToc,
+        source: &S,
+        cache: &mut MigrationArchiveCache,
+        options: PreparedMigrationOptions<'_>,
+    ) -> crate::Result<Self> {
+        let (archives, by_hash) = migration_catalog(options.category)?;
+        let mapping = CategoryMapping::load(options.category)?;
+        let source_name = required_archive_name(&by_hash, options.source_hash, "source")?;
+        let source_archive =
+            cached_source_archive(cache, source, options.source_hash, &mapping).await?;
+        let prepared = prepare_source_patch(
+            patch,
+            SourcePatchContext {
+                category: options.category,
+                mapping: &mapping,
+                source: source_archive.as_deref(),
+                source_name: &source_name,
+                unmatched_unit_policy: options.unmatched_unit_policy,
+            },
+        )?;
+        let (empty_unit_template, padding_mode) = migration_padding(options.no_padding);
+        Ok(Self {
+            archives,
+            by_hash,
+            empty_unit_template,
+            mapping,
+            padding_mode,
+            prepared,
+            source_archive,
+            source_hash: options.source_hash.to_owned(),
+            source_name,
+            unmatched_unit_policy: options.unmatched_unit_policy,
+        })
+    }
+
+    pub(crate) async fn migrate_target<S: DataSource + ?Sized>(
+        &self,
+        source: &S,
+        cache: &mut MigrationArchiveCache,
+        target_hash: &str,
+        progress: Option<&dyn WebProgress>,
+    ) -> crate::Result<WebTargetResult> {
+        if target_hash == self.source_hash {
+            eyre::bail!("source archive cannot also be a migration target");
+        }
+        let target_name = required_archive_name(&self.by_hash, target_hash, "target")?;
+        notify_target_start(progress, &target_name, target_hash)?;
+        let loaded = self
+            .load_target(source, cache, target_hash, &target_name)
+            .await?;
+        let result = self.compute_target(loaded, target_name, progress)?;
+        if let Some(progress) = progress {
+            progress.target_finished(&result.target_name)?;
+        }
+        Ok(result)
+    }
+
+    async fn load_target<S: DataSource + ?Sized>(
+        &self,
+        source: &S,
+        cache: &mut MigrationArchiveCache,
+        target_hash: &str,
+        target_name: &str,
+    ) -> crate::Result<LoadedTarget> {
+        match &self.mapping {
+            CategoryMapping::Armor(_) => Ok(LoadedTarget {
+                hash: target_hash.to_owned(),
+                archive: cache.load_target_archive(source, target_hash).await?,
+            }),
+            CategoryMapping::Helmet(table) => {
+                load_cached_helmet_target(cache, source, self.archives, target_name, table).await
+            }
+        }
+    }
+
+    fn compute_target(
+        &self,
+        loaded: LoadedTarget,
+        target_name: String,
+        progress: Option<&dyn WebProgress>,
+    ) -> crate::Result<WebTargetResult> {
+        let context = self.compute_context();
+        let stage = |value: &str| notify_stage(progress, &target_name, value);
+        let identity = TargetIdentity {
+            hash: &loaded.hash,
+            name: &target_name,
+        };
+        let artifact = compute_cross_target(&context, &loaded.archive, &identity, stage)?;
+        Ok(finish_target_result(
+            loaded.hash,
+            target_name,
+            artifact,
+            &self.prepared,
+        ))
+    }
+
+    fn compute_context(&self) -> MigrationComputeContext<'_> {
+        MigrationComputeContext {
+            patch: &self.prepared.migration,
+            source: self.source_archive.as_deref(),
+            source_name: &self.source_name,
+            mapping: &self.mapping,
+            empty_unit_template: self.empty_unit_template.as_ref(),
+            padding_mode: self.padding_mode,
+            unmatched_unit_policy: self.unmatched_unit_policy,
+        }
+    }
+}
+
+fn migration_catalog(
+    category: &str,
+) -> crate::Result<(&'static [ArmorEntry], HashMap<String, String>)> {
+    let archives = ArchiveIndex::builtin()
+        .category(category)
+        .ok_or_else(|| eyre::eyre!("category {category:?} not found in builtin index"))?;
+    let by_hash = selectable_archive_entries(category)?
+        .into_iter()
+        .map(|archive| (archive.hash.clone(), archive.name.clone()))
+        .collect();
+    Ok((archives, by_hash))
+}
+
+fn required_archive_name(
+    by_hash: &HashMap<String, String>,
+    hash: &str,
+    role: &str,
+) -> crate::Result<String> {
+    by_hash
+        .get(hash)
+        .cloned()
+        .ok_or_else(|| eyre::eyre!("{role} {hash} not in builtin index"))
+}
+
+async fn cached_source_archive<S: DataSource + ?Sized>(
+    cache: &mut MigrationArchiveCache,
+    source: &S,
+    hash: &str,
+    mapping: &CategoryMapping,
+) -> crate::Result<Option<Arc<StreamToc>>> {
+    match mapping {
+        CategoryMapping::Armor(_) => cache.load_source_archive(source, hash).await.map(Some),
+        CategoryMapping::Helmet(_) => Ok(None),
+    }
+}
+
+struct SourcePatchContext<'a> {
+    category: &'a str,
+    mapping: &'a CategoryMapping,
+    source: Option<&'a StreamToc>,
+    source_name: &'a str,
+    unmatched_unit_policy: UnmatchedUnitPolicy,
+}
+
+fn prepare_source_patch(
+    patch: &StreamToc,
+    context: SourcePatchContext<'_>,
+) -> crate::Result<PreparedPatch> {
+    let mut prepared = prepare_patch(
+        patch,
+        context.source,
+        context.mapping,
+        context.unmatched_unit_policy,
+    );
+    prepared.source_unit_ids = selected_source_unit_ids(
+        &prepared.migration,
+        context.source,
+        context.mapping,
+        context.source_name,
+    )?;
+    prepared.model_detection_warning =
+        detect_unclaimed_model_warning(context.category, context.source_name, patch)?;
+    Ok(prepared)
+}
+
+fn migration_padding(no_padding: bool) -> (Option<EmptyUnitTemplate>, PaddingMode) {
+    if no_padding {
+        (None, PaddingMode::Disabled)
+    } else {
+        (Some(padding::builtin_template()), PaddingMode::Sanitized)
+    }
+}
+
+fn notify_target_start(
+    progress: Option<&dyn WebProgress>,
+    target_name: &str,
+    target_hash: &str,
 ) -> crate::Result<()> {
-    if target_hashes.iter().any(|hash| hash == source_hash) {
-        eyre::bail!("source archive cannot also be a migration target");
+    if let Some(progress) = progress {
+        progress.target_started(target_name, target_hash)?;
+        progress.stage(target_name, "loading target")?;
     }
     Ok(())
 }
 
-async fn load_armor_source_archive<S: DataSource + ?Sized>(
-    source: &S,
-    bundle: Option<&BundleSlicer>,
-    archive_name: &str,
-    mapping: &CategoryMapping,
-) -> crate::Result<Option<StreamToc>> {
-    match mapping {
-        CategoryMapping::Armor(_) => Ok(Some(
-            load_archive_async(source, bundle, archive_name).await?,
-        )),
-        CategoryMapping::Helmet(_) => Ok(None),
+fn notify_stage(
+    progress: Option<&dyn WebProgress>,
+    target_name: &str,
+    stage: &str,
+) -> crate::Result<()> {
+    match progress {
+        Some(progress) => progress.stage(target_name, stage),
+        None => Ok(()),
     }
+}
+
+fn resolve_source_hash_for_options(
+    patch: &StreamToc,
+    options: &WebMigrateOptions,
+    category: &str,
+) -> crate::Result<String> {
+    let (_, by_hash) = migration_catalog(category)?;
+    resolve_source_hash(patch, options, category, &by_hash)
 }
 
 struct PreparedPatch {
@@ -203,7 +400,7 @@ struct PreparedPatch {
 }
 
 fn prepare_patch(
-    patch: StreamToc,
+    patch: &StreamToc,
     source: Option<&StreamToc>,
     mapping: &CategoryMapping,
     policy: UnmatchedUnitPolicy,
@@ -211,7 +408,7 @@ fn prepare_patch(
     match (mapping, source) {
         (CategoryMapping::Armor(_), Some(source)) => prepare_armor_patch(patch, source, policy),
         _ => PreparedPatch {
-            migration: patch,
+            migration: patch.clone(),
             preserved_entries: Vec::new(),
             dropped_entries: 0,
             preserved_units: 0,
@@ -222,11 +419,11 @@ fn prepare_patch(
 }
 
 fn prepare_armor_patch(
-    patch: StreamToc,
+    patch: &StreamToc,
     source: &StreamToc,
     policy: UnmatchedUnitPolicy,
 ) -> PreparedPatch {
-    let filter = source_selection::filter_patch_to_source_archive_units(&patch, source);
+    let filter = source_selection::filter_patch_to_source_archive_units(patch, source);
     if policy == UnmatchedUnitPolicy::Drop {
         return PreparedPatch {
             migration: filter.patch,
@@ -239,13 +436,13 @@ fn prepare_armor_patch(
     }
 
     let selected_units = unit_file_ids(&filter.patch);
-    let foreign_units = unit_file_ids(&patch)
+    let foreign_units = unit_file_ids(patch)
         .difference(&selected_units)
         .copied()
         .collect::<HashSet<_>>();
     PreparedPatch {
         migration: filter.patch,
-        preserved_entries: source_selection::unit_dependency_entries(&patch, &foreign_units),
+        preserved_entries: source_selection::unit_dependency_entries(patch, &foreign_units),
         dropped_entries: 0,
         preserved_units: foreign_units.len(),
         model_detection_warning: None,
@@ -337,50 +534,26 @@ fn finish_target_result(
     }
 }
 
-struct ArchiveLoadContext<'a, S: DataSource + ?Sized> {
-    source: &'a S,
-    bundle: Option<&'a BundleSlicer>,
-    archives: &'a [ArmorEntry],
-}
-
 struct LoadedTarget {
     hash: String,
-    archive: StreamToc,
+    archive: Arc<StreamToc>,
 }
 
-async fn load_migration_target<S: DataSource + ?Sized>(
-    context: &ArchiveLoadContext<'_, S>,
-    requested_hash: &str,
-    target_name: &str,
-    mapping: &CategoryMapping,
-) -> crate::Result<LoadedTarget> {
-    match mapping {
-        CategoryMapping::Armor(_) => Ok(LoadedTarget {
-            hash: requested_hash.to_string(),
-            archive: load_archive_async(context.source, context.bundle, requested_hash).await?,
-        }),
-        CategoryMapping::Helmet(table) => {
-            load_helmet_target_candidate(context, target_name, table).await
-        }
-    }
-}
-
-/// Select the current-game archive candidate that actually owns the mapped Helmet Unit.
-async fn load_helmet_target_candidate<S: DataSource + ?Sized>(
-    context: &ArchiveLoadContext<'_, S>,
+async fn load_cached_helmet_target<S: DataSource + ?Sized>(
+    cache: &mut MigrationArchiveCache,
+    source: &S,
+    archives: &[ArmorEntry],
     target_name: &str,
     table: &HelmetMappingTable,
 ) -> crate::Result<LoadedTarget> {
     let target_unit_id = table
         .unit_id(target_name)
         .ok_or_else(|| eyre::eyre!("helmet {target_name:?} is missing from the bundled mapping"))?;
-    for candidate in context
-        .archives
+    for candidate in archives
         .iter()
         .filter(|archive| archive.name == target_name)
     {
-        let archive =
-            load_unit_index_async(context.source, context.bundle, &candidate.hash).await?;
+        let archive = cache.load_unit_index(source, &candidate.hash).await?;
         if unit_file_ids(&archive).contains(&target_unit_id) {
             return Ok(LoadedTarget {
                 hash: candidate.hash.clone(),
@@ -558,11 +731,61 @@ fn resolve_source_hash(
 }
 
 #[cfg(test)]
-mod same_source_tests {
+mod archive_cache_tests {
     use super::*;
+    use crate::io::IoFuture;
+    use std::cell::Cell;
+
+    struct CountingSource {
+        reads: Cell<usize>,
+        toc: Vec<u8>,
+    }
+
+    impl DataSource for CountingSource {
+        fn read_full<'a>(&'a self, _path: &'a str) -> IoFuture<'a, Vec<u8>> {
+            self.reads.set(self.reads.get() + 1);
+            Box::pin(async { Ok(self.toc.clone()) })
+        }
+
+        fn read_range<'a>(
+            &'a self,
+            _path: &'a str,
+            _offset: u64,
+            _len: u64,
+        ) -> IoFuture<'a, Vec<u8>> {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+
+        fn exists<'a>(&'a self, _path: &'a str) -> IoFuture<'a, bool> {
+            Box::pin(async { Ok(false) })
+        }
+
+        fn list_bundle_chunks<'a>(&'a self) -> IoFuture<'a, Vec<String>> {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+
+        fn list_packages<'a>(&'a self) -> IoFuture<'a, Vec<String>> {
+            Box::pin(async { Ok(Vec::new()) })
+        }
+    }
 
     #[test]
-    fn rejects_source_archive_in_targets() {
-        assert!(ensure_targets_differ_from_source(&["source".to_string()], "source").is_err());
+    fn reuses_source_archives_without_retaining_unique_targets() {
+        let (toc, _, _) = StreamToc::default().serialize();
+        let source = CountingSource {
+            reads: Cell::new(0),
+            toc,
+        };
+        let mut cache = pollster::block_on(MigrationArchiveCache::open(&source)).expect("cache");
+
+        let first =
+            pollster::block_on(cache.load_source_archive(&source, "source")).expect("source");
+        let second = pollster::block_on(cache.load_source_archive(&source, "source"))
+            .expect("cached source");
+        pollster::block_on(cache.load_target_archive(&source, "target")).expect("first target");
+        pollster::block_on(cache.load_target_archive(&source, "target")).expect("second target");
+
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(source.reads.get(), 3);
     }
 }
