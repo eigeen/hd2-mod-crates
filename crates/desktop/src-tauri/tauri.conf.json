@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "HD2 Migrator Tauri",
+  "productName": "HD2 Mod Tools Desktop",
   "version": "0.1.0",
-  "identifier": "dev.modarmor.migrator.tauriui",
+  "identifier": "dev.hd2modtools.desktop",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "HD2 Migrator",
+        "title": "HD2 Mod Tools",
         "width": 960,
         "height": 720,
         "minWidth": 760,

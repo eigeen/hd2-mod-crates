@@ -32,7 +32,7 @@ import {
   repatchMod,
   subscribeToMigrationProgress,
   validateGameDataDir,
-} from "./nativeClient";
+} from "./desktopClient";
 import type {
   DetectedSource,
   EquipmentOption,

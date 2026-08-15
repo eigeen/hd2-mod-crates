@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    hd2_migrator_tauri_ui_lib::run()
+    hd2_migrator_desktop_lib::run()
 }

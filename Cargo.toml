@@ -7,7 +7,7 @@ members = [
     "crates/hd2-migrator-io",
     "crates/hd2-migrator-wasm",
     "crates/hd2-unit-matching",
-    "crates/tauri_ui/src-tauri",
+    "crates/desktop/src-tauri",
     "crates/svd-core",
     "crates/svd-export",
     "crates/svd-pack",

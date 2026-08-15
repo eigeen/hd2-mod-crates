@@ -8,7 +8,6 @@
     "web:dev": "bun run --cwd crates/web_ui dev",
     "web:build": "bun run --cwd crates/web_ui build",
     "web:wasm": "bun run --cwd crates/web_ui wasm",
-    "tauri:dev": "bun run --cwd crates/tauri_ui tauri dev",
-    "tauri:build": "bun run --cwd crates/tauri_ui tauri build"
+    "desktop:build": "bun run --cwd crates/desktop desktop build"
   }
 }

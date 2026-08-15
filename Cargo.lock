@@ -1851,7 +1851,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "hd2_migrator_tauri_ui"
+name = "hd2_migrator_desktop"
 version = "0.1.0"
 dependencies = [
  "eyre",

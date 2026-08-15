@@ -79,7 +79,7 @@ pub async fn migrate_equipment(
     app: AppHandle,
 ) -> Result<WebMigrationSummary, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let progress = TauriProgress::new(app);
+        let progress = DesktopProgress::new(app);
         pollster::block_on(migrate_equipment_blocking(request, Some(&progress)))
     })
     .await
@@ -187,11 +187,11 @@ fn validate_output_request(data_dir: &Path, output_path: &Path) -> Result<(), St
     Ok(())
 }
 
-struct TauriProgress {
+struct DesktopProgress {
     app: AppHandle,
 }
 
-impl TauriProgress {
+impl DesktopProgress {
     fn new(app: AppHandle) -> Self {
         Self { app }
     }
@@ -207,7 +207,7 @@ impl TauriProgress {
     }
 }
 
-impl WebProgress for TauriProgress {
+impl WebProgress for DesktopProgress {
     fn target_started(&self, name: &str, hash: &str) {
         self.emit(ProgressKind::TargetStart, name, hash, "");
     }
@@ -231,10 +231,10 @@ mod real_data_tests {
     use hd2_migrator_io::web::{UnmatchedUnitPolicy, WebMigrationMapping, WebMigrationVariant};
 
     #[test]
-    #[ignore = "requires HD2_TAURI_TEST_PATCH and HD2_TAURI_TEST_DATA"]
+    #[ignore = "requires HD2_DESKTOP_TEST_PATCH and HD2_DESKTOP_TEST_DATA"]
     fn inspects_real_patch_with_installed_game_data() {
-        let patch_path = required_path("HD2_TAURI_TEST_PATCH");
-        let data_dir = required_path("HD2_TAURI_TEST_DATA");
+        let patch_path = required_path("HD2_DESKTOP_TEST_PATCH");
+        let data_dir = required_path("HD2_DESKTOP_TEST_DATA");
         let result = inspect_patch_blocking(InspectPatchRequest {
             paths: vec![patch_path],
             data_dir: Some(data_dir),
@@ -249,10 +249,10 @@ mod real_data_tests {
     }
 
     #[test]
-    #[ignore = "requires HD2_TAURI_TEST_PATCH, HD2_TAURI_TEST_DATA, and HD2_TAURI_TEST_OUTPUT"]
+    #[ignore = "requires HD2_DESKTOP_TEST_PATCH, HD2_DESKTOP_TEST_DATA, and HD2_DESKTOP_TEST_OUTPUT"]
     fn migrates_real_patch_to_a_different_equipment_target() {
-        let patch_path = required_path("HD2_TAURI_TEST_PATCH");
-        let data_dir = required_path("HD2_TAURI_TEST_DATA");
+        let patch_path = required_path("HD2_DESKTOP_TEST_PATCH");
+        let data_dir = required_path("HD2_DESKTOP_TEST_DATA");
         let output_path = output_path("real-migration.zip");
         let inspection = inspect_patch_blocking(InspectPatchRequest {
             paths: vec![patch_path.clone()],
@@ -283,10 +283,10 @@ mod real_data_tests {
     }
 
     #[test]
-    #[ignore = "requires HD2_TAURI_TEST_PATCH, HD2_TAURI_TEST_DATA, and HD2_TAURI_TEST_OUTPUT"]
+    #[ignore = "requires HD2_DESKTOP_TEST_PATCH, HD2_DESKTOP_TEST_DATA, and HD2_DESKTOP_TEST_OUTPUT"]
     fn migrates_all_real_equipment_sources_into_one_patch() {
-        let patch_path = required_path("HD2_TAURI_TEST_PATCH");
-        let data_dir = required_path("HD2_TAURI_TEST_DATA");
+        let patch_path = required_path("HD2_DESKTOP_TEST_PATCH");
+        let data_dir = required_path("HD2_DESKTOP_TEST_DATA");
         let output_path = output_path("real-combined-migration.zip");
         let inspection = inspect_patch_blocking(InspectPatchRequest {
             paths: vec![patch_path.clone()],
@@ -325,12 +325,12 @@ mod real_data_tests {
     }
 
     #[test]
-    #[ignore = "requires HD2_TAURI_TEST_PATCH, HD2_TAURI_TEST_DATA, and HD2_TAURI_TEST_OUTPUT"]
+    #[ignore = "requires HD2_DESKTOP_TEST_PATCH, HD2_DESKTOP_TEST_DATA, and HD2_DESKTOP_TEST_OUTPUT"]
     fn repatches_real_patch_from_installed_game_data() {
         let output_path = output_path("real-repatch.zip");
         let request = RepatchRequest {
-            patch_paths: vec![required_path("HD2_TAURI_TEST_PATCH")],
-            data_dir: required_path("HD2_TAURI_TEST_DATA"),
+            patch_paths: vec![required_path("HD2_DESKTOP_TEST_PATCH")],
+            data_dir: required_path("HD2_DESKTOP_TEST_DATA"),
             output_path: output_path.clone(),
             options: UnitRepatchOptions::default(),
         };
@@ -381,7 +381,7 @@ mod real_data_tests {
     }
 
     fn output_path(filename: &str) -> PathBuf {
-        let directory = required_path("HD2_TAURI_TEST_OUTPUT");
+        let directory = required_path("HD2_DESKTOP_TEST_OUTPUT");
         std::fs::create_dir_all(&directory).expect("create real-data output directory");
         directory.join(filename)
     }
