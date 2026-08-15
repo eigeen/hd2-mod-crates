@@ -20,6 +20,10 @@ import { ToolIntro } from "../../web_ui/src/ToolIntro";
 import { UnitUpdaterPanel } from "../../web_ui/src/UnitUpdaterPanel";
 import { useI18n, type Translate } from "../../web_ui/src/i18n";
 import { uniqueOutputFilename } from "../../web_ui/src/migrationDownloads";
+import {
+  ResultReportDialog,
+  type CompletedTaskReport,
+} from "../../web_ui/src/ResultReportDialog";
 import { normalizeTaskError } from "../../web_ui/src/taskError";
 import { DesktopGameDataPanel, DesktopPatchPanel } from "./DesktopPanels";
 import { dropZoneFromPhysicalPosition, type DropZone } from "./dropTarget";
@@ -39,12 +43,10 @@ import type {
   DetectedSource,
   EquipmentOption,
   MigrationProgressEvent,
-  MigrationSummary,
   MigrationVariant,
   MissingUnitPolicy,
   PatchDescriptor,
   UnmatchedUnitPolicy,
-  UnitRepatchSummary,
 } from "./types";
 
 const PATCH_SUFFIX = "9ba626afa44a3aa3.patch_0";
@@ -70,6 +72,7 @@ function App() {
   const [cancelling, setCancelling] = useState(false);
   const [progressLabel, setProgressLabel] = useState("");
   const [hoveredDropZone, setHoveredDropZone] = useState<DropZone | null>(null);
+  const [completedReport, setCompletedReport] = useState<CompletedTaskReport | null>(null);
   const hoveredDropZoneRef = useRef<DropZone | null>(null);
   const activeTaskRef = useRef<DesktopTask<unknown> | null>(null);
 
@@ -195,7 +198,7 @@ function App() {
       }, (event) => setProgressLabel(progressText(event, t)));
       activeTaskRef.current = task;
       const summary = await task.result;
-      showMigrationReport(summary, t);
+      setCompletedReport({ kind: "migration", output: outputPath, summary });
     });
     setProgressLabel("");
   }, [configuredMappings, equipmentOptions, gameDir, noPadding, outputAsSinglePatch, patch, patchPaths, t, unmatchedUnitPolicy]);
@@ -214,7 +217,7 @@ function App() {
       }, (event) => setProgressLabel(progressText(event, t)));
       activeTaskRef.current = task;
       const summary = await task.result;
-      showUnitRepatchReport(summary, t);
+      setCompletedReport({ kind: "repatch", output: outputPath, summary });
     });
     setProgressLabel("");
   }, [gameDir, missingUnitPolicy, patch, patchPaths, t]);
@@ -242,6 +245,11 @@ function App() {
     <div className="min-h-screen">
       <div className="fixed inset-0 z-0 bg-center bg-cover" style={{ backgroundImage: "url(/background.webp)", filter: "brightness(0.4)" }} />
       <Toaster position="top-center" theme="dark" />
+      <ResultReportDialog
+        equipmentOptions={equipmentOptions}
+        onClose={() => setCompletedReport(null)}
+        report={completedReport}
+      />
       <div className="relative z-[1]">
         <main className="mx-auto w-full max-w-[56rem] px-4 py-6 min-[51.25rem]:px-6 min-[51.25rem]:py-10">
           <div className="overflow-hidden border-2 border-hd2-border bg-black/60">
@@ -483,35 +491,6 @@ function progressText(event: MigrationProgressEvent, t: Translate) {
   if (event.kind === "stage") return t("app.progressStage", { name: event.targetName, stage: event.stage });
   if (event.kind === "targetFinish") return "";
   return t("app.progressMigrating", { name: event.targetName });
-}
-
-function showMigrationReport(summary: MigrationSummary, t: Translate) {
-  const details = summary.reports.map((report) => reportLine(report, t)).join("\n");
-  const options = { description: <span style={{ whiteSpace: "pre-line" }}>{details}</span>, duration: 8000 };
-  const title = t("report.title", { count: summary.migratedCount });
-  if (summary.warningCount) toast.warning(title, options);
-  else toast.success(title, options);
-}
-
-function reportLine(report: MigrationSummary["reports"][number], t: Translate) {
-  const parts = [report.targetName];
-  if (report.fileIdRemapped) parts.push(t("report.remapped", { count: report.fileIdRemapped }));
-  if (report.paddedUnits) parts.push(t("report.padded", { count: report.paddedUnits }));
-  if (report.skippedEntries) parts.push(t("report.skipped", { count: report.skippedEntries }));
-  if (report.warnings.length) parts.push(t("report.warnings", { count: report.warnings.length }));
-  return parts.join(" · ");
-}
-
-function showUnitRepatchReport(summary: UnitRepatchSummary, t: Translate) {
-  const description = t("repatch.reportDetails", {
-    updated: summary.updatedUnits,
-    current: summary.alreadyCurrentUnits,
-    removed: summary.removedUnits,
-    failed: summary.failedUnits,
-    archives: summary.scannedArchives,
-  });
-  if (summary.warnings.length || summary.failedUnits) toast.warning(t("repatch.reportTitle"), { description });
-  else toast.success(t("repatch.reportTitle"), { description });
 }
 
 async function runTask(

@@ -8,6 +8,7 @@ interface Hd2DialogProps {
   open: boolean;
   onClose?: () => void;
   children: ReactNode;
+  size?: "small" | "large";
 }
 
 /**
@@ -15,7 +16,7 @@ interface Hd2DialogProps {
  * Open animation: top/bottom lines expand from center (clip-path),
  * then content fades in once fully expanded.
  */
-export function Hd2Dialog({ open, onClose, children }: Hd2DialogProps) {
+export function Hd2Dialog({ open, onClose, children, size = "small" }: Hd2DialogProps) {
   const [mounted, setMounted] = useState(open);
   const [phase, setPhase] = useState<AnimPhase>(open ? "idle" : "exit");
 
@@ -65,7 +66,7 @@ export function Hd2Dialog({ open, onClose, children }: Hd2DialogProps) {
     >
       {/* Only top + bottom borders, no left/right. bg semi-transparent. */}
       <div
-        className={`w-full max-w-sm border-t-2 border-b-2 border-hd2-yellow ${panelClass}`}
+        className={`w-full ${size === "large" ? "max-w-2xl" : "max-w-sm"} border-t-2 border-b-2 border-hd2-yellow ${panelClass}`}
         style={{ background: "rgba(8,8,8,0.82)" }}
         onClick={(e) => e.stopPropagation()}
         onAnimationEnd={handleAnimationEnd}

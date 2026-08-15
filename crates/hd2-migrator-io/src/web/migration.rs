@@ -98,6 +98,8 @@ pub struct WebMigrationReportRow {
     pub slot_id_remapped: usize,
     pub padded_units: usize,
     pub skipped_entries: usize,
+    pub unmatched_units: usize,
+    pub unmatched_unit_policy: UnmatchedUnitPolicy,
     pub warnings: Vec<String>,
     #[serde(default)]
     pub mappings: Vec<super::equipment::WebMigrationMapping>,
@@ -168,6 +170,8 @@ pub async fn migrate_many_with_source<S: DataSource + ?Sized>(
             slot_id_remapped: result.report.slot_id_remapped,
             padded_units: result.report.padded_units,
             skipped_entries: result.report.skipped_entries,
+            unmatched_units: 0,
+            unmatched_unit_policy: options.unmatched_unit_policy,
             warnings: result.report.warnings.clone(),
             mappings: vec![super::equipment::WebMigrationMapping {
                 category: match category {

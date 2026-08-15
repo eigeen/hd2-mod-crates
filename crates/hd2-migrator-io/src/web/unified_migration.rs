@@ -131,6 +131,7 @@ async fn migrate_variant<S: DataSource + ?Sized>(
     let original_patch = parse_patch(context.original)?;
     let mut builder = VariantPatchBuilder::new(&original_patch);
     let mut report = empty_report(variant);
+    report.unmatched_unit_policy = context.options.unmatched_unit_policy;
     for (mapping, authoritative_edges) in variant.mappings.iter().zip(&unit_plan.mapping_edges) {
         let mut result = migrate_mapping(context, mapping).await?;
         builder.merge_mapping(&original_patch, mapping, authoritative_edges, &mut result)?;
@@ -141,6 +142,7 @@ async fn migrate_variant<S: DataSource + ?Sized>(
         &original_patch,
         context.options.unmatched_unit_policy,
     );
+    report.unmatched_units = builder.unconverted_original_units(&original_patch).len();
     report.mappings = variant.mappings.clone();
     let patch = builder.finish(&original_patch, context.options.unmatched_unit_policy);
     Ok(VariantResult { patch, report })
@@ -162,7 +164,9 @@ async fn migrate_single_mapping_variant<S: DataSource + ?Sized>(
     let mut builder = VariantPatchBuilder::new(&original_patch);
     builder.merge_mapping(&original_patch, mapping, mapping_edges, &mut result)?;
     let mut report = empty_report(variant);
+    report.unmatched_unit_policy = context.options.unmatched_unit_policy;
     merge_report(&mut report, result.report);
+    report.unmatched_units = builder.unconverted_original_units(&original_patch).len();
     report.mappings = variant.mappings.clone();
     let patch = builder.finish(&original_patch, context.options.unmatched_unit_policy);
     Ok(VariantResult { patch, report })
@@ -596,6 +600,8 @@ fn empty_report(variant: &WebMigrationVariant) -> WebMigrationReportRow {
         slot_id_remapped: 0,
         padded_units: 0,
         skipped_entries: 0,
+        unmatched_units: 0,
+        unmatched_unit_policy: UnmatchedUnitPolicy::Keep,
         warnings: Vec::new(),
         mappings: variant.mappings.clone(),
     }
@@ -852,6 +858,7 @@ mod tests {
         assert!(
             combined_variant_warnings(&builder, &original, UnmatchedUnitPolicy::Keep).is_empty()
         );
+        assert_eq!(builder.unconverted_original_units(&original).len(), 0);
     }
 
     #[test]
@@ -868,6 +875,7 @@ mod tests {
 
         let keep = combined_variant_warnings(&builder, &original, UnmatchedUnitPolicy::Keep);
         let drop = combined_variant_warnings(&builder, &original, UnmatchedUnitPolicy::Drop);
+        assert_eq!(builder.unconverted_original_units(&original).len(), 1);
         assert_eq!(
             keep,
             ["kept 1 part not covered by the configured equipment mappings"]

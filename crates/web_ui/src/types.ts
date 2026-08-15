@@ -77,6 +77,8 @@ export interface MigrationReportRow {
   slotIdRemapped: number;
   paddedUnits: number;
   skippedEntries: number;
+  unmatchedUnits: number;
+  unmatchedUnitPolicy: UnmatchedUnitPolicy;
   warnings: string[];
   mappings: MigrationMapping[];
 }

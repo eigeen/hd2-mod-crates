@@ -408,6 +408,7 @@ mod real_data_tests {
         );
         assert_eq!(summary.migrated_count, 1);
         assert_eq!(summary.reports[0].mappings.len(), 2);
+        assert_eq!(summary.reports[0].unmatched_units, 0);
         assert!(summary.reports[0].warnings.is_empty());
         assert!(output_path.is_file());
         assert_zip_has_entries(&output_path);

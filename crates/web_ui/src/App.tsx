@@ -34,6 +34,7 @@ import {
 } from "./MigratorPanels";
 import { UnitUpdaterPanel } from "./UnitUpdaterPanel";
 import { ToolIntro } from "./ToolIntro";
+import { ResultReportDialog, type CompletedTaskReport } from "./ResultReportDialog";
 import { normalizeTaskError, throwIfTaskCancelled } from "./taskError";
 import type {
   DetectedSource,
@@ -83,6 +84,7 @@ function App() {
   const [missingUnitPolicy, setMissingUnitPolicy] = useState<MissingUnitPolicy>("drop");
   const [faqOpen, setFaqOpen] = useState(false);
   const [faqAttention, setFaqAttention] = useState<TranslationKey | null>(null);
+  const [completedReport, setCompletedReport] = useState<CompletedTaskReport | null>(null);
   const activeTaskRef = useRef<AbortController | null>(null);
 
   const runCancellableTask = useCallback(async (
@@ -284,7 +286,7 @@ function App() {
     const dataSource = new GameDataSource(gameDir.handle);
     setProgressLabel("");
     await runCancellableTask(async (signal) => {
-      const summary = await migrateVariants({
+      const result = await migrateVariants({
         dataSource,
         noPadding,
         options: equipmentOptions,
@@ -295,7 +297,7 @@ function App() {
         unmatchedUnitPolicy,
         variants,
       });
-      showMigrationReport(summary, t);
+      setCompletedReport({ kind: "migration", output: result.output, summary: result.summary });
     });
     setProgressLabel("");
   }, [
@@ -331,7 +333,11 @@ function App() {
       );
       throwIfTaskCancelled(signal);
       downloadRepatchedPatch(patch, output.tocBytes, "hd2-repatched-mod.zip");
-      showUnitRepatchReport(output.summary, t);
+      setCompletedReport({
+        kind: "repatch",
+        output: "hd2-repatched-mod.zip",
+        summary: output.summary,
+      });
     });
     setProgressLabel("");
   }, [gameDir, missingUnitPolicy, runCancellableTask, t]);
@@ -346,6 +352,11 @@ function App() {
       />
 
       <Toaster position="top-center" theme="dark" />
+      <ResultReportDialog
+        equipmentOptions={equipmentOptions}
+        onClose={() => setCompletedReport(null)}
+        report={completedReport}
+      />
 
       <div className="relative z-[1]">
       <main className="mx-auto w-full max-w-[56rem] px-4 py-6 min-[51.25rem]:px-6 min-[51.25rem]:py-10">
@@ -559,7 +570,7 @@ interface VariantMigrationRequest {
 /** Migrate all selected variants into one incrementally assembled ZIP. */
 async function migrateVariants(
   request: VariantMigrationRequest,
-): Promise<MigrationSummary> {
+): Promise<{ output: string; summary: MigrationSummary }> {
   const mappings = request.variants.flatMap((variant) => variant.mappings);
   const result = await migrateEquipmentVariants(
     request.patch,
@@ -574,11 +585,9 @@ async function migrateVariants(
     ),
   );
   throwIfTaskCancelled(request.signal);
-  downloadZip(
-    result.zipBlob,
-    migrationOutputFilename(request.patch, request.variants, request.options),
-  );
-  return result.summary;
+  const output = migrationOutputFilename(request.patch, request.variants, request.options);
+  downloadZip(result.zipBlob, output);
+  return { output, summary: result.summary };
 }
 
 function migrationOutputFilename(
@@ -650,44 +659,6 @@ function numberedTargetLabel(name: string, targetIndex: number, targetCount: num
   if (targetCount === 1) return name;
   return `${targetIndex + 1}/${targetCount} ${name}`;
 }
-
-function showMigrationReport(summary: MigrationSummary, t: Translate): void {
-  const details = summary.reports
-    .map((r) => {
-      const parts: string[] = [r.targetName];
-      if (r.fileIdRemapped) parts.push(t("report.remapped", { count: r.fileIdRemapped }));
-      if (r.paddedUnits) parts.push(t("report.padded", { count: r.paddedUnits }));
-      if (r.skippedEntries) parts.push(t("report.skipped", { count: r.skippedEntries }));
-      if (r.warnings.length) parts.push(t("report.warnings", { count: r.warnings.length }));
-      return parts.join(" · ");
-    })
-    .join("\n");
-
-  const description = <span style={{ whiteSpace: "pre-line" }}>{details}</span>;
-  const title = t("report.title", { count: summary.migratedCount });
-  if (summary.warningCount > 0) {
-    toast.warning(title, { description, duration: 8000 });
-  } else {
-    toast.success(title, { description, duration: 6000 });
-  }
-}
-
-function showUnitRepatchReport(summary: UnitRepatchSummary, t: Translate): void {
-  const description = t("repatch.reportDetails", {
-    updated: summary.updatedUnits,
-    current: summary.alreadyCurrentUnits,
-    removed: summary.removedUnits,
-    failed: summary.failedUnits,
-    archives: summary.scannedArchives,
-  });
-  const options = { description, duration: summary.warnings.length ? 8000 : 6000 };
-  if (summary.warnings.length || summary.failedUnits) {
-    toast.warning(t("repatch.reportTitle"), options);
-    return;
-  }
-  toast.success(t("repatch.reportTitle"), options);
-}
-
 
 async function runTask(
   setBusy: (value: boolean) => void,
