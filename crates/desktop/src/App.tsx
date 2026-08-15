@@ -509,6 +509,10 @@ function outputFilename(patch: PatchDescriptor, variants: MigrationVariant[], op
 }
 
 function progressText(event: MigrationProgressEvent, t: Translate) {
+  if (event.kind === "outputProgress") {
+    const percent = event.totalBytes ? Math.round(event.completedBytes * 100 / event.totalBytes) : 100;
+    return t("app.progressWriting", { percent });
+  }
   if (event.kind === "stage" && !event.targetName) {
     return `${t("repatch.progress")} · ${event.stage}`;
   }

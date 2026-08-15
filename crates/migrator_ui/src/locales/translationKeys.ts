@@ -3,6 +3,7 @@ export const translationKeys = [
   "app.run",
   "app.progressMigrating",
   "app.progressStage",
+  "app.progressWriting",
   "app.blockerGameData",
   "app.blockerPatch",
   "app.blockerTarget",

@@ -1,6 +1,6 @@
 use hd2_migrator_io::archive::{SerializedPart, StreamToc};
 use std::fs::File;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use tempfile::NamedTempFile;
 use zip::write::SimpleFileOptions;
@@ -10,6 +10,17 @@ pub struct OutputZip {
     writer: ZipWriter<File>,
     temporary: NamedTempFile,
     output_path: PathBuf,
+}
+
+pub trait OutputProgress: Sync {
+    fn ensure_active(&self) -> io::Result<()>;
+    fn report_bytes(&self, completed: u64, total: u64) -> io::Result<()>;
+}
+
+pub struct PatchZipContext<'a> {
+    pub directory: &'a str,
+    pub progress: Option<&'a dyn OutputProgress>,
+    pub suffix: &'a str,
 }
 
 pub fn create_zip(path: &Path) -> Result<OutputZip, String> {
@@ -45,28 +56,122 @@ pub fn write_zip_entry(
 pub fn write_patch_to_zip(
     zip: &mut OutputZip,
     patch: &mut StreamToc,
-    directory: &str,
-    suffix: &str,
+    context: PatchZipContext<'_>,
 ) -> hd2_migrator_io::Result<()> {
     let serializer = patch.serializer();
-    let toc_path = format!("{directory}/{suffix}");
-    write_serialized_entry(zip, &serializer, &toc_path, SerializedPart::Toc)?;
+    let toc_path = format!("{}/{}", context.directory, context.suffix);
+    write_serialized_entry(
+        zip,
+        &serializer,
+        entry_context(&toc_path, SerializedPart::Toc, context.progress),
+    )?;
     let gpu_path = format!("{toc_path}.gpu_resources");
-    write_serialized_entry(zip, &serializer, &gpu_path, SerializedPart::Gpu)?;
+    write_serialized_entry(
+        zip,
+        &serializer,
+        entry_context(&gpu_path, SerializedPart::Gpu, context.progress),
+    )?;
     let stream_path = format!("{toc_path}.stream");
-    write_serialized_entry(zip, &serializer, &stream_path, SerializedPart::Stream)
+    write_serialized_entry(
+        zip,
+        &serializer,
+        entry_context(&stream_path, SerializedPart::Stream, context.progress),
+    )
+}
+
+struct SerializedEntryContext<'a> {
+    part: SerializedPart,
+    path: &'a str,
+    progress: Option<&'a dyn OutputProgress>,
+}
+
+fn entry_context<'a>(
+    path: &'a str,
+    part: SerializedPart,
+    progress: Option<&'a dyn OutputProgress>,
+) -> SerializedEntryContext<'a> {
+    SerializedEntryContext {
+        part,
+        path,
+        progress,
+    }
 }
 
 fn write_serialized_entry(
     zip: &mut OutputZip,
     serializer: &hd2_migrator_io::archive::StreamTocSerializer<'_>,
-    path: &str,
-    part: SerializedPart,
+    context: SerializedEntryContext<'_>,
 ) -> hd2_migrator_io::Result<()> {
-    validate_entry_path(path)?;
+    validate_entry_path(context.path)?;
+    ensure_active(context.progress)?;
+    let total = serializer.part_len(context.part) as u64;
+    report_bytes(context.progress, 0, total)?;
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
-    zip.writer.start_file(path, options)?;
-    serializer.write_part(part, &mut zip.writer)
+    zip.writer.start_file(context.path, options)?;
+    let mut writer = ProgressWriter::new(&mut zip.writer, context.progress, total);
+    serializer.write_part(context.part, &mut writer)?;
+    report_bytes(context.progress, writer.completed, total)?;
+    Ok(())
+}
+
+const WRITE_CHUNK_SIZE: usize = 1024 * 1024;
+const PROGRESS_INTERVAL: u64 = 4 * 1024 * 1024;
+
+struct ProgressWriter<'a, W> {
+    completed: u64,
+    inner: &'a mut W,
+    next_report: u64,
+    progress: Option<&'a dyn OutputProgress>,
+    total: u64,
+}
+
+impl<'a, W> ProgressWriter<'a, W> {
+    fn new(inner: &'a mut W, progress: Option<&'a dyn OutputProgress>, total: u64) -> Self {
+        Self {
+            completed: 0,
+            inner,
+            next_report: PROGRESS_INTERVAL,
+            progress,
+            total,
+        }
+    }
+}
+
+impl<W: Write> Write for ProgressWriter<'_, W> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        ensure_active(self.progress)?;
+        let count = self
+            .inner
+            .write(&bytes[..bytes.len().min(WRITE_CHUNK_SIZE)])?;
+        self.completed += count as u64;
+        if self.completed >= self.next_report {
+            report_bytes(self.progress, self.completed, self.total)?;
+            self.next_report = self.completed + PROGRESS_INTERVAL;
+        }
+        Ok(count)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+fn ensure_active(progress: Option<&dyn OutputProgress>) -> io::Result<()> {
+    match progress {
+        Some(progress) => progress.ensure_active(),
+        None => Ok(()),
+    }
+}
+
+fn report_bytes(
+    progress: Option<&dyn OutputProgress>,
+    completed: u64,
+    total: u64,
+) -> io::Result<()> {
+    match progress {
+        Some(progress) => progress.report_bytes(completed, total),
+        None => Ok(()),
+    }
 }
 
 pub fn finish_zip(zip: OutputZip) -> Result<(), String> {
@@ -107,6 +212,37 @@ mod tests {
     use super::*;
     use hd2_migrator_io::archive::TocEntry;
     use std::io::Read;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct TestProgress {
+        cancel_after_report: bool,
+        cancelled: AtomicBool,
+    }
+
+    impl TestProgress {
+        fn active() -> Self {
+            Self {
+                cancel_after_report: false,
+                cancelled: AtomicBool::new(false),
+            }
+        }
+    }
+
+    impl OutputProgress for TestProgress {
+        fn ensure_active(&self) -> io::Result<()> {
+            if self.cancelled.load(Ordering::Acquire) {
+                return Err(io::Error::other("task cancelled"));
+            }
+            Ok(())
+        }
+
+        fn report_bytes(&self, completed: u64, _total: u64) -> io::Result<()> {
+            if self.cancel_after_report && completed >= PROGRESS_INTERVAL {
+                self.cancelled.store(true, Ordering::Release);
+            }
+            Ok(())
+        }
+    }
 
     #[test]
     fn writes_stored_zip_entry() {
@@ -169,9 +305,18 @@ mod tests {
         let mut patch = sample_patch();
         let (expected_toc, expected_gpu, expected_stream) = patch.clone().serialize();
         let mut zip = create_zip(&output).expect("create ZIP");
+        let progress = TestProgress::active();
 
-        write_patch_to_zip(&mut zip, &mut patch, "variant", "example.patch_0")
-            .expect("stream patch");
+        write_patch_to_zip(
+            &mut zip,
+            &mut patch,
+            PatchZipContext {
+                directory: "variant",
+                progress: Some(&progress),
+                suffix: "example.patch_0",
+            },
+        )
+        .expect("stream patch");
         finish_zip(zip).expect("finish ZIP");
 
         let mut archive =
@@ -188,6 +333,23 @@ mod tests {
             read_zip_entry(&mut archive, "variant/example.patch_0.stream"),
             expected_stream
         );
+    }
+
+    #[test]
+    fn checks_cancellation_between_output_chunks() {
+        let progress = TestProgress {
+            cancel_after_report: true,
+            cancelled: AtomicBool::new(false),
+        };
+        let mut output = Vec::new();
+        let mut writer = ProgressWriter::new(&mut output, Some(&progress), 8 * 1024 * 1024);
+
+        let error = writer
+            .write_all(&vec![1; 8 * 1024 * 1024])
+            .expect_err("cancel write");
+
+        assert_eq!(error.to_string(), "task cancelled");
+        assert_eq!(output.len() as u64, PROGRESS_INTERVAL);
     }
 
     fn sample_patch() -> StreamToc {

@@ -137,6 +137,14 @@ pub struct StreamTocSerializer<'a> {
 }
 
 impl StreamTocSerializer<'_> {
+    pub fn part_len(&self, part: SerializedPart) -> usize {
+        match part {
+            SerializedPart::Toc => self.toc_len(),
+            SerializedPart::Gpu => self.resource_len(SerializedPart::Gpu),
+            SerializedPart::Stream => self.resource_len(SerializedPart::Stream),
+        }
+    }
+
     /// Writes one serialized archive part without allocating a full output buffer.
     pub fn write_part<W: Write>(&self, part: SerializedPart, writer: &mut W) -> crate::Result<()> {
         match part {
@@ -158,10 +166,31 @@ impl StreamTocSerializer<'_> {
                 .iter()
                 .map(|&index| self.archive.entries[index].toc_data.len())
                 .sum::<usize>();
-        write_zeroes(
-            writer,
-            (256 * self.archive.entries.len()).saturating_sub(written),
-        )
+        write_zeroes(writer, self.toc_len().saturating_sub(written))
+    }
+
+    fn toc_len(&self) -> usize {
+        let content_len = self.plan.header_size
+            + self
+                .plan
+                .ordered_indexes
+                .iter()
+                .map(|&index| self.archive.entries[index].toc_data.len())
+                .sum::<usize>();
+        content_len.max(256 * self.archive.entries.len())
+    }
+
+    fn resource_len(&self, part: SerializedPart) -> usize {
+        self.plan
+            .ordered_indexes
+            .iter()
+            .map(|&index| {
+                let entry = &self.archive.entries[index];
+                let (offset, bytes) = resource_part(entry, self.plan.layouts[index], part);
+                offset + bytes.len()
+            })
+            .max()
+            .unwrap_or(0)
     }
 
     fn write_resource<W: Write>(&self, writer: &mut W, part: SerializedPart) -> crate::Result<()> {

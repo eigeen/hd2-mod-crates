@@ -1,7 +1,7 @@
 mod output;
 mod patch;
 
-use self::output::{create_zip, finish_zip, write_patch_to_zip, write_zip_entry};
+use self::output::{PatchZipContext, create_zip, finish_zip, write_patch_to_zip, write_zip_entry};
 use self::patch::{LoadedPatch, PatchDescriptor, load_patch};
 use crate::command_error::CommandError;
 use crate::task::TaskRegistry;
@@ -52,15 +52,18 @@ pub struct RepatchRequest {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MigrationProgressEvent {
+    completed_bytes: u64,
     target_name: String,
     target_hash: String,
     stage: String,
     kind: ProgressKind,
+    total_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum ProgressKind {
+    OutputProgress,
     TargetStart,
     Stage,
     TargetFinish,
@@ -152,18 +155,22 @@ fn inspect_with_optional_source(
 
 async fn migrate_equipment_blocking(
     request: MigrateRequest,
-    progress: Option<&dyn WebProgress>,
+    progress: Option<&DesktopProgress>,
 ) -> Result<WebMigrationSummary, String> {
     validate_output_request(&request.data_dir, &request.output_path)?;
     let patch = load_patch(&request.patch_paths)?;
     let source = NativeDataSource::new(request.data_dir);
     let mut zip = create_zip(&request.output_path)?;
-    let callbacks = VariantPatchCallbacks::new(progress, |mut output: VariantPatchOutput| {
+    let web_progress = progress.map(|value| value as &dyn WebProgress);
+    let callbacks = VariantPatchCallbacks::new(web_progress, |mut output: VariantPatchOutput| {
         write_patch_to_zip(
             &mut zip,
             &mut output.patch,
-            &output.directory,
-            &output.suffix,
+            PatchZipContext {
+                directory: &output.directory,
+                progress: progress.map(|value| value as &dyn output::OutputProgress),
+                suffix: &output.suffix,
+            },
         )
     });
     let summary = web::migrate_variants_to_patch_sink(
@@ -180,7 +187,7 @@ async fn migrate_equipment_blocking(
 
 async fn repatch_mod_blocking(
     request: RepatchRequest,
-    progress: Option<&dyn WebProgress>,
+    progress: Option<&DesktopProgress>,
 ) -> Result<web::UnitRepatchSummary, String> {
     validate_output_request(&request.data_dir, &request.output_path)?;
     let patch = load_patch(&request.patch_paths)?;
@@ -189,7 +196,7 @@ async fn repatch_mod_blocking(
         &patch.bytes().toc,
         request.options,
         &NativeDataSource::new(request.data_dir),
-        progress,
+        progress.map(|value| value as &dyn WebProgress),
     )
     .await
     .map_err(display_error)?;
@@ -256,10 +263,12 @@ impl DesktopProgress {
     ) -> hd2_migrator_io::Result<()> {
         self.ensure_active()?;
         let event = MigrationProgressEvent {
+            completed_bytes: 0,
             target_name: name.to_owned(),
             target_hash: hash.to_owned(),
             stage: stage.to_owned(),
             kind,
+            total_bytes: 0,
         };
         self.channel
             .send(event)
@@ -271,6 +280,29 @@ impl DesktopProgress {
             eyre::bail!("task cancelled");
         }
         Ok(())
+    }
+
+    fn report_output_bytes(&self, completed: u64, total: u64) -> std::io::Result<()> {
+        self.channel
+            .send(MigrationProgressEvent {
+                completed_bytes: completed,
+                target_name: String::new(),
+                target_hash: String::new(),
+                stage: String::new(),
+                kind: ProgressKind::OutputProgress,
+                total_bytes: total,
+            })
+            .map_err(std::io::Error::other)
+    }
+}
+
+impl output::OutputProgress for DesktopProgress {
+    fn ensure_active(&self) -> std::io::Result<()> {
+        DesktopProgress::ensure_active(self).map_err(std::io::Error::other)
+    }
+
+    fn report_bytes(&self, completed: u64, total: u64) -> std::io::Result<()> {
+        self.report_output_bytes(completed, total)
     }
 }
 

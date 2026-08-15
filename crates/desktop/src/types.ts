@@ -48,8 +48,10 @@ export interface RepatchRequest {
 }
 
 export interface MigrationProgressEvent {
+  completedBytes: number;
   targetName: string;
   targetHash: string;
   stage: string;
-  kind: "targetStart" | "stage" | "targetFinish";
+  kind: "outputProgress" | "targetStart" | "stage" | "targetFinish";
+  totalBytes: number;
 }
