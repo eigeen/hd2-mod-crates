@@ -11,6 +11,7 @@
     "web:wasm": "bun run --cwd crates/web_ui wasm",
     "ui:typecheck": "bun run --cwd crates/migrator_ui typecheck",
     "ui:test": "bun test crates/migrator_ui/tests crates/web_ui/tests",
-    "desktop:build": "bun run --cwd crates/desktop desktop build"
+    "desktop:build": "bun run --cwd crates/desktop desktop build",
+    "desktop:info": "bun run --cwd crates/desktop exe:info"
   }
 }

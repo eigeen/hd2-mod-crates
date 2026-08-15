@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "bunx --bun vite",
     "build": "bunx --bun tsc && bunx --bun vite build",
+    "exe:info": "bun run scripts/exe-info.ts",
     "preview": "bunx --bun vite preview",
     "smoke": "bun run scripts/runtime-smoke.ts",
     "desktop": "tauri"

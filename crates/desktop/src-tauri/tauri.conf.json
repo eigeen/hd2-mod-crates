@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "HD2 Mod Tools Desktop",
-  "version": "0.1.0",
   "identifier": "dev.hd2modtools.desktop",
   "build": {
     "beforeDevCommand": "bun run dev",

@@ -21,6 +21,7 @@ From this directory:
 bun run build
 bun run desktop build
 bun run smoke
+bun run exe:info
 ```
 
 `bun run desktop build` generates the packaged release executable without an
@@ -29,6 +30,8 @@ launches that executable, verifies the rendered
 WebView, native IPC against the real-data fixture, and single-instance behavior,
 then closes the process it started. Run `bun run desktop build` first; a plain
 `cargo build --release` keeps Tauri's development URL and is not a packaged app.
+`bun run exe:info` verifies the shared version and prints the EXE revision, size,
+and SHA-256 checksum.
 
 From the workspace root:
 

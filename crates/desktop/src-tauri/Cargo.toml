@@ -1,6 +1,6 @@
 [package]
 name = "hd2_migrator_desktop"
-version = "0.1.0"
+version.workspace = true
 description = "Native desktop application for HD2 Mod Tools"
 edition = "2024"
 license.workspace = true
