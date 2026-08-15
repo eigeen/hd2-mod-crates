@@ -2,9 +2,10 @@
 
 use hd2_migrator_io::io::NativeDataSource;
 use hd2_migrator_io::web::{
-    PatchBytes, UnmatchedUnitPolicy, VariantMigrationCallbacks, WebMigrationMapping,
-    WebMigrationVariant, WebOutputFile, WebUnifiedMigrateOptions, inspect_equipment_with_source,
-    list_equipment_options, migrate_variants_to_sink,
+    ParallelVariantPatchCallbacks, PatchBytes, UnmatchedUnitPolicy, VariantMigrationCallbacks,
+    VariantPatchOutput, WebMigrationMapping, WebMigrationVariant, WebOutputFile,
+    WebUnifiedMigrateOptions, inspect_equipment_with_source, list_equipment_options,
+    migrate_variants_to_patch_sink_parallel, migrate_variants_to_sink,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -33,6 +34,33 @@ fn streams_twenty_large_patch_variants_without_retaining_outputs() {
 
     assert_eq!(summary.migrated_count, variant_count);
     assert_eq!(output_paths.len(), variant_count * 3);
+    assert!(output_bytes > 0);
+}
+
+#[test]
+#[ignore = "requires HD2_TEST_DATA_DIR or a local Helldivers 2 install"]
+fn computes_twenty_large_patch_variants_with_rayon() {
+    let data_dir = game_data_dir();
+    let source = NativeDataSource::new(&data_dir);
+    let patch = load_large_fixture();
+    let variant_count = requested_variant_count();
+    let options = pollster::block_on(migration_options(&patch, &source, variant_count));
+    let mut output_bytes = 0usize;
+    let mut output_count = 0usize;
+
+    let callbacks = ParallelVariantPatchCallbacks::new(None, |mut output: VariantPatchOutput| {
+        let (toc, gpu, stream) = output.patch.serialize();
+        output_bytes += toc.len() + gpu.len() + stream.len();
+        output_count += 1;
+        Ok(())
+    });
+    let summary = pollster::block_on(migrate_variants_to_patch_sink_parallel(
+        patch, options, &source, callbacks,
+    ))
+    .expect("migrate Rayon variants");
+
+    assert_eq!(summary.migrated_count, variant_count);
+    assert_eq!(output_count, variant_count);
     assert!(output_bytes > 0);
 }
 

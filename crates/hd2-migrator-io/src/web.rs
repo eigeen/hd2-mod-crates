@@ -23,6 +23,10 @@ pub use repatch::{
     MissingUnitPolicy, UnitRepatchOptions, UnitRepatchPlan, UnitRepatchResult, UnitRepatchSummary,
     repatch_units, repatch_units_plan_with_progress, repatch_units_with_progress,
 };
+#[cfg(not(target_family = "wasm"))]
+pub use unified_migration::{
+    ParallelVariantPatchCallbacks, migrate_variants_to_patch_sink_parallel,
+};
 pub use unified_migration::{
     VariantMigrationCallbacks, VariantPatchCallbacks, VariantPatchOutput, WebMigrationVariant,
     WebUnifiedMigrateOptions, migrate_variants_to_patch_sink, migrate_variants_to_sink,

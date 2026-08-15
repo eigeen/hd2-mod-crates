@@ -12,9 +12,13 @@ use crate::web::migration::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+#[cfg(not(target_family = "wasm"))]
+mod parallel;
 mod prepared;
 mod unit_plan;
 
+#[cfg(not(target_family = "wasm"))]
+pub use parallel::{ParallelVariantPatchCallbacks, migrate_variants_to_patch_sink_parallel};
 use prepared::MigrationExecutor;
 use unit_plan::UnitMappingEdge;
 
@@ -174,20 +178,61 @@ async fn migrate_variant<S: DataSource + ?Sized>(
     if variant.mappings.len() == 1 {
         return migrate_single_mapping_variant(context, variant, unit_plan).await;
     }
-    let mut builder = VariantPatchBuilder::new(context.original);
-    let mut report = empty_report(variant);
-    report.unmatched_unit_policy = context.unmatched_unit_policy;
+    let mut assembly =
+        VariantAssembly::new(context.original, variant, context.unmatched_unit_policy);
     for (mapping, authoritative_edges) in variant.mappings.iter().zip(&unit_plan.mapping_edges) {
-        let mut result = migrate_mapping(context, mapping).await?;
-        builder.merge_mapping(context.original, mapping, authoritative_edges, &mut result)?;
-        merge_report_totals(&mut report, result.report);
+        let result = migrate_mapping(context, mapping).await?;
+        assembly.merge(mapping, authoritative_edges, result)?;
     }
-    report.warnings =
-        combined_variant_warnings(&builder, context.original, context.unmatched_unit_policy);
-    report.unmatched_units = builder.unconverted_original_units(context.original).len();
-    report.mappings = variant.mappings.clone();
-    let patch = builder.finish(context.original, context.unmatched_unit_policy);
-    Ok(VariantResult { patch, report })
+    Ok(assembly.finish())
+}
+
+struct VariantAssembly<'a> {
+    builder: VariantPatchBuilder,
+    original: &'a StreamToc,
+    policy: UnmatchedUnitPolicy,
+    report: WebMigrationReportRow,
+    variant: &'a WebMigrationVariant,
+}
+
+impl<'a> VariantAssembly<'a> {
+    fn new(
+        original: &'a StreamToc,
+        variant: &'a WebMigrationVariant,
+        policy: UnmatchedUnitPolicy,
+    ) -> Self {
+        let mut report = empty_report(variant);
+        report.unmatched_unit_policy = policy;
+        Self {
+            builder: VariantPatchBuilder::new(original),
+            original,
+            policy,
+            report,
+            variant,
+        }
+    }
+
+    fn merge(
+        &mut self,
+        mapping: &WebMigrationMapping,
+        mapping_edges: &[UnitMappingEdge],
+        mut result: mode_a_web::WebTargetResult,
+    ) -> crate::Result<()> {
+        self.builder
+            .merge_mapping(self.original, mapping, mapping_edges, &mut result)?;
+        merge_report_totals(&mut self.report, result.report);
+        Ok(())
+    }
+
+    fn finish(mut self) -> VariantResult {
+        self.report.warnings = combined_variant_warnings(&self.builder, self.original, self.policy);
+        self.report.unmatched_units = self.builder.unconverted_original_units(self.original).len();
+        self.report.mappings = self.variant.mappings.clone();
+        VariantResult {
+            patch: self.builder.finish(self.original, self.policy),
+            report: self.report,
+        }
+    }
 }
 
 async fn migrate_single_mapping_variant<S: DataSource + ?Sized>(
@@ -201,15 +246,44 @@ async fn migrate_single_mapping_variant<S: DataSource + ?Sized>(
     let [mapping_edges] = unit_plan.mapping_edges.as_slice() else {
         eyre::bail!("single-mapping migration received multiple Unit plans");
     };
-    let mut result = migrate_mapping(context, mapping).await?;
+    let result = migrate_mapping(context, mapping).await?;
+    assemble_single_mapping(
+        SingleMappingAssembly {
+            mapping,
+            mapping_edges,
+            original: context.original,
+            policy: context.unmatched_unit_policy,
+            variant,
+        },
+        result,
+    )
+}
+
+struct SingleMappingAssembly<'a> {
+    mapping: &'a WebMigrationMapping,
+    mapping_edges: &'a [UnitMappingEdge],
+    original: &'a StreamToc,
+    policy: UnmatchedUnitPolicy,
+    variant: &'a WebMigrationVariant,
+}
+
+fn assemble_single_mapping(
+    context: SingleMappingAssembly<'_>,
+    mut result: mode_a_web::WebTargetResult,
+) -> crate::Result<VariantResult> {
     let mut builder = VariantPatchBuilder::new(context.original);
-    builder.merge_mapping(context.original, mapping, mapping_edges, &mut result)?;
-    let mut report = empty_report(variant);
-    report.unmatched_unit_policy = context.unmatched_unit_policy;
+    builder.merge_mapping(
+        context.original,
+        context.mapping,
+        context.mapping_edges,
+        &mut result,
+    )?;
+    let mut report = empty_report(context.variant);
+    report.unmatched_unit_policy = context.policy;
     merge_report(&mut report, result.report);
     report.unmatched_units = builder.unconverted_original_units(context.original).len();
-    report.mappings = variant.mappings.clone();
-    let patch = builder.finish(context.original, context.unmatched_unit_policy);
+    report.mappings = context.variant.mappings.clone();
+    let patch = builder.finish(context.original, context.policy);
     Ok(VariantResult { patch, report })
 }
 

@@ -10,8 +10,9 @@ use crate::command_error::CommandError;
 use crate::task::TaskRegistry;
 use hd2_migrator_io::io::NativeDataSource;
 use hd2_migrator_io::web::{
-    self, UnitRepatchOptions, VariantPatchCallbacks, VariantPatchOutput, WebEquipmentInspection,
-    WebEquipmentOption, WebMigrationSummary, WebProgress, WebUnifiedMigrateOptions,
+    self, ParallelVariantPatchCallbacks, UnitRepatchOptions, VariantPatchOutput,
+    WebEquipmentInspection, WebEquipmentOption, WebMigrationSummary, WebProgress,
+    WebUnifiedMigrateOptions,
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -164,19 +165,20 @@ async fn migrate_equipment_blocking(
     let patch = load_patch(&request.patch_paths)?;
     let source = NativeDataSource::new(request.data_dir);
     let mut zip = create_zip(&request.output_path)?;
-    let web_progress = progress.map(|value| value as &dyn WebProgress);
-    let callbacks = VariantPatchCallbacks::new(web_progress, |mut output: VariantPatchOutput| {
-        write_patch_to_zip(
-            &mut zip,
-            &mut output.patch,
-            PatchZipContext {
-                directory: &output.directory,
-                progress: progress.map(|value| value as &dyn output::OutputProgress),
-                suffix: &output.suffix,
-            },
-        )
-    });
-    let summary = web::migrate_variants_to_patch_sink(
+    let parallel_progress = progress.map(|value| value as &(dyn WebProgress + Sync));
+    let callbacks =
+        ParallelVariantPatchCallbacks::new(parallel_progress, |mut output: VariantPatchOutput| {
+            write_patch_to_zip(
+                &mut zip,
+                &mut output.patch,
+                PatchZipContext {
+                    directory: &output.directory,
+                    progress: progress.map(|value| value as &dyn output::OutputProgress),
+                    suffix: &output.suffix,
+                },
+            )
+        });
+    let summary = web::migrate_variants_to_patch_sink_parallel(
         patch.into_bytes(),
         request.options,
         &source,

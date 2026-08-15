@@ -126,6 +126,12 @@ pub(crate) struct PreparedMigration {
     unmatched_unit_policy: UnmatchedUnitPolicy,
 }
 
+pub(crate) struct PreparedTarget {
+    archive: Arc<StreamToc>,
+    hash: String,
+    name: String,
+}
+
 /// Run the async cross-archive migration. Returns one [`WebTargetResult`]
 /// per requested target, in the requested order.
 pub async fn run<S: DataSource + ?Sized>(
@@ -218,15 +224,38 @@ impl PreparedMigration {
         target_hash: &str,
         progress: Option<&dyn WebProgress>,
     ) -> crate::Result<WebTargetResult> {
+        let target = self
+            .prepare_target(source, cache, target_hash, progress)
+            .await?;
+        self.compute_prepared_target(target, progress)
+    }
+
+    pub(crate) async fn prepare_target<S: DataSource + ?Sized>(
+        &self,
+        source: &S,
+        cache: &mut MigrationArchiveCache,
+        target_hash: &str,
+        progress: Option<&dyn WebProgress>,
+    ) -> crate::Result<PreparedTarget> {
         if target_hash == self.source_hash {
             eyre::bail!("source archive cannot also be a migration target");
         }
-        let target_name = required_archive_name(&self.by_hash, target_hash, "target")?;
-        notify_target_start(progress, &target_name, target_hash)?;
-        let loaded = self
-            .load_target(source, cache, target_hash, &target_name)
-            .await?;
-        let result = self.compute_target(loaded, target_name, progress)?;
+        let name = required_archive_name(&self.by_hash, target_hash, "target")?;
+        notify_target_start(progress, &name, target_hash)?;
+        let loaded = self.load_target(source, cache, target_hash, &name).await?;
+        Ok(PreparedTarget {
+            archive: loaded.archive,
+            hash: loaded.hash,
+            name,
+        })
+    }
+
+    pub(crate) fn compute_prepared_target(
+        &self,
+        target: PreparedTarget,
+        progress: Option<&dyn WebProgress>,
+    ) -> crate::Result<WebTargetResult> {
+        let result = self.compute_target(&target, progress)?;
         if let Some(progress) = progress {
             progress.target_finished(&result.target_name)?;
         }
@@ -253,20 +282,19 @@ impl PreparedMigration {
 
     fn compute_target(
         &self,
-        loaded: LoadedTarget,
-        target_name: String,
+        target: &PreparedTarget,
         progress: Option<&dyn WebProgress>,
     ) -> crate::Result<WebTargetResult> {
         let context = self.compute_context();
-        let stage = |value: &str| notify_stage(progress, &target_name, value);
+        let stage = |value: &str| notify_stage(progress, &target.name, value);
         let identity = TargetIdentity {
-            hash: &loaded.hash,
-            name: &target_name,
+            hash: &target.hash,
+            name: &target.name,
         };
-        let artifact = compute_cross_target(&context, &loaded.archive, &identity, stage)?;
+        let artifact = compute_cross_target(&context, &target.archive, &identity, stage)?;
         Ok(finish_target_result(
-            loaded.hash,
-            target_name,
+            target.hash.clone(),
+            target.name.clone(),
             artifact,
             &self.prepared,
         ))

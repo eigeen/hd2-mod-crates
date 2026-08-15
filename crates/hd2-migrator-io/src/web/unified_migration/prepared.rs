@@ -1,10 +1,11 @@
 use crate::archive::StreamToc;
 use crate::io::DataSource;
 use crate::migrator::mode_a_web::{
-    self, MigrationArchiveCache, PreparedMigration, PreparedMigrationOptions,
+    self, MigrationArchiveCache, PreparedMigration, PreparedMigrationOptions, PreparedTarget,
 };
 use crate::web::equipment::{EquipmentCategory, WebMigrationMapping};
 use crate::web::migration::UnmatchedUnitPolicy;
+use std::sync::Arc;
 
 pub(super) struct MigrationExecutor<'a, S: DataSource + ?Sized> {
     archive_cache: MigrationArchiveCache,
@@ -17,8 +18,31 @@ pub(super) struct MigrationExecutor<'a, S: DataSource + ?Sized> {
 
 struct PreparedEntry {
     category: EquipmentCategory,
-    migration: PreparedMigration,
+    migration: Arc<PreparedMigration>,
     source_hash: String,
+}
+
+pub(super) struct PreparedWork {
+    migration: Arc<PreparedMigration>,
+    target: PreparedTarget,
+}
+
+impl PreparedWork {
+    #[cfg(not(target_family = "wasm"))]
+    pub(super) fn compute(
+        self,
+        progress: Option<&(dyn mode_a_web::WebProgress + Sync)>,
+    ) -> crate::Result<mode_a_web::WebTargetResult> {
+        self.migration
+            .compute_prepared_target(self.target, progress.map(as_web_progress))
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+pub(super) fn as_web_progress(
+    progress: &(dyn mode_a_web::WebProgress + Sync),
+) -> &dyn mode_a_web::WebProgress {
+    progress
 }
 
 impl<'a, S: DataSource + ?Sized> MigrationExecutor<'a, S> {
@@ -42,16 +66,37 @@ impl<'a, S: DataSource + ?Sized> MigrationExecutor<'a, S> {
         &mut self,
         mapping: &WebMigrationMapping,
     ) -> crate::Result<mode_a_web::WebTargetResult> {
+        let work = self.prepare_work(mapping, self.progress).await?;
+        work.migration
+            .compute_prepared_target(work.target, self.progress)
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    pub(super) async fn prepare_parallel_work(
+        &mut self,
+        mapping: &WebMigrationMapping,
+        progress: Option<&(dyn mode_a_web::WebProgress + Sync)>,
+    ) -> crate::Result<PreparedWork> {
+        self.prepare_work(mapping, progress.map(as_web_progress))
+            .await
+    }
+
+    async fn prepare_work(
+        &mut self,
+        mapping: &WebMigrationMapping,
+        progress: Option<&dyn mode_a_web::WebProgress>,
+    ) -> crate::Result<PreparedWork> {
         let prepared_index = self.prepared_index(mapping).await?;
-        let prepared = &self.prepared[prepared_index].migration;
-        prepared
-            .migrate_target(
+        let migration = Arc::clone(&self.prepared[prepared_index].migration);
+        let target = migration
+            .prepare_target(
                 self.source,
                 &mut self.archive_cache,
                 &mapping.target_hash,
-                self.progress,
+                progress,
             )
-            .await
+            .await?;
+        Ok(PreparedWork { migration, target })
     }
 
     async fn prepared_index(&mut self, mapping: &WebMigrationMapping) -> crate::Result<usize> {
@@ -72,7 +117,7 @@ impl<'a, S: DataSource + ?Sized> MigrationExecutor<'a, S> {
         .await?;
         self.prepared.push(PreparedEntry {
             category: mapping.category,
-            migration,
+            migration: Arc::new(migration),
             source_hash: mapping.source_hash.clone(),
         });
         Ok(self.prepared.len() - 1)
