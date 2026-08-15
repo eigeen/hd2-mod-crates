@@ -123,11 +123,18 @@ async function evaluateSmokeChecks(client: CdpClient): Promise<unknown> {
         request: { paths: [${JSON.stringify(fixture)}], dataDir: ${JSON.stringify(dataDir)} }
       });
       await Promise.all([...document.images].map((image) => image.decode().catch(() => undefined)));
+      const shell = document.querySelector("[data-desktop-shell]");
+      const shellBounds = shell?.getBoundingClientRect();
       return {
         bodyHasAppTitle: document.body.innerText.includes("HD2 Mod"),
         equipmentCount: equipment.length,
         imagesLoaded: [...document.images].every((image) => image.complete && image.naturalWidth > 0),
         patchName: inspection.patch.name,
+        shellFillsViewport: Boolean(shellBounds)
+          && Math.abs(shellBounds.left) < 1
+          && Math.abs(shellBounds.top) < 1
+          && Math.abs(shellBounds.width - innerWidth) < 1
+          && shellBounds.height >= innerHeight,
         sourceCount: inspection.inspection.sources.length,
         styleSheetCount: document.styleSheets.length,
         title: document.title
@@ -149,6 +156,7 @@ function assertSmokeResult(value: unknown): asserts value is Record<string, unkn
   if (!result.bodyHasAppTitle) throw new Error("Application UI did not render");
   if (typeof result.equipmentCount !== "number" || result.equipmentCount === 0) throw new Error("Equipment IPC returned no data");
   if (!result.imagesLoaded) throw new Error("CSP blocked an application image");
+  if (!result.shellFillsViewport) throw new Error("Desktop application shell does not fill the WebView");
   if (typeof result.sourceCount !== "number" || result.sourceCount === 0) throw new Error("Fixture inspection found no sources");
   if (typeof result.styleSheetCount !== "number" || result.styleSheetCount === 0) throw new Error("CSP blocked application styles");
 }

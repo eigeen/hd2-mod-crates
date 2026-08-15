@@ -255,7 +255,7 @@ function App() {
   }, [busy]);
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-hd2-bg">
       <div className="fixed inset-0 z-0 bg-center bg-cover" style={{ backgroundImage: `url(${backgroundUrl})`, filter: "brightness(0.4)" }} />
       <Toaster position="top-center" theme="dark" />
       <ResultReportDialog
@@ -264,9 +264,9 @@ function App() {
         onRevealOutput={(output) => void revealItemInDir(output).catch((error) => showError(error, t))}
         report={reportHistory.activeReport}
       />
-      <div className="relative z-[1]">
-        <main className="mx-auto w-full max-w-[56rem] px-4 py-6 min-[51.25rem]:px-6 min-[51.25rem]:py-10">
-          <div className="overflow-hidden border-2 border-hd2-border bg-black/60">
+      <div className="relative z-[1] min-h-screen">
+        <main className="min-h-screen w-full">
+          <div className="min-h-screen overflow-hidden bg-black/60" data-desktop-shell>
             <Header
               onClearReports={reportHistory.clearHistory}
               onOpenReport={reportHistory.openReport}
