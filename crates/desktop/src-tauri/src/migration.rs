@@ -3,6 +3,8 @@ mod patch;
 
 use self::output::{create_zip, finish_zip, write_zip_entry};
 use self::patch::{LoadedPatch, PatchDescriptor, load_patch};
+use crate::command_error::CommandError;
+use crate::task::TaskRegistry;
 use hd2_migrator_io::io::NativeDataSource;
 use hd2_migrator_io::web::{
     self, UnitRepatchOptions, VariantMigrationCallbacks, WebEquipmentInspection,
@@ -10,7 +12,10 @@ use hd2_migrator_io::web::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Emitter};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::State;
+use tauri::ipc::Channel;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -62,35 +67,66 @@ enum ProgressKind {
 }
 
 #[tauri::command]
-pub fn load_equipment_options() -> Result<Vec<WebEquipmentOption>, String> {
-    web::list_equipment_options().map_err(display_error)
+pub fn load_equipment_options() -> Result<Vec<WebEquipmentOption>, CommandError> {
+    web::list_equipment_options()
+        .map_err(|error| CommandError::from_display("equipment.loadFailed", error))
 }
 
 #[tauri::command]
-pub async fn inspect_patch(request: InspectPatchRequest) -> Result<InspectPatchResult, String> {
+pub async fn inspect_patch(
+    request: InspectPatchRequest,
+) -> Result<InspectPatchResult, CommandError> {
     tauri::async_runtime::spawn_blocking(move || inspect_patch_blocking(request))
         .await
-        .map_err(|error| format!("Patch inspection task failed: {error}"))?
+        .map_err(|error| CommandError::from_display("task.joinFailed", error))?
+        .map_err(|error| CommandError::new("patch.inspectFailed", error))
 }
 
 #[tauri::command]
 pub async fn migrate_equipment(
     request: MigrateRequest,
-    app: AppHandle,
-) -> Result<WebMigrationSummary, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let progress = DesktopProgress::new(app);
+    task_id: String,
+    on_progress: Channel<MigrationProgressEvent>,
+    tasks: State<'_, TaskRegistry>,
+) -> Result<WebMigrationSummary, CommandError> {
+    let lease = tasks.register(task_id)?;
+    let cancellation = lease.cancellation();
+    let task_cancellation = Arc::clone(&cancellation);
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let _lease = lease;
+        let progress = DesktopProgress::new(on_progress, task_cancellation);
         pollster::block_on(migrate_equipment_blocking(request, Some(&progress)))
     })
     .await
-    .map_err(|error| format!("Migration task failed: {error}"))?
+    .map_err(|error| CommandError::from_display("task.joinFailed", error))?;
+    task_result(result, &cancellation, "migration.failed")
 }
 
 #[tauri::command]
-pub async fn repatch_mod(request: RepatchRequest) -> Result<web::UnitRepatchSummary, String> {
-    tauri::async_runtime::spawn_blocking(move || pollster::block_on(repatch_mod_blocking(request)))
-        .await
-        .map_err(|error| format!("Repatch task failed: {error}"))?
+pub async fn repatch_mod(
+    request: RepatchRequest,
+    task_id: String,
+    on_progress: Channel<MigrationProgressEvent>,
+    tasks: State<'_, TaskRegistry>,
+) -> Result<web::UnitRepatchSummary, CommandError> {
+    let lease = tasks.register(task_id)?;
+    let cancellation = lease.cancellation();
+    let task_cancellation = Arc::clone(&cancellation);
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let _lease = lease;
+        let progress = DesktopProgress::new(on_progress, task_cancellation);
+        let result = pollster::block_on(repatch_mod_blocking(request, Some(&progress)));
+        progress.ensure_active().map_err(display_error)?;
+        result
+    })
+    .await
+    .map_err(|error| CommandError::from_display("task.joinFailed", error))?;
+    task_result(result, &cancellation, "repatch.failed")
+}
+
+#[tauri::command]
+pub fn cancel_task(task_id: String, tasks: State<'_, TaskRegistry>) -> bool {
+    tasks.cancel(&task_id)
 }
 
 fn inspect_patch_blocking(request: InspectPatchRequest) -> Result<InspectPatchResult, String> {
@@ -135,14 +171,18 @@ async fn migrate_equipment_blocking(
     Ok(summary)
 }
 
-async fn repatch_mod_blocking(request: RepatchRequest) -> Result<web::UnitRepatchSummary, String> {
+async fn repatch_mod_blocking(
+    request: RepatchRequest,
+    progress: Option<&dyn WebProgress>,
+) -> Result<web::UnitRepatchSummary, String> {
     validate_output_request(&request.data_dir, &request.output_path)?;
     let patch = load_patch(&request.patch_paths)?;
-    let result = web::repatch_units(
+    let result = web::repatch_units_with_progress(
         patch.name(),
         &patch.bytes().toc,
         request.options,
         &NativeDataSource::new(request.data_dir),
+        progress,
     )
     .await
     .map_err(display_error)?;
@@ -188,41 +228,90 @@ fn validate_output_request(data_dir: &Path, output_path: &Path) -> Result<(), St
 }
 
 struct DesktopProgress {
-    app: AppHandle,
+    channel: Channel<MigrationProgressEvent>,
+    cancellation: Arc<AtomicBool>,
 }
 
 impl DesktopProgress {
-    fn new(app: AppHandle) -> Self {
-        Self { app }
+    fn new(channel: Channel<MigrationProgressEvent>, cancellation: Arc<AtomicBool>) -> Self {
+        Self {
+            channel,
+            cancellation,
+        }
     }
 
-    fn emit(&self, kind: ProgressKind, name: &str, hash: &str, stage: &str) {
+    fn emit(
+        &self,
+        kind: ProgressKind,
+        name: &str,
+        hash: &str,
+        stage: &str,
+    ) -> hd2_migrator_io::Result<()> {
+        self.ensure_active()?;
         let event = MigrationProgressEvent {
             target_name: name.to_owned(),
             target_hash: hash.to_owned(),
             stage: stage.to_owned(),
             kind,
         };
-        let _ = self.app.emit("migration://progress", event);
+        self.channel
+            .send(event)
+            .map_err(|error| eyre::eyre!("send task progress: {error}"))
+    }
+
+    fn ensure_active(&self) -> hd2_migrator_io::Result<()> {
+        if self.cancellation.load(Ordering::Acquire) {
+            eyre::bail!("task cancelled");
+        }
+        Ok(())
     }
 }
 
 impl WebProgress for DesktopProgress {
-    fn target_started(&self, name: &str, hash: &str) {
-        self.emit(ProgressKind::TargetStart, name, hash, "");
+    fn target_started(&self, name: &str, hash: &str) -> hd2_migrator_io::Result<()> {
+        self.emit(ProgressKind::TargetStart, name, hash, "")
     }
 
-    fn stage(&self, name: &str, stage: &str) {
-        self.emit(ProgressKind::Stage, name, "", stage);
+    fn stage(&self, name: &str, stage: &str) -> hd2_migrator_io::Result<()> {
+        self.emit(ProgressKind::Stage, name, "", stage)
     }
 
-    fn target_finished(&self, name: &str) {
-        self.emit(ProgressKind::TargetFinish, name, "", "");
+    fn target_finished(&self, name: &str) -> hd2_migrator_io::Result<()> {
+        self.emit(ProgressKind::TargetFinish, name, "", "")
     }
+}
+
+fn task_result<T>(
+    result: Result<T, String>,
+    cancellation: &AtomicBool,
+    failure_code: &'static str,
+) -> Result<T, CommandError> {
+    if cancellation.load(Ordering::Acquire) {
+        return Err(CommandError::new("task.cancelled", "Task was cancelled"));
+    }
+    result.map_err(|error| CommandError::new(failure_code, error))
 }
 
 fn display_error(error: impl std::fmt::Display) -> String {
     error.to_string()
+}
+
+#[cfg(test)]
+mod task_result_tests {
+    use super::*;
+
+    #[test]
+    fn cancellation_code_takes_priority_over_worker_errors() {
+        let cancellation = AtomicBool::new(true);
+        let error = task_result::<()>(
+            Err("worker stopped".to_owned()),
+            &cancellation,
+            "migration.failed",
+        )
+        .expect_err("cancelled task");
+
+        assert_eq!(error.code, "task.cancelled");
+    }
 }
 
 #[cfg(test)]
@@ -335,7 +424,8 @@ mod real_data_tests {
             options: UnitRepatchOptions::default(),
         };
 
-        let summary = pollster::block_on(repatch_mod_blocking(request)).expect("repatch real mod");
+        let summary =
+            pollster::block_on(repatch_mod_blocking(request, None)).expect("repatch real mod");
 
         assert!(summary.unit_count > 0);
         assert!(output_path.is_file());

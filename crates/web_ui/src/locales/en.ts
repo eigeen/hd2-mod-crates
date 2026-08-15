@@ -108,4 +108,7 @@ export const en = {
   "performance.body": "Separate output creates a complete Patch for every target, so its selection limit depends on the original Patch size. Bundle as one Patch usually stores shared textures, Units, and other resources once, producing a smaller result, though merging is still constrained by browser memory. One-Patch output is forced when multiple sources have mappings to avoid Cartesian-product outputs.",
   "dialog.cancel": "Cancel",
   "dialog.continue": "Continue",
+  "task.cancel": "Cancel task",
+  "task.cancelling": "Cancelling…",
+  "task.cancelled": "Task cancelled",
 } satisfies TranslationResources;

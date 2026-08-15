@@ -106,6 +106,9 @@ export const translationKeys = [
   "performance.body",
   "dialog.cancel",
   "dialog.continue",
+  "task.cancel",
+  "task.cancelling",
+  "task.cancelled",
 ] as const;
 
 export type TranslationKey = (typeof translationKeys)[number];

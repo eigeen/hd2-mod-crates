@@ -111,25 +111,17 @@ pub async fn inspect_equipment_with_source(
 /// `onTargetStart`/`onStage`/`onTargetFinish` callbacks.
 #[wasm_bindgen]
 pub async fn migrate_cross_archive(
-    patch_name: String,
-    toc: Vec<u8>,
-    gpu: Vec<u8>,
-    stream: Vec<u8>,
-    options: JsValue,
+    patch: JsValue,
+    request: JsValue,
     data_source: JsValue,
     progress: JsValue,
-    category: Option<String>,
 ) -> WasmResult<JsValue> {
-    let category = category.unwrap_or_else(|| DEFAULT_CATEGORY.to_string());
-    let request: WebMigrateOptions = parse_options(options)?;
+    let category =
+        optional_string(&request, "category")?.unwrap_or_else(|| DEFAULT_CATEGORY.to_string());
+    let request: WebMigrateOptions = parse_options(property(&request, "options")?)?;
     let source = JsDataSource::from_js(data_source)?;
     let progress_sink = JsProgress::from_js(progress)?;
-    let patch = PatchBytes {
-        name: patch_name,
-        toc,
-        gpu,
-        stream,
-    };
+    let patch = patch_bytes_from_js(&patch)?;
     let bundle =
         web::migrate_many_with_source(&category, patch, request, &source, Some(&progress_sink))
             .await
@@ -139,10 +131,7 @@ pub async fn migrate_cross_archive(
 
 #[wasm_bindgen]
 pub async fn migrate_equipment_variants(
-    patch_name: String,
-    toc: Vec<u8>,
-    gpu: Vec<u8>,
-    stream: Vec<u8>,
+    patch: JsValue,
     options: JsValue,
     data_source: JsValue,
     callbacks: JsValue,
@@ -152,12 +141,7 @@ pub async fn migrate_equipment_variants(
     let source = JsDataSource::from_js(data_source)?;
     let progress_sink = JsProgress::from_js(callbacks.clone())?;
     let output_sink = JsOutputSink::from_js(callbacks)?;
-    let patch = PatchBytes {
-        name: patch_name,
-        toc,
-        gpu,
-        stream,
-    };
+    let patch = patch_bytes_from_js(&patch)?;
     let callbacks = web::VariantMigrationCallbacks::new(Some(&progress_sink), |file| {
         output_sink
             .write(file)
@@ -175,17 +159,21 @@ pub async fn migrate_equipment_variants(
 /// GPU/stream sidecars and packages them with the returned TOC.
 #[wasm_bindgen]
 pub async fn repatch_units(
-    patch_name: String,
-    toc: Vec<u8>,
+    patch: JsValue,
     options: JsValue,
     data_source: JsValue,
+    callbacks: JsValue,
 ) -> WasmResult<JsValue> {
     let options: web::UnitRepatchOptions =
         serde_wasm_bindgen::from_value(options).map_err(js_error)?;
     let source = JsDataSource::from_js(data_source)?;
-    let output = web::repatch_units(&patch_name, &toc, options, &source)
-        .await
-        .map_err(js_error)?;
+    let progress = JsProgress::from_js(callbacks)?;
+    let patch_name = required_string(&patch, "name")?;
+    let toc = required_bytes(&patch, "toc")?;
+    let output =
+        web::repatch_units_with_progress(&patch_name, &toc, options, &source, Some(&progress))
+            .await
+            .map_err(js_error)?;
     let result = Object::new();
     let toc = Uint8Array::from(output.toc.as_slice());
     Reflect::set(&result, &JsValue::from_str("tocBytes"), &toc)?;
@@ -195,6 +183,44 @@ pub async fn repatch_units(
         &serde_wasm_bindgen::to_value(&output.summary).map_err(js_error)?,
     )?;
     Ok(result.into())
+}
+
+fn patch_bytes_from_js(patch: &JsValue) -> WasmResult<PatchBytes> {
+    Ok(PatchBytes {
+        name: required_string(patch, "name")?,
+        toc: required_bytes(patch, "toc")?,
+        gpu: required_bytes(patch, "gpu")?,
+        stream: required_bytes(patch, "stream")?,
+    })
+}
+
+fn required_string(value: &JsValue, key: &str) -> WasmResult<String> {
+    property(value, key)?
+        .as_string()
+        .ok_or_else(|| js_error(format!("patch.{key} must be a string")))
+}
+
+fn optional_string(value: &JsValue, key: &str) -> WasmResult<Option<String>> {
+    let value = property(value, key)?;
+    if value.is_null() || value.is_undefined() {
+        return Ok(None);
+    }
+    value
+        .as_string()
+        .map(Some)
+        .ok_or_else(|| js_error(format!("{key} must be a string")))
+}
+
+fn required_bytes(value: &JsValue, key: &str) -> WasmResult<Vec<u8>> {
+    let bytes = property(value, key)?;
+    if !bytes.is_instance_of::<Uint8Array>() {
+        return Err(js_error(format!("patch.{key} must be a Uint8Array")));
+    }
+    Ok(Uint8Array::new(&bytes).to_vec())
+}
+
+fn property(value: &JsValue, key: &str) -> WasmResult<JsValue> {
+    Reflect::get(value, &JsValue::from_str(key))
 }
 
 fn parse_options(value: JsValue) -> WasmResult<WebMigrateOptions> {

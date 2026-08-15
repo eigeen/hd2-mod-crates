@@ -40,19 +40,21 @@ declare module "./wasm/hd2_migrator_wasm/hd2_migrator_wasm.js" {
     category?: string,
   ): unknown;
   export function migrate_cross_archive(
-    patchName: string,
-    toc: Uint8Array,
-    gpu: Uint8Array,
-    stream: Uint8Array,
-    options: unknown,
+    patch: unknown,
+    request: { options: unknown; category?: string },
     dataSource: unknown,
     progress: unknown,
-    category?: string,
   ): Promise<unknown>;
   export function repatch_units(
-    patchName: string,
-    toc: Uint8Array,
+    patch: unknown,
     options: unknown,
     dataSource: unknown,
+    callbacks: unknown,
+  ): Promise<unknown>;
+  export function migrate_equipment_variants(
+    patch: unknown,
+    options: unknown,
+    dataSource: unknown,
+    callbacks: unknown,
   ): Promise<unknown>;
 }

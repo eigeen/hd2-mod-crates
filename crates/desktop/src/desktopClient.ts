@@ -1,5 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   EquipmentOption,
@@ -28,14 +27,6 @@ export function inspectPatch(paths: string[], dataDir: string | null): Promise<I
   return invoke("inspect_patch", { request: { paths, dataDir } });
 }
 
-export function migrateEquipment(request: MigrateRequest): Promise<MigrationSummary> {
-  return invoke("migrate_equipment", { request });
-}
-
-export function repatchMod(request: RepatchRequest): Promise<UnitRepatchSummary> {
-  return invoke("repatch_mod", { request });
-}
-
 export async function choosePatchPaths(): Promise<string[] | null> {
   const selected = await open({ multiple: true, title: "Choose patch files" });
   if (!selected) return null;
@@ -54,8 +45,37 @@ export function chooseOutputZip(defaultPath: string): Promise<string | null> {
   });
 }
 
-export function subscribeToMigrationProgress(
+export interface DesktopTask<T> {
+  id: string;
+  result: Promise<T>;
+  cancel: () => Promise<boolean>;
+}
+
+export function startMigration(
+  request: MigrateRequest,
   onProgress: (event: MigrationProgressEvent) => void,
-) {
-  return listen<MigrationProgressEvent>("migration://progress", ({ payload }) => onProgress(payload));
+): DesktopTask<MigrationSummary> {
+  return startTask("migrate_equipment", request, onProgress);
+}
+
+export function startRepatch(
+  request: RepatchRequest,
+  onProgress: (event: MigrationProgressEvent) => void,
+): DesktopTask<UnitRepatchSummary> {
+  return startTask("repatch_mod", request, onProgress);
+}
+
+function startTask<TRequest, TResult>(
+  command: string,
+  request: TRequest,
+  onProgress: (event: MigrationProgressEvent) => void,
+): DesktopTask<TResult> {
+  const id = crypto.randomUUID();
+  const channel = new Channel<MigrationProgressEvent>();
+  channel.onmessage = onProgress;
+  return {
+    id,
+    result: invoke<TResult>(command, { request, taskId: id, onProgress: channel }),
+    cancel: () => invoke<boolean>("cancel_task", { taskId: id }),
+  };
 }

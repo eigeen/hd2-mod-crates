@@ -21,6 +21,7 @@ pub use migration::{
 };
 pub use repatch::{
     MissingUnitPolicy, UnitRepatchOptions, UnitRepatchResult, UnitRepatchSummary, repatch_units,
+    repatch_units_with_progress,
 };
 pub use unified_migration::{
     VariantMigrationCallbacks, WebMigrationVariant, WebUnifiedMigrateOptions,

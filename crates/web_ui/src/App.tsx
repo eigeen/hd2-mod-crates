@@ -1,4 +1,5 @@
 import AccountTreeIcon from "@mui/icons-material/AccountTree";
+import CancelIcon from "@mui/icons-material/Cancel";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import GitHubIcon from "@mui/icons-material/GitHub";
 import { Button, CircularProgress, IconButton, Tab, Tabs, Tooltip } from "@mui/material";
@@ -33,6 +34,7 @@ import {
 } from "./MigratorPanels";
 import { UnitUpdaterPanel } from "./UnitUpdaterPanel";
 import { ToolIntro } from "./ToolIntro";
+import { normalizeTaskError, throwIfTaskCancelled } from "./taskError";
 import type {
   DetectedSource,
   EquipmentOption,
@@ -73,6 +75,7 @@ function App() {
   const [noPadding, setNoPadding] = useState(false);
   const [unmatchedUnitPolicy, setUnmatchedUnitPolicy] = useState<UnmatchedUnitPolicy>("keep");
   const [busy, setBusy] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [progressLabel, setProgressLabel] = useState("");
   const [warningOpen, setWarningOpen] = useState(false);
   const [multiConfirmed, setMultiConfirmed] = useState(false);
@@ -80,6 +83,31 @@ function App() {
   const [missingUnitPolicy, setMissingUnitPolicy] = useState<MissingUnitPolicy>("drop");
   const [faqOpen, setFaqOpen] = useState(false);
   const [faqAttention, setFaqAttention] = useState<TranslationKey | null>(null);
+  const activeTaskRef = useRef<AbortController | null>(null);
+
+  const runCancellableTask = useCallback(async (
+    task: (signal: AbortSignal) => Promise<void>,
+  ) => {
+    const controller = new AbortController();
+    activeTaskRef.current = controller;
+    setBusy(true);
+    try {
+      await task(controller.signal);
+    } catch (error) {
+      showTaskError(error, t);
+    } finally {
+      if (activeTaskRef.current === controller) activeTaskRef.current = null;
+      setCancelling(false);
+      setBusy(false);
+    }
+  }, [t]);
+
+  const cancelActiveTask = useCallback(() => {
+    if (!activeTaskRef.current || cancelling) return;
+    setCancelling(true);
+    setProgressLabel(t("task.cancelling"));
+    activeTaskRef.current.abort();
+  }, [cancelling, t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -255,19 +283,20 @@ function App() {
     if (!gameDir) return;
     const dataSource = new GameDataSource(gameDir.handle);
     setProgressLabel("");
-    await runTask(setBusy, async () => {
+    await runCancellableTask(async (signal) => {
       const summary = await migrateVariants({
         dataSource,
         noPadding,
         options: equipmentOptions,
         patch,
         setProgressLabel,
+        signal,
         t,
         unmatchedUnitPolicy,
         variants,
       });
       showMigrationReport(summary, t);
-    }, t);
+    });
     setProgressLabel("");
   }, [
     gameDir,
@@ -281,23 +310,31 @@ function App() {
     singlePatchMappingLimit,
     t,
     unmatchedUnitPolicy,
+    runCancellableTask,
   ]);
 
   const runUnitRepatch = useCallback(async () => {
     const patch = patchRef.current;
     if (!patch || !gameDir) return;
     setProgressLabel(t("repatch.progress"));
-    await runTask(setBusy, async () => {
+    await runCancellableTask(async (signal) => {
       const output = await repatchUnits(
         patch,
         { missingUnitPolicy },
         new GameDataSource(gameDir.handle),
+        {
+          onStage: (_name, stage) => {
+            throwIfTaskCancelled(signal);
+            setProgressLabel(`${t("repatch.progress")} · ${stage}`);
+          },
+        },
       );
+      throwIfTaskCancelled(signal);
       downloadRepatchedPatch(patch, output.tocBytes, "hd2-repatched-mod.zip");
       showUnitRepatchReport(output.summary, t);
-    }, t);
+    });
     setProgressLabel("");
-  }, [gameDir, missingUnitPolicy, t]);
+  }, [gameDir, missingUnitPolicy, runCancellableTask, t]);
 
   const runSelectedTool = toolMode === "migrate" ? runMigration : runUnitRepatch;
 
@@ -432,15 +469,27 @@ function App() {
                   {busy ? progressLabel : blockerHint}
                 </span>
               </div>
-              <Button
-                className="shrink-0"
-                disabled={!canRun || busy}
-                onClick={runSelectedTool}
-                startIcon={<PlayArrowIcon />}
-                variant="contained"
-              >
-                {toolMode === "migrate" ? t("app.run") : t("repatch.run")}
-              </Button>
+              {busy ? (
+                <Button
+                  className="shrink-0"
+                  disabled={cancelling}
+                  onClick={cancelActiveTask}
+                  startIcon={<CancelIcon />}
+                  variant="outlined"
+                >
+                  {cancelling ? t("task.cancelling") : t("task.cancel")}
+                </Button>
+              ) : (
+                <Button
+                  className="shrink-0"
+                  disabled={!canRun}
+                  onClick={runSelectedTool}
+                  startIcon={<PlayArrowIcon />}
+                  variant="contained"
+                >
+                  {toolMode === "migrate" ? t("app.run") : t("repatch.run")}
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -501,6 +550,7 @@ interface VariantMigrationRequest {
   options: EquipmentOption[];
   patch: PatchFiles;
   setProgressLabel: (label: string) => void;
+  signal: AbortSignal;
   t: Translate;
   unmatchedUnitPolicy: UnmatchedUnitPolicy;
   variants: MigrationVariant[];
@@ -519,9 +569,11 @@ async function migrateVariants(
       mappings,
       request.options,
       request.setProgressLabel,
+      request.signal,
       request.t,
     ),
   );
+  throwIfTaskCancelled(request.signal);
   downloadZip(
     result.zipBlob,
     migrationOutputFilename(request.patch, request.variants, request.options),
@@ -561,6 +613,7 @@ function migrationProgress(
   mappings: MigrationMapping[],
   options: EquipmentOption[],
   setProgressLabel: (label: string) => void,
+  signal: AbortSignal,
   t: Translate,
 ): MigrationProgressSink {
   let mappingIndex = 0;
@@ -573,9 +626,16 @@ function migrationProgress(
     return numberedTargetLabel(`${source} → ${target}`, mappingIndex, mappings.length);
   };
   return {
-    onTargetStart: () => setProgressLabel(t("app.progressMigrating", { name: label() })),
-    onStage: (_name, stage) => setProgressLabel(t("app.progressStage", { name: label(), stage })),
+    onTargetStart: () => {
+      throwIfTaskCancelled(signal);
+      setProgressLabel(t("app.progressMigrating", { name: label() }));
+    },
+    onStage: (_name, stage) => {
+      throwIfTaskCancelled(signal);
+      setProgressLabel(t("app.progressStage", { name: label(), stage }));
+    },
     onTargetFinish: () => {
+      throwIfTaskCancelled(signal);
       mappingIndex += 1;
       setProgressLabel("");
     },
@@ -638,18 +698,22 @@ async function runTask(
   try {
     await task();
   } catch (error) {
-    console.error("[hd2-migrator] task failed:", error);
-    toast.error(isWasmRuntimeTrapError(error) ? t("app.wasmRuntimeError") : errorMessage(error));
+    showTaskError(error, t);
   } finally {
     setBusy(false);
   }
 }
 
-function errorMessage(error: unknown) {
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message: unknown }).message);
+function showTaskError(error: unknown, t: Translate): void {
+  console.error("[hd2-migrator] task failed:", error);
+  const taskError = normalizeTaskError(error);
+  if (taskError.code === "task.cancelled") {
+    toast.info(t("task.cancelled"));
+    return;
   }
-  return String(error);
+  toast.error(isWasmRuntimeTrapError(error) || taskError.code === "wasm.runtime"
+    ? t("app.wasmRuntimeError")
+    : taskError.message);
 }
 
 function patchFileMessages(t: Translate) {

@@ -37,9 +37,9 @@ use std::collections::{HashMap, HashSet};
 /// Async progress callback. Mirrors `migrator::ProgressSink` but does not
 /// require `Sync` (the wasm impl wraps `js_sys::Function` which is `!Send`).
 pub trait WebProgress {
-    fn target_started(&self, target_name: &str, target_hash: &str);
-    fn stage(&self, target_name: &str, stage: &str);
-    fn target_finished(&self, target_name: &str);
+    fn target_started(&self, target_name: &str, target_hash: &str) -> crate::Result<()>;
+    fn stage(&self, target_name: &str, stage: &str) -> crate::Result<()>;
+    fn target_finished(&self, target_name: &str) -> crate::Result<()>;
 }
 
 /// Result for one migrated target. The caller assembles the output ZIP /
@@ -137,8 +137,8 @@ pub async fn run<S: DataSource + ?Sized>(
             .cloned()
             .ok_or_else(|| eyre::eyre!("target {target_hash} not in builtin index"))?;
         if let Some(p) = progress {
-            p.target_started(&target_name, target_hash);
-            p.stage(&target_name, "loading target");
+            p.target_started(&target_name, target_hash)?;
+            p.stage(&target_name, "loading target")?;
         }
         let load_context = ArchiveLoadContext {
             source,
@@ -147,10 +147,11 @@ pub async fn run<S: DataSource + ?Sized>(
         };
         let loaded =
             load_migration_target(&load_context, target_hash, &target_name, &mapping).await?;
-        let stage_callback = |stage: &str| {
+        let stage_callback = |stage: &str| -> crate::Result<()> {
             if let Some(p) = progress {
-                p.stage(&target_name, stage);
+                p.stage(&target_name, stage)?;
             }
+            Ok(())
         };
         let identity = TargetIdentity {
             hash: &loaded.hash,
@@ -161,7 +162,7 @@ pub async fn run<S: DataSource + ?Sized>(
         let resolved_hash = loaded.hash;
         let result = finish_target_result(resolved_hash, target_name, artifact, &prepared);
         if let Some(p) = progress {
-            p.target_finished(&result.target_name);
+            p.target_finished(&result.target_name)?;
         }
         results.push(result);
     }
@@ -454,7 +455,7 @@ struct TargetIdentity<'a> {
     name: &'a str,
 }
 
-fn compute_cross_target<F: Fn(&str)>(
+fn compute_cross_target<F: Fn(&str) -> crate::Result<()>>(
     context: &MigrationComputeContext<'_>,
     target: &StreamToc,
     identity: &TargetIdentity<'_>,
@@ -463,7 +464,7 @@ fn compute_cross_target<F: Fn(&str)>(
     match context.mapping {
         CategoryMapping::Armor(_) => compute_armor_target(context, target, identity, on_stage),
         CategoryMapping::Helmet(table) => {
-            on_stage("rewriting helmet Unit");
+            on_stage("rewriting helmet Unit")?;
             let inputs = HelmetMigrationInputs {
                 patch: context.patch,
                 source_name: context.source_name,
@@ -477,7 +478,7 @@ fn compute_cross_target<F: Fn(&str)>(
     }
 }
 
-fn compute_armor_target<F: Fn(&str)>(
+fn compute_armor_target<F: Fn(&str) -> crate::Result<()>>(
     context: &MigrationComputeContext<'_>,
     target: &StreamToc,
     identity: &TargetIdentity<'_>,

@@ -48,14 +48,14 @@ pub enum IncompleteUnitPolicy {
 /// All input archives must already be loaded into memory. `on_stage` is invoked
 /// at each major phase with a short label (e.g. "computing remap"); pass `|_| {}`
 /// to ignore progress.
-pub fn compute_migrated_target<F: Fn(&str)>(
+pub fn compute_migrated_target<F: Fn(&str) -> crate::Result<()>>(
     common: &CommonInputs<'_>,
     target: &StreamToc,
     target_hash: &str,
     target_name: &str,
     on_stage: F,
 ) -> crate::Result<TargetBuildArtifact> {
-    on_stage("computing remap");
+    on_stage("computing remap")?;
     let plan = super::build_remap(common.source, target);
     let mut remap: HashMap<u64, u64> = plan.remap.clone();
     let slot_remap: HashMap<u32, u32> = HashMap::new();
@@ -136,7 +136,7 @@ pub fn compute_migrated_target<F: Fn(&str)>(
         );
     }
 
-    on_stage("rewriting entries");
+    on_stage("rewriting entries")?;
 
     let source_units: HashMap<u64, &TocEntry> = common
         .source
@@ -183,7 +183,7 @@ pub fn compute_migrated_target<F: Fn(&str)>(
 
     let padded = if !extra_unit_file_ids.is_empty() {
         if let Some(template) = common.empty_unit_template {
-            on_stage("padding empty units");
+            on_stage("padding empty units")?;
             let extras = crate::padding::pad_patch(
                 &mut new_patch,
                 &extra_unit_file_ids,

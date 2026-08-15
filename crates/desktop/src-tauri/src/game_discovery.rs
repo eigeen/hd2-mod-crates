@@ -1,3 +1,4 @@
+use crate::command_error::CommandError;
 use serde::Serialize;
 use std::{
     collections::HashMap,
@@ -28,18 +29,19 @@ struct SteamAppManifest {
 
 /// Find the most likely Helldivers 2 `data` directory without blocking the UI.
 #[tauri::command]
-pub async fn detect_game_data_dir() -> Result<GameDataDiscovery, String> {
+pub async fn detect_game_data_dir() -> Result<GameDataDiscovery, CommandError> {
     tauri::async_runtime::spawn_blocking(discover_game_data_dir)
         .await
-        .map_err(|error| format!("Game directory search failed: {error}"))
+        .map_err(|error| CommandError::from_display("gameData.discoveryFailed", error))
 }
 
 /// Verify that a manually selected directory contains a supported HD2 data layout.
 #[tauri::command]
-pub async fn validate_game_data_dir(path: PathBuf) -> Result<(), String> {
+pub async fn validate_game_data_dir(path: PathBuf) -> Result<(), CommandError> {
     tauri::async_runtime::spawn_blocking(move || validate_game_data_dir_blocking(&path))
         .await
-        .map_err(|error| format!("Game directory validation failed: {error}"))?
+        .map_err(|error| CommandError::from_display("task.joinFailed", error))?
+        .map_err(|error| CommandError::new("gameData.invalid", error))
 }
 
 fn validate_game_data_dir_blocking(path: &Path) -> Result<(), String> {

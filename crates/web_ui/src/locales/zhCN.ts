@@ -108,4 +108,7 @@ export const zhCN = {
   "performance.body": "分别输出会为每个目标生成完整 Patch，因此会根据原 Patch 大小限制可选数量。开启“打包为单个 Patch”后，共用的贴图、Unit 等资源通常只保留一份，成品一般更小，但合并过程仍受浏览器内存限制。多个源都配置了映射时会强制开启单 Patch，以避免生成笛卡尔积数量的产物。",
   "dialog.cancel": "取消",
   "dialog.continue": "继续",
+  "task.cancel": "取消任务",
+  "task.cancelling": "正在取消…",
+  "task.cancelled": "任务已取消",
 } satisfies TranslationResources;

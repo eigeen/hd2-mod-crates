@@ -6,6 +6,7 @@ use crate::archive::toc_only::{
 };
 use crate::constants::{DSAR_MAGIC, UNIT_ID};
 use crate::io::{BundleSlicer, DataSource};
+use crate::migrator::mode_a_web::WebProgress;
 use crate::unit::repatch::{LatestUnitParts, RepatchOutcome, repatch_unit};
 use eyre::WrapErr;
 use serde::{Deserialize, Serialize};
@@ -50,13 +51,23 @@ pub async fn repatch_units<S: DataSource + ?Sized>(
     options: UnitRepatchOptions,
     source: &S,
 ) -> crate::Result<UnitRepatchResult> {
+    repatch_units_with_progress(patch_name, patch_toc, options, source, None).await
+}
+
+pub async fn repatch_units_with_progress<S: DataSource + ?Sized>(
+    patch_name: &str,
+    patch_toc: &[u8],
+    options: UnitRepatchOptions,
+    source: &S,
+    progress: Option<&dyn WebProgress>,
+) -> crate::Result<UnitRepatchResult> {
     let mut patch = TocOnlyPackage::parse(patch_toc).wrap_err("parse patch TOC")?;
     let wanted = patch_unit_ids(&patch);
     if wanted.is_empty() {
         return Ok(no_units_result(patch_toc));
     }
     let mut lookup = LatestUnitLookup::new(wanted, patch_name);
-    lookup.load(source).await?;
+    lookup.load(source, progress).await?;
     enforce_missing_policy(&lookup.missing, options.missing_unit_policy)?;
     let summary = apply_latest_units(&mut patch, lookup, options.missing_unit_policy);
     let toc = serialize_if_changed(&patch, patch_toc, &summary)?;
@@ -110,23 +121,32 @@ impl LatestUnitLookup {
         }
     }
 
-    async fn load<S: DataSource + ?Sized>(&mut self, source: &S) -> crate::Result<()> {
+    async fn load<S: DataSource + ?Sized>(
+        &mut self,
+        source: &S,
+        progress: Option<&dyn WebProgress>,
+    ) -> crate::Result<()> {
         if self.wanted.is_empty() {
             return Ok(());
         }
         if source.exists("bundles.nxa").await? {
-            self.load_bundled(source).await
+            self.load_bundled(source, progress).await
         } else {
-            self.load_legacy(source).await
+            self.load_legacy(source, progress).await
         }
     }
 
-    async fn load_legacy<S: DataSource + ?Sized>(&mut self, source: &S) -> crate::Result<()> {
+    async fn load_legacy<S: DataSource + ?Sized>(
+        &mut self,
+        source: &S,
+        progress: Option<&dyn WebProgress>,
+    ) -> crate::Result<()> {
         let packages = source
             .list_packages()
             .await
             .wrap_err("list game archives")?;
         for package in prioritize(packages, self.preferred_archive.as_deref()) {
+            notify_scan_progress(progress, &package)?;
             self.load_legacy_package(source, &package).await?;
             if self.missing.is_empty() {
                 break;
@@ -135,7 +155,11 @@ impl LatestUnitLookup {
         Ok(())
     }
 
-    async fn load_bundled<S: DataSource + ?Sized>(&mut self, source: &S) -> crate::Result<()> {
+    async fn load_bundled<S: DataSource + ?Sized>(
+        &mut self,
+        source: &S,
+        progress: Option<&dyn WebProgress>,
+    ) -> crate::Result<()> {
         let slicer = BundleSlicer::open(source).await?;
         let packages = slicer
             .packages
@@ -145,6 +169,7 @@ impl LatestUnitLookup {
             .into_iter()
             .collect();
         for package in prioritize(packages, self.preferred_archive.as_deref()) {
+            notify_scan_progress(progress, &package)?;
             let toc = slicer.load_package(source, &package).await?;
             self.load_package_bytes(&package, &toc);
             if self.missing.is_empty() {
@@ -227,6 +252,42 @@ impl LatestUnitLookup {
                     .push(format!("{package}/{:016x}: {error}", location.file_id)),
             }
         }
+    }
+}
+
+fn notify_scan_progress(progress: Option<&dyn WebProgress>, package: &str) -> crate::Result<()> {
+    let Some(progress) = progress else {
+        return Ok(());
+    };
+    progress.stage("", &format!("scanning {package}"))
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+
+    struct CancelledProgress;
+
+    impl WebProgress for CancelledProgress {
+        fn target_started(&self, _name: &str, _hash: &str) -> crate::Result<()> {
+            Ok(())
+        }
+
+        fn stage(&self, _name: &str, _stage: &str) -> crate::Result<()> {
+            eyre::bail!("task cancelled")
+        }
+
+        fn target_finished(&self, _name: &str) -> crate::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn scan_progress_can_cancel_repatching() {
+        let error = notify_scan_progress(Some(&CancelledProgress), "example.patch_0")
+            .expect_err("cancel scan");
+
+        assert!(error.to_string().contains("task cancelled"));
     }
 }
 

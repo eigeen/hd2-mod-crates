@@ -1,5 +1,6 @@
 import type { GameDataSource } from "./gameDataSource";
 import { StoreZipBuilder } from "./fileInputs";
+import { TaskError, normalizeTaskError, type TaskErrorCode } from "./taskError";
 import type {
   EquipmentOption,
   MigrationResult,
@@ -100,10 +101,7 @@ export async function migrateEquipmentVariants(
   };
   const result = await callWasm("migrate_equipment_variants", () =>
     wasm.migrate_equipment_variants(
-      patch.name,
-      patch.toc,
-      patch.gpu,
-      patch.stream,
+      patch,
       options,
       dataSource,
       callbacks,
@@ -116,11 +114,12 @@ export async function repatchUnits(
   patch: PatchFiles,
   options: UnitRepatchOptions,
   dataSource: GameDataSource,
+  progress: MigrationProgressSink | null = null,
 ): Promise<UnitRepatchResult> {
   const wasm = await loadWasm();
   // Sidecars stay in JS and are reused verbatim in the output ZIP.
   return callWasm("repatch_units", () =>
-    wasm.repatch_units(patch.name, patch.toc, options, dataSource),
+    wasm.repatch_units(patch, options, dataSource, progress),
   ) as Promise<UnitRepatchResult>;
 }
 
@@ -129,7 +128,7 @@ async function callWasm<T>(label: string, fn: () => T | Promise<T>): Promise<T> 
     return await runWithWasmTrapBoundary(fn);
   } catch (error) {
     console.error(`[hd2-migrator] wasm.${label} threw:`, error);
-    throw normalizeWasmError(error);
+    throw normalizeWasmError(error, wasmErrorCode(label));
   }
 }
 
@@ -168,23 +167,25 @@ function isWasmRuntimeTrap(error: unknown): boolean {
   return error.stack?.includes(".wasm") ?? false;
 }
 
-function normalizeWasmError(error: unknown): Error {
-  if (error instanceof Error) {
-    return error;
+function normalizeWasmError(error: unknown, fallbackCode: TaskErrorCode): Error {
+  if (error instanceof WasmRuntimeTrapError) {
+    return new TaskError("wasm.runtime", error.message);
   }
-  if (typeof error === "string") {
-    return new Error(error);
+  const taskError = normalizeTaskError(error, fallbackCode);
+  if (taskError.message.toLowerCase().includes("task was cancelled")) {
+    return new TaskError("task.cancelled", taskError.message);
   }
-  if (error && typeof error === "object") {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string") {
-      return new Error(message);
-    }
-    try {
-      return new Error(JSON.stringify(error));
-    } catch {
-      return new Error(String(error));
-    }
+  return taskError;
+}
+
+function wasmErrorCode(label: string): TaskErrorCode {
+  if (label === "builtin_equipment_options" || label === "builtin_target_options") {
+    return "equipment.loadFailed";
   }
-  return new Error(String(error));
+  if (label.startsWith("inspect_") || label === "detect_source") {
+    return "patch.inspectFailed";
+  }
+  if (label === "repatch_units") return "repatch.failed";
+  if (label.includes("migrate")) return "migration.failed";
+  return "unknown";
 }

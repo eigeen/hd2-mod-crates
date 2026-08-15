@@ -249,6 +249,7 @@ fn build_migrated_target(
             if let Some(p) = progress {
                 p.stage(progress_label, stage);
             }
+            Ok(())
         },
     )?;
     Ok(TargetBuild {

@@ -1,4 +1,5 @@
 import AccountTreeIcon from "@mui/icons-material/AccountTree";
+import CancelIcon from "@mui/icons-material/Cancel";
 import GitHubIcon from "@mui/icons-material/GitHub";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { Button, CircularProgress, IconButton, Tab, Tabs, Tooltip } from "@mui/material";
@@ -19,6 +20,7 @@ import { ToolIntro } from "../../web_ui/src/ToolIntro";
 import { UnitUpdaterPanel } from "../../web_ui/src/UnitUpdaterPanel";
 import { useI18n, type Translate } from "../../web_ui/src/i18n";
 import { uniqueOutputFilename } from "../../web_ui/src/migrationDownloads";
+import { normalizeTaskError } from "../../web_ui/src/taskError";
 import { DesktopGameDataPanel, DesktopPatchPanel } from "./DesktopPanels";
 import { dropZoneFromPhysicalPosition, type DropZone } from "./dropTarget";
 import {
@@ -28,10 +30,10 @@ import {
   detectGameDataDir,
   inspectPatch,
   loadEquipmentOptions,
-  migrateEquipment,
-  repatchMod,
-  subscribeToMigrationProgress,
+  startMigration,
+  startRepatch,
   validateGameDataDir,
+  type DesktopTask,
 } from "./desktopClient";
 import type {
   DetectedSource,
@@ -65,9 +67,11 @@ function App() {
   const [unmatchedUnitPolicy, setUnmatchedUnitPolicy] = useState<UnmatchedUnitPolicy>("keep");
   const [missingUnitPolicy, setMissingUnitPolicy] = useState<MissingUnitPolicy>("drop");
   const [busy, setBusy] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [progressLabel, setProgressLabel] = useState("");
   const [hoveredDropZone, setHoveredDropZone] = useState<DropZone | null>(null);
   const hoveredDropZoneRef = useRef<DropZone | null>(null);
+  const activeTaskRef = useRef<DesktopTask<unknown> | null>(null);
 
   useEffect(() => {
     void loadEquipmentOptions().then(setEquipmentOptions).catch(showError);
@@ -76,21 +80,6 @@ function App() {
   useEffect(() => {
     void restoreOrDetectGameDir(setGameDir);
   }, []);
-
-  useEffect(() => {
-    let disposed = false;
-    let unsubscribe: (() => void) | undefined;
-    void subscribeToMigrationProgress((event) => {
-      if (!disposed) setProgressLabel(progressText(event, t));
-    }).then((value) => {
-      if (disposed) value();
-      else unsubscribe = value;
-    });
-    return () => {
-      disposed = true;
-      unsubscribe?.();
-    };
-  }, [t]);
 
   const activeSource = sources.find((source) => source.id === activeSourceId) ?? null;
   const activeTargets = activeSource ? targetsBySource[activeSource.id] ?? [] : [];
@@ -145,11 +134,11 @@ function App() {
   }, [importPatchPaths]);
 
   const importGameDir = useCallback(async (selected: string) => {
-    await runTask(setBusy, async () => {
+    await runTask(setBusy, t, async () => {
       await validateGameDataDir(selected);
       applyGameDir(selected, setGameDir);
     });
-  }, []);
+  }, [t]);
 
   const selectGameDir = useCallback(async () => {
     const selected = await chooseGameDataDir();
@@ -197,13 +186,15 @@ function App() {
     const outputPath = await chooseOutputZip(outputFilename(patch, variants, equipmentOptions));
     if (!outputPath) return;
     setProgressLabel("");
-    await runTask(setBusy, async () => {
-      const summary = await migrateEquipment({
+    await runTask(setBusy, t, async () => {
+      const task = startMigration({
         patchPaths,
         dataDir: gameDir,
         outputPath,
         options: { variants, patchSuffix: PATCH_SUFFIX, noPadding, unmatchedUnitPolicy },
-      });
+      }, (event) => setProgressLabel(progressText(event, t)));
+      activeTaskRef.current = task;
+      const summary = await task.result;
       showMigrationReport(summary, t);
     });
     setProgressLabel("");
@@ -214,17 +205,38 @@ function App() {
     const outputPath = await chooseOutputZip("hd2-repatched-mod.zip");
     if (!outputPath) return;
     setProgressLabel(t("repatch.progress"));
-    await runTask(setBusy, async () => {
-      const summary = await repatchMod({
+    await runTask(setBusy, t, async () => {
+      const task = startRepatch({
         patchPaths,
         dataDir: gameDir,
         outputPath,
         options: { missingUnitPolicy },
-      });
+      }, (event) => setProgressLabel(progressText(event, t)));
+      activeTaskRef.current = task;
+      const summary = await task.result;
       showUnitRepatchReport(summary, t);
     });
     setProgressLabel("");
   }, [gameDir, missingUnitPolicy, patch, patchPaths, t]);
+
+  const cancelActiveTask = useCallback(async () => {
+    const task = activeTaskRef.current;
+    if (!task || cancelling) return;
+    setCancelling(true);
+    setProgressLabel(t("task.cancelling"));
+    try {
+      await task.cancel();
+    } catch (error) {
+      setCancelling(false);
+      showError(error, t);
+    }
+  }, [cancelling, t]);
+
+  useEffect(() => {
+    if (busy) return;
+    activeTaskRef.current = null;
+    setCancelling(false);
+  }, [busy]);
 
   return (
     <div className="min-h-screen">
@@ -286,9 +298,11 @@ function App() {
             <ActionRow
               blockerHint={blockerHint}
               busy={busy}
+              cancelling={cancelling}
               canRun={canRun}
               noPadding={noPadding}
               onRun={toolMode === "migrate" ? runMigration : runRepatch}
+              onCancel={cancelActiveTask}
               progressLabel={progressLabel}
               setNoPadding={setNoPadding}
               setUnmatchedUnitPolicy={setUnmatchedUnitPolicy}
@@ -333,9 +347,11 @@ function Header() {
 interface ActionRowProps {
   blockerHint: string;
   busy: boolean;
+  cancelling: boolean;
   canRun: boolean;
   noPadding: boolean;
   onRun: () => Promise<void>;
+  onCancel: () => Promise<void>;
   progressLabel: string;
   setNoPadding: (value: boolean) => void;
   setUnmatchedUnitPolicy: (value: UnmatchedUnitPolicy) => void;
@@ -364,9 +380,15 @@ function ActionRow(props: ActionRowProps) {
             {props.busy ? props.progressLabel : props.blockerHint}
           </span>
         </div>
-        <Button disabled={!props.canRun || props.busy} onClick={() => void props.onRun()} startIcon={<PlayArrowIcon />} variant="contained">
-          {props.toolMode === "migrate" ? t("app.run") : t("repatch.run")}
-        </Button>
+        {props.busy ? (
+          <Button disabled={props.cancelling} onClick={() => void props.onCancel()} startIcon={<CancelIcon />} variant="outlined">
+            {props.cancelling ? t("task.cancelling") : t("task.cancel")}
+          </Button>
+        ) : (
+          <Button disabled={!props.canRun} onClick={() => void props.onRun()} startIcon={<PlayArrowIcon />} variant="contained">
+            {props.toolMode === "migrate" ? t("app.run") : t("repatch.run")}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -455,6 +477,9 @@ function outputFilename(patch: PatchDescriptor, variants: MigrationVariant[], op
 }
 
 function progressText(event: MigrationProgressEvent, t: Translate) {
+  if (event.kind === "stage" && !event.targetName) {
+    return `${t("repatch.progress")} · ${event.stage}`;
+  }
   if (event.kind === "stage") return t("app.progressStage", { name: event.targetName, stage: event.stage });
   if (event.kind === "targetFinish") return "";
   return t("app.progressMigrating", { name: event.targetName });
@@ -489,25 +514,29 @@ function showUnitRepatchReport(summary: UnitRepatchSummary, t: Translate) {
   else toast.success(t("repatch.reportTitle"), { description });
 }
 
-async function runTask(setBusy: (value: boolean) => void, task: () => Promise<void>) {
+async function runTask(
+  setBusy: (value: boolean) => void,
+  t: Translate,
+  task: () => Promise<void>,
+) {
   setBusy(true);
   try {
     await task();
   } catch (error) {
-    showError(error);
+    showError(error, t);
   } finally {
     setBusy(false);
   }
 }
 
-function showError(error: unknown) {
+function showError(error: unknown, t?: Translate) {
   console.error("[hd2-migrator-native] task failed:", error);
-  toast.error(errorMessage(error));
-}
-
-function errorMessage(error: unknown) {
-  if (error && typeof error === "object" && "message" in error) return String(error.message);
-  return String(error);
+  const taskError = normalizeTaskError(error);
+  if (taskError.code === "task.cancelled") {
+    toast.info(t ? t("task.cancelled") : taskError.message);
+    return;
+  }
+  toast.error(taskError.message);
 }
 
 export default App;
