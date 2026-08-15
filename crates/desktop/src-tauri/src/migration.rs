@@ -115,9 +115,7 @@ pub async fn repatch_mod(
     let result = tauri::async_runtime::spawn_blocking(move || {
         let _lease = lease;
         let progress = DesktopProgress::new(on_progress, task_cancellation);
-        let result = pollster::block_on(repatch_mod_blocking(request, Some(&progress)));
-        progress.ensure_active().map_err(display_error)?;
-        result
+        pollster::block_on(repatch_mod_blocking(request, Some(&progress)))
     })
     .await
     .map_err(|error| CommandError::from_display("task.joinFailed", error))?;
@@ -286,10 +284,13 @@ fn task_result<T>(
     cancellation: &AtomicBool,
     failure_code: &'static str,
 ) -> Result<T, CommandError> {
-    if cancellation.load(Ordering::Acquire) {
-        return Err(CommandError::new("task.cancelled", "Task was cancelled"));
+    match result {
+        Ok(value) => Ok(value),
+        Err(_) if cancellation.load(Ordering::Acquire) => {
+            Err(CommandError::new("task.cancelled", "Task was cancelled"))
+        }
+        Err(error) => Err(CommandError::new(failure_code, error)),
     }
-    result.map_err(|error| CommandError::new(failure_code, error))
 }
 
 fn display_error(error: impl std::fmt::Display) -> String {
@@ -311,6 +312,15 @@ mod task_result_tests {
         .expect_err("cancelled task");
 
         assert_eq!(error.code, "task.cancelled");
+    }
+
+    #[test]
+    fn completed_output_takes_priority_over_late_cancellation() {
+        let cancellation = AtomicBool::new(true);
+
+        let result = task_result(Ok("committed"), &cancellation, "migration.failed");
+
+        assert_eq!(result.expect("completed task"), "committed");
     }
 }
 
