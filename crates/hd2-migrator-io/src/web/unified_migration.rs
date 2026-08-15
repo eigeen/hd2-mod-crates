@@ -134,8 +134,13 @@ async fn migrate_variant<S: DataSource + ?Sized>(
     for (mapping, authoritative_edges) in variant.mappings.iter().zip(&unit_plan.mapping_edges) {
         let mut result = migrate_mapping(context, mapping).await?;
         builder.merge_mapping(&original_patch, mapping, authoritative_edges, &mut result)?;
-        merge_report(&mut report, result.report);
+        merge_report_totals(&mut report, result.report);
     }
+    report.warnings = combined_variant_warnings(
+        &builder,
+        &original_patch,
+        context.options.unmatched_unit_policy,
+    );
     report.mappings = variant.mappings.clone();
     let patch = builder.finish(&original_patch, context.options.unmatched_unit_policy);
     Ok(VariantResult { patch, report })
@@ -322,6 +327,16 @@ impl VariantPatchBuilder {
             );
         }
         self.output
+    }
+
+    fn unconverted_original_units(&self, original: &StreamToc) -> HashSet<u64> {
+        let original_units = crate::web::migration::unit_file_ids(original);
+        let mut units = original_units
+            .difference(&self.claimed_source_units)
+            .copied()
+            .collect::<HashSet<_>>();
+        units.extend(self.preserved_source_units.iter().copied());
+        units
     }
 }
 
@@ -587,6 +602,12 @@ fn empty_report(variant: &WebMigrationVariant) -> WebMigrationReportRow {
 }
 
 fn merge_report(report: &mut WebMigrationReportRow, next: crate::migrator::MigrationReport) {
+    let warnings = next.warnings.clone();
+    merge_report_totals(report, next);
+    report.warnings.extend(warnings);
+}
+
+fn merge_report_totals(report: &mut WebMigrationReportRow, next: crate::migrator::MigrationReport) {
     if report.target_name.is_empty() {
         report.target_name = next.target_name;
     }
@@ -594,7 +615,25 @@ fn merge_report(report: &mut WebMigrationReportRow, next: crate::migrator::Migra
     report.slot_id_remapped += next.slot_id_remapped;
     report.padded_units += next.padded_units;
     report.skipped_entries += next.skipped_entries;
-    report.warnings.extend(next.warnings);
+}
+
+fn combined_variant_warnings(
+    builder: &VariantPatchBuilder,
+    original: &StreamToc,
+    policy: UnmatchedUnitPolicy,
+) -> Vec<String> {
+    let count = builder.unconverted_original_units(original).len();
+    if count == 0 {
+        return Vec::new();
+    }
+    let action = match policy {
+        UnmatchedUnitPolicy::Keep => "kept",
+        UnmatchedUnitPolicy::Drop => "dropped",
+    };
+    let noun = if count == 1 { "part" } else { "parts" };
+    vec![format!(
+        "{action} {count} {noun} not covered by the configured equipment mappings"
+    )]
 }
 
 fn variant_directory(
@@ -795,6 +834,47 @@ mod tests {
         assert_eq!(
             crate::web::migration::unit_file_ids(&combined),
             HashSet::from([4, 10, 11, 20, 21]),
+        );
+    }
+
+    #[test]
+    fn combined_warning_is_empty_when_every_original_unit_is_mapped() {
+        let original = archive(&[entry(1, vec![1]), entry(2, vec![2])]);
+        let mut builder = VariantPatchBuilder::new(&original);
+        builder
+            .merge_selected_output(
+                &HashSet::from([1, 2]),
+                &HashSet::from([10, 20]),
+                archive(&[entry(10, vec![1]), entry(20, vec![2])]),
+            )
+            .unwrap();
+
+        assert!(
+            combined_variant_warnings(&builder, &original, UnmatchedUnitPolicy::Keep).is_empty()
+        );
+    }
+
+    #[test]
+    fn combined_warning_reports_units_outside_configured_mappings() {
+        let original = archive(&[entry(1, vec![1]), entry(2, vec![2])]);
+        let mut builder = VariantPatchBuilder::new(&original);
+        builder
+            .merge_selected_output(
+                &HashSet::from([1]),
+                &HashSet::from([10]),
+                archive(&[entry(10, vec![1])]),
+            )
+            .unwrap();
+
+        let keep = combined_variant_warnings(&builder, &original, UnmatchedUnitPolicy::Keep);
+        let drop = combined_variant_warnings(&builder, &original, UnmatchedUnitPolicy::Drop);
+        assert_eq!(
+            keep,
+            ["kept 1 part not covered by the configured equipment mappings"]
+        );
+        assert_eq!(
+            drop,
+            ["dropped 1 part not covered by the configured equipment mappings"]
         );
     }
 

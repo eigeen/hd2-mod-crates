@@ -119,13 +119,25 @@ function App() {
     setSinglePatch(false);
   }, []);
 
-  const importPatchPaths = useCallback(async (selected: string[]) => {
-    await runTask(setBusy, async () => {
-      const result = await inspectPatch(selected, gameDir);
-      setPatchPaths(selected);
-      applyInspection(result);
+  useEffect(() => {
+    if (!patchPaths.length) return;
+    let cancelled = false;
+    setBusy(true);
+    void inspectPatch(patchPaths, gameDir).then((result) => {
+      if (!cancelled) applyInspection(result);
+    }).catch((error) => {
+      if (!cancelled) showError(error);
+    }).finally(() => {
+      if (!cancelled) setBusy(false);
     });
-  }, [applyInspection, gameDir]);
+    return () => {
+      cancelled = true;
+    };
+  }, [applyInspection, gameDir, patchPaths]);
+
+  const importPatchPaths = useCallback(async (selected: string[]) => {
+    setPatchPaths(selected);
+  }, []);
 
   const selectPatch = useCallback(async () => {
     const selected = await choosePatchPaths();
@@ -135,10 +147,9 @@ function App() {
   const importGameDir = useCallback(async (selected: string) => {
     await runTask(setBusy, async () => {
       await validateGameDataDir(selected);
-      if (patchPaths.length) applyInspection(await inspectPatch(patchPaths, selected));
       applyGameDir(selected, setGameDir);
     });
-  }, [applyInspection, patchPaths]);
+  }, []);
 
   const selectGameDir = useCallback(async () => {
     const selected = await chooseGameDataDir();

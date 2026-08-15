@@ -79,7 +79,8 @@ pub async fn migrate_equipment(
     app: AppHandle,
 ) -> Result<WebMigrationSummary, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        pollster::block_on(migrate_equipment_blocking(request, app))
+        let progress = TauriProgress::new(app);
+        pollster::block_on(migrate_equipment_blocking(request, Some(&progress)))
     })
     .await
     .map_err(|error| format!("Migration task failed: {error}"))?
@@ -117,14 +118,13 @@ fn inspect_with_optional_source(
 
 async fn migrate_equipment_blocking(
     request: MigrateRequest,
-    app: AppHandle,
+    progress: Option<&dyn WebProgress>,
 ) -> Result<WebMigrationSummary, String> {
     validate_output_request(&request.data_dir, &request.output_path)?;
     let patch = load_patch(&request.patch_paths)?;
     let source = NativeDataSource::new(request.data_dir);
-    let progress = TauriProgress::new(app);
     let mut zip = create_zip(&request.output_path)?;
-    let callbacks = VariantMigrationCallbacks::new(Some(&progress), |file: WebOutputFile| {
+    let callbacks = VariantMigrationCallbacks::new(progress, |file: WebOutputFile| {
         write_zip_entry(&mut zip, &file.path, &file.bytes)
     });
     let summary =
@@ -223,4 +223,178 @@ impl WebProgress for TauriProgress {
 
 fn display_error(error: impl std::fmt::Display) -> String {
     error.to_string()
+}
+
+#[cfg(test)]
+mod real_data_tests {
+    use super::*;
+    use hd2_migrator_io::web::{UnmatchedUnitPolicy, WebMigrationMapping, WebMigrationVariant};
+
+    #[test]
+    #[ignore = "requires HD2_TAURI_TEST_PATCH and HD2_TAURI_TEST_DATA"]
+    fn inspects_real_patch_with_installed_game_data() {
+        let patch_path = required_path("HD2_TAURI_TEST_PATCH");
+        let data_dir = required_path("HD2_TAURI_TEST_DATA");
+        let result = inspect_patch_blocking(InspectPatchRequest {
+            paths: vec![patch_path],
+            data_dir: Some(data_dir),
+        })
+        .expect("inspect real patch");
+
+        eprintln!(
+            "{}",
+            serde_json::to_string_pretty(&result.inspection).expect("serialize inspection")
+        );
+        assert!(!result.inspection.sources.is_empty());
+    }
+
+    #[test]
+    #[ignore = "requires HD2_TAURI_TEST_PATCH, HD2_TAURI_TEST_DATA, and HD2_TAURI_TEST_OUTPUT"]
+    fn migrates_real_patch_to_a_different_equipment_target() {
+        let patch_path = required_path("HD2_TAURI_TEST_PATCH");
+        let data_dir = required_path("HD2_TAURI_TEST_DATA");
+        let output_path = output_path("real-migration.zip");
+        let inspection = inspect_patch_blocking(InspectPatchRequest {
+            paths: vec![patch_path.clone()],
+            data_dir: Some(data_dir.clone()),
+        })
+        .expect("inspect real patch");
+        let mapping = first_available_mapping(&inspection.inspection);
+        let request = MigrateRequest {
+            patch_paths: vec![patch_path],
+            data_dir,
+            output_path: output_path.clone(),
+            options: WebUnifiedMigrateOptions {
+                variants: vec![WebMigrationVariant {
+                    mappings: vec![mapping],
+                }],
+                patch_suffix: Some(web::migration::DEFAULT_PATCH_SUFFIX.to_owned()),
+                no_padding: false,
+                unmatched_unit_policy: UnmatchedUnitPolicy::Keep,
+            },
+        };
+
+        let summary = pollster::block_on(migrate_equipment_blocking(request, None))
+            .expect("migrate real patch");
+
+        assert_eq!(summary.migrated_count, 1);
+        assert!(output_path.is_file());
+        assert_zip_has_entries(&output_path);
+    }
+
+    #[test]
+    #[ignore = "requires HD2_TAURI_TEST_PATCH, HD2_TAURI_TEST_DATA, and HD2_TAURI_TEST_OUTPUT"]
+    fn migrates_all_real_equipment_sources_into_one_patch() {
+        let patch_path = required_path("HD2_TAURI_TEST_PATCH");
+        let data_dir = required_path("HD2_TAURI_TEST_DATA");
+        let output_path = output_path("real-combined-migration.zip");
+        let inspection = inspect_patch_blocking(InspectPatchRequest {
+            paths: vec![patch_path.clone()],
+            data_dir: Some(data_dir.clone()),
+        })
+        .expect("inspect real patch");
+        let mappings = available_mappings(&inspection.inspection);
+        assert!(
+            mappings.len() > 1,
+            "fixture must contain mixed equipment sources"
+        );
+        let request = MigrateRequest {
+            patch_paths: vec![patch_path],
+            data_dir,
+            output_path: output_path.clone(),
+            options: WebUnifiedMigrateOptions {
+                variants: vec![WebMigrationVariant { mappings }],
+                patch_suffix: Some(web::migration::DEFAULT_PATCH_SUFFIX.to_owned()),
+                no_padding: false,
+                unmatched_unit_policy: UnmatchedUnitPolicy::Keep,
+            },
+        };
+
+        let summary = pollster::block_on(migrate_equipment_blocking(request, None))
+            .expect("migrate mixed real patch");
+
+        eprintln!(
+            "{}",
+            serde_json::to_string_pretty(&summary).expect("serialize migration summary")
+        );
+        assert_eq!(summary.migrated_count, 1);
+        assert_eq!(summary.reports[0].mappings.len(), 2);
+        assert!(summary.reports[0].warnings.is_empty());
+        assert!(output_path.is_file());
+        assert_zip_has_entries(&output_path);
+    }
+
+    #[test]
+    #[ignore = "requires HD2_TAURI_TEST_PATCH, HD2_TAURI_TEST_DATA, and HD2_TAURI_TEST_OUTPUT"]
+    fn repatches_real_patch_from_installed_game_data() {
+        let output_path = output_path("real-repatch.zip");
+        let request = RepatchRequest {
+            patch_paths: vec![required_path("HD2_TAURI_TEST_PATCH")],
+            data_dir: required_path("HD2_TAURI_TEST_DATA"),
+            output_path: output_path.clone(),
+            options: UnitRepatchOptions::default(),
+        };
+
+        let summary = pollster::block_on(repatch_mod_blocking(request)).expect("repatch real mod");
+
+        assert!(summary.unit_count > 0);
+        assert!(output_path.is_file());
+        assert_zip_has_entries(&output_path);
+    }
+
+    fn first_available_mapping(inspection: &WebEquipmentInspection) -> WebMigrationMapping {
+        let source = inspection
+            .sources
+            .iter()
+            .find(|source| source.resolved_hash.is_some())
+            .expect("resolved equipment source");
+        mapping_for_source(source)
+    }
+
+    fn available_mappings(inspection: &WebEquipmentInspection) -> Vec<WebMigrationMapping> {
+        inspection
+            .sources
+            .iter()
+            .filter(|source| source.resolved_hash.is_some())
+            .map(mapping_for_source)
+            .collect()
+    }
+
+    fn mapping_for_source(source: &web::WebDetectedSource) -> WebMigrationMapping {
+        let source_hash = source.resolved_hash.clone().expect("source hash");
+        let target = web::list_equipment_options()
+            .expect("equipment options")
+            .into_iter()
+            .find(|target| {
+                target.category == source.category && target.hash != source_hash && !target.excluded
+            })
+            .expect("different migration target");
+        eprintln!(
+            "real migration: {source_hash} -> {} ({})",
+            target.hash, target.name
+        );
+        WebMigrationMapping {
+            category: source.category,
+            source_hash,
+            target_hash: target.hash,
+        }
+    }
+
+    fn output_path(filename: &str) -> PathBuf {
+        let directory = required_path("HD2_TAURI_TEST_OUTPUT");
+        std::fs::create_dir_all(&directory).expect("create real-data output directory");
+        directory.join(filename)
+    }
+
+    fn assert_zip_has_entries(path: &Path) {
+        let file = std::fs::File::open(path).expect("open output ZIP");
+        let archive = zip::ZipArchive::new(file).expect("parse output ZIP");
+        assert!(!archive.is_empty());
+    }
+
+    fn required_path(name: &str) -> PathBuf {
+        std::env::var_os(name)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| panic!("{name} must be set"))
+    }
 }
