@@ -278,6 +278,17 @@ textarea {
   font-size: 1rem;
 }
 
+.quickSelectMenuBtn.MuiIconButton-root {
+  border-radius: 0 !important;
+  color: var(--color-hd2-faint);
+  padding: 0.25rem !important;
+}
+
+.quickSelectMenuBtn.MuiIconButton-root:hover {
+  background: rgba(254, 231, 15, 0.06) !important;
+  color: var(--color-hd2-yellow);
+}
+
 .MuiTextField-root .MuiInputLabel-root {
   color: var(--color-hd2-muted);
   font-size: 0.75rem;

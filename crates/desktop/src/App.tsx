@@ -181,6 +181,11 @@ function App() {
     setTargetsBySource((current) => ({ ...current, [activeSource.id]: targets }));
   }, [activeSource, activeTargets, multiTarget]);
 
+  const chooseTargetBatch = useCallback((hashes: string[]) => {
+    if (!activeSource) return;
+    setTargetsBySource((current) => ({ ...current, [activeSource.id]: hashes }));
+  }, [activeSource]);
+
   const toggleMultiTarget = useCallback((enabled: boolean) => {
     if (!multiTargetEligible) return;
     setMultiTarget(enabled);
@@ -296,6 +301,7 @@ function App() {
                   equipmentOptions={equipmentOptions}
                   multiTarget={multiTarget}
                   multiTargetEligible={multiTargetEligible}
+                  onBatchSelect={chooseTargetBatch}
                   onMultiTargetChange={toggleMultiTarget}
                   onResolveSource={resolveSource}
                   onSinglePatchChange={setSinglePatch}
