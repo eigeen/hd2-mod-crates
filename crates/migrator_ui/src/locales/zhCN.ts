@@ -3,9 +3,6 @@ import type { TranslationResources } from "./translationKeys";
 export const zhCN = {
   "app.title": "HD2 Mod 工具",
   "app.run": "执行",
-  "app.progressMigrating": "正在迁移 {{name}}",
-  "app.progressStage": "{{name}} · {{stage}}",
-  "app.progressWriting": "正在写入输出 · {{percent}}%",
   "app.blockerGameData": "请先选择游戏 data 目录",
   "app.blockerPatch": "请选择补丁文件",
   "app.blockerTarget": "请选择目标版本",

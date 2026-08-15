@@ -17,6 +17,7 @@ import {
   backgroundUrl,
   buildMigrationVariants,
   configuredMappings as collectConfiguredMappings,
+  createMigrationProgressCounter,
   multiTargetEligible as canUseMultiTarget,
   presentTaskError,
   selectTarget,
@@ -201,14 +202,18 @@ function App() {
     const variants = buildMigrationVariants(configuredMappings, outputAsSinglePatch);
     const outputPath = await chooseOutputZip(outputFilename(patch, variants, equipmentOptions));
     if (!outputPath) return;
-    setProgressLabel("");
+    const onProgress = stableDesktopMigrationProgress(
+      configuredMappings,
+      equipmentOptions,
+      setProgressLabel,
+    );
     await runTask(setBusy, t, async () => {
       const task = startMigration({
         patchPaths,
         dataDir: gameDir,
         outputPath,
         options: { variants, patchSuffix: PATCH_SUFFIX, noPadding, unmatchedUnitPolicy },
-      }, (event) => setProgressLabel(progressText(event, t)));
+      }, onProgress);
       activeTaskRef.current = task;
       const summary = await task.result;
       reportHistory.recordReport({ kind: "migration", output: outputPath, summary });
@@ -220,14 +225,14 @@ function App() {
     if (!gameDir || !patch) return;
     const outputPath = await chooseOutputZip("hd2-repatched-mod.zip");
     if (!outputPath) return;
-    setProgressLabel(t("repatch.progress"));
+    setProgressLabel(`1/1 ${t("repatch.progress")}`);
     await runTask(setBusy, t, async () => {
       const task = startRepatch({
         patchPaths,
         dataDir: gameDir,
         outputPath,
         options: { missingUnitPolicy },
-      }, (event) => setProgressLabel(progressText(event, t)));
+      }, () => {});
       activeTaskRef.current = task;
       const summary = await task.result;
       reportHistory.recordReport({ kind: "repatch", output: outputPath, summary });
@@ -239,7 +244,6 @@ function App() {
     const task = activeTaskRef.current;
     if (!task || cancelling) return;
     setCancelling(true);
-    setProgressLabel(t("task.cancelling"));
     try {
       await task.cancel();
     } catch (error) {
@@ -514,17 +518,18 @@ function outputFilename(patch: PatchDescriptor, variants: MigrationVariant[], op
   return uniqueOutputFilename(patch.originalName ?? patch.name, mapping.targetHash, options);
 }
 
-function progressText(event: MigrationProgressEvent, t: Translate) {
-  if (event.kind === "outputProgress") {
-    const percent = event.totalBytes ? Math.round(event.completedBytes * 100 / event.totalBytes) : 100;
-    return t("app.progressWriting", { percent });
-  }
-  if (event.kind === "stage" && !event.targetName) {
-    return `${t("repatch.progress")} · ${event.stage}`;
-  }
-  if (event.kind === "stage") return t("app.progressStage", { name: event.targetName, stage: event.stage });
-  if (event.kind === "targetFinish") return "";
-  return t("app.progressMigrating", { name: event.targetName });
+function stableDesktopMigrationProgress(
+  mappings: MigrationVariant["mappings"],
+  options: EquipmentOption[],
+  setLabel: (label: string) => void,
+) {
+  const labels = mappings.map((mapping) => (
+    options.find((candidate) => candidate.hash === mapping.targetHash)?.name ?? mapping.targetHash
+  ));
+  const counter = createMigrationProgressCounter(labels, setLabel);
+  return (event: MigrationProgressEvent) => {
+    if (event.kind === "targetFinish") counter.advance();
+  };
 }
 
 async function runTask(

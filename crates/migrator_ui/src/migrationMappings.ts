@@ -84,6 +84,41 @@ export function selectTarget(values: string[], hash: string, multiTarget: boolea
   return values.includes(hash) ? values.filter((value) => value !== hash) : [...values, hash];
 }
 
+export function migrationMappingLabel(
+  mapping: MigrationMapping,
+  options: EquipmentOption[],
+): string {
+  const source = equipmentName(mapping.sourceHash, options);
+  const target = equipmentName(mapping.targetHash, options);
+  return `${source} → ${target}`;
+}
+
+export interface MigrationProgressCounter {
+  advance: () => void;
+}
+
+/** Show the first mapping immediately and retain the final label until task teardown. */
+export function createMigrationProgressCounter(
+  labels: string[],
+  setLabel: (label: string) => void,
+): MigrationProgressCounter {
+  if (!labels.length) throw new Error("migration progress requires at least one label");
+  let index = 0;
+  const showCurrent = () => setLabel(`${index + 1}/${labels.length} ${labels[index]}`);
+  showCurrent();
+  return {
+    advance: () => {
+      if (index >= labels.length - 1) return;
+      index += 1;
+      showCurrent();
+    },
+  };
+}
+
+function equipmentName(hash: string, options: EquipmentOption[]): string {
+  return options.find((candidate) => candidate.hash === hash)?.name ?? hash;
+}
+
 function mappingsBySource(mappings: MigrationMapping[]): MigrationMapping[][] {
   const groups = new Map<string, MigrationMapping[]>();
   for (const mapping of mappings) {

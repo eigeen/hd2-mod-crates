@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test";
 import {
   buildMigrationVariants,
   configuredMappings,
+  createMigrationProgressCounter,
   exceedsWebMappingLimit,
   MAX_WEB_SEPARATE_PATCH_OUTPUTS,
   MAX_WEB_SINGLE_PATCH_MAPPINGS,
   maxWebSeparateOutputsForPatch,
+  migrationMappingLabel,
   multiTargetEligible,
   selectTarget,
   singlePatchRequired,
@@ -39,6 +41,32 @@ describe("unified migration mapping state", () => {
   test("cancels a single target by selecting it again", () => {
     expect(selectTarget([armorTarget.hash], armorTarget.hash, false)).toEqual([]);
     expect(selectTarget([], armorTarget.hash, false)).toEqual([armorTarget.hash]);
+  });
+
+  test("formats a readable source and target label", () => {
+    const mapping = configuredMappings([source("armor", armor)], {
+      armor: [armorTarget.hash],
+    })[0];
+
+    expect(migrationMappingLabel(mapping, [armor, armorTarget]))
+      .toBe("FS-55 Devastator → XX-66 Armor");
+  });
+
+  test("retains the final progress label instead of clearing between stages", () => {
+    const mappings = configuredMappings([source("armor", armor)], {
+      armor: [armorTarget.hash, "armor-target-2"],
+    });
+    const labels: string[] = [];
+    const progressLabels = mappings.map((mapping) => migrationMappingLabel(mapping, [armor, armorTarget]));
+    const counter = createMigrationProgressCounter(progressLabels, (label) => labels.push(label));
+
+    counter.advance();
+    counter.advance();
+
+    expect(labels).toEqual([
+      "1/2 FS-55 Devastator → XX-66 Armor",
+      "2/2 FS-55 Devastator → armor-target-2",
+    ]);
   });
 
   test("expands one source with multiple targets into independent variants", () => {

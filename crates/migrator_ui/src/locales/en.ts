@@ -3,9 +3,6 @@ import type { TranslationResources } from "./translationKeys";
 export const en = {
   "app.title": "HD2 Mod Tools",
   "app.run": "Run",
-  "app.progressMigrating": "Migrating {{name}}",
-  "app.progressStage": "{{name}} · {{stage}}",
-  "app.progressWriting": "Writing output · {{percent}}%",
   "app.blockerGameData": "Choose the game data folder first",
   "app.blockerPatch": "Choose patch files",
   "app.blockerTarget": "Choose a target version",

@@ -19,9 +19,11 @@ import {
   backgroundUrl,
   buildMigrationVariants,
   configuredMappings as collectConfiguredMappings,
+  createMigrationProgressCounter,
   copyTaskErrorDiagnostic,
   exceedsWebMappingLimit,
   maxWebSeparateOutputsForPatch,
+  migrationMappingLabel,
   multiTargetEligible as canUseMultiTarget,
   presentTaskError,
   selectTarget,
@@ -107,9 +109,8 @@ function App() {
   const cancelActiveTask = useCallback(() => {
     if (!activeTaskRef.current || cancelling) return;
     setCancelling(true);
-    setProgressLabel(t("task.cancelling"));
     activeTaskRef.current.abort();
-  }, [cancelling, t]);
+  }, [cancelling]);
 
   useEffect(() => {
     let cancelled = false;
@@ -293,7 +294,6 @@ function App() {
         patch,
         setProgressLabel,
         signal,
-        t,
         unmatchedUnitPolicy,
         variants,
       });
@@ -319,16 +319,15 @@ function App() {
   const runUnitRepatch = useCallback(async () => {
     const patch = patchRef.current;
     if (!patch || !gameDir) return;
-    setProgressLabel(t("repatch.progress"));
+    setProgressLabel(`1/1 ${t("repatch.progress")}`);
     await runCancellableTask(async (signal) => {
       const output = await repatchUnits(
         patch,
         { missingUnitPolicy },
         new GameDataSource(gameDir.handle),
         {
-          onStage: (_name, stage) => {
+          onStage: () => {
             throwIfTaskCancelled(signal);
-            setProgressLabel(`${t("repatch.progress")} · ${stage}`);
           },
         },
       );
@@ -568,7 +567,6 @@ interface VariantMigrationRequest {
   patch: PatchFiles;
   setProgressLabel: (label: string) => void;
   signal: AbortSignal;
-  t: Translate;
   unmatchedUnitPolicy: UnmatchedUnitPolicy;
   variants: MigrationVariant[];
 }
@@ -587,7 +585,6 @@ async function migrateVariants(
       request.options,
       request.setProgressLabel,
       request.signal,
-      request.t,
     ),
   );
   throwIfTaskCancelled(request.signal);
@@ -629,41 +626,25 @@ function migrationProgress(
   options: EquipmentOption[],
   setProgressLabel: (label: string) => void,
   signal: AbortSignal,
-  t: Translate,
 ): MigrationProgressSink {
-  let mappingIndex = 0;
-  const label = () => {
-    const mapping = mappings[Math.min(mappingIndex, mappings.length - 1)];
-    const source = options.find((candidate) => candidate.hash === mapping?.sourceHash)?.name
-      ?? mapping?.sourceHash;
-    const target = options.find((candidate) => candidate.hash === mapping?.targetHash)?.name
-      ?? mapping?.targetHash;
-    return numberedTargetLabel(`${source} → ${target}`, mappingIndex, mappings.length);
-  };
+  const labels = mappings.map((mapping) => migrationMappingLabel(mapping, options));
+  const counter = createMigrationProgressCounter(labels, setProgressLabel);
   return {
     onTargetStart: () => {
       throwIfTaskCancelled(signal);
-      setProgressLabel(t("app.progressMigrating", { name: label() }));
     },
-    onStage: (_name, stage) => {
+    onStage: () => {
       throwIfTaskCancelled(signal);
-      setProgressLabel(t("app.progressStage", { name: label(), stage }));
     },
     onTargetFinish: () => {
       throwIfTaskCancelled(signal);
-      mappingIndex += 1;
-      setProgressLabel("");
+      counter.advance();
     },
   };
 }
 
 function patchByteLength(patch: PatchFiles): number {
   return patch.toc.byteLength + patch.gpu.byteLength + patch.stream.byteLength;
-}
-
-function numberedTargetLabel(name: string, targetIndex: number, targetCount: number): string {
-  if (targetCount === 1) return name;
-  return `${targetIndex + 1}/${targetCount} ${name}`;
 }
 
 async function runTask(
