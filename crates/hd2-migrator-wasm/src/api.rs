@@ -44,12 +44,7 @@ pub fn detect_source(
 ) -> WasmResult<JsValue> {
     let category = category.unwrap_or_else(|| DEFAULT_CATEGORY.to_string());
     // 仅 toc 参与识别；gpu/stream 不需要传入，避免无谓地把数百 MB 拷贝进 WASM 内存导致 OOM。
-    let patch = PatchBytes {
-        name: patch_name,
-        toc,
-        gpu: Vec::new(),
-        stream: Vec::new(),
-    };
+    let patch = toc_only_patch(patch_name, toc);
     let source = web::detect_source_archive(&category, &patch).map_err(js_error)?;
     serde_wasm_bindgen::to_value(&source).map_err(js_error)
 }
@@ -62,24 +57,14 @@ pub fn inspect_patch(
 ) -> WasmResult<JsValue> {
     let category = category.unwrap_or_else(|| DEFAULT_CATEGORY.to_string());
     // Inspection only needs the TOC. One combined call avoids copying a large TOC twice.
-    let patch = PatchBytes {
-        name: patch_name,
-        toc,
-        gpu: Vec::new(),
-        stream: Vec::new(),
-    };
+    let patch = toc_only_patch(patch_name, toc);
     let inspection = web::inspect_patch(&category, &patch).map_err(js_error)?;
     serde_wasm_bindgen::to_value(&inspection).map_err(js_error)
 }
 
 #[wasm_bindgen]
 pub fn inspect_equipment(patch_name: String, toc: Vec<u8>) -> WasmResult<JsValue> {
-    let patch = PatchBytes {
-        name: patch_name,
-        toc,
-        gpu: Vec::new(),
-        stream: Vec::new(),
-    };
+    let patch = toc_only_patch(patch_name, toc);
     let inspection = web::inspect_equipment(&patch).map_err(js_error)?;
     serde_wasm_bindgen::to_value(&inspection).map_err(js_error)
 }
@@ -90,17 +75,59 @@ pub async fn inspect_equipment_with_source(
     toc: Vec<u8>,
     data_source: JsValue,
 ) -> WasmResult<JsValue> {
-    let patch = PatchBytes {
-        name: patch_name,
-        toc,
-        gpu: Vec::new(),
-        stream: Vec::new(),
-    };
+    let patch = toc_only_patch(patch_name, toc);
     let source = JsDataSource::from_js(data_source)?;
     let inspection = web::inspect_equipment_with_source(&patch, &source)
         .await
         .map_err(js_error)?;
     serde_wasm_bindgen::to_value(&inspection).map_err(js_error)
+}
+
+#[wasm_bindgen]
+pub fn analyze_equipment_patch(patch_name: String, toc: Vec<u8>) -> WasmResult<JsValue> {
+    let patch = toc_only_patch(patch_name, toc);
+    let analysis = web::analyze_equipment_patch(&patch).map_err(js_error)?;
+    serde_wasm_bindgen::to_value(&analysis).map_err(js_error)
+}
+
+#[wasm_bindgen]
+pub fn preview_equipment_mapping(
+    patch_name: String,
+    toc: Vec<u8>,
+    mapping: JsValue,
+) -> WasmResult<JsValue> {
+    let patch = toc_only_patch(patch_name, toc);
+    let mapping: web::WebMigrationMapping =
+        serde_wasm_bindgen::from_value(mapping).map_err(js_error)?;
+    let preview = web::preview_equipment_mapping(&patch, &mapping).map_err(js_error)?;
+    serde_wasm_bindgen::to_value(&preview).map_err(js_error)
+}
+
+#[wasm_bindgen]
+pub fn preview_equipment_mappings(
+    patch_name: String,
+    toc: Vec<u8>,
+    mappings: JsValue,
+) -> WasmResult<JsValue> {
+    let patch = toc_only_patch(patch_name, toc);
+    let mappings: Vec<web::WebMigrationMapping> =
+        serde_wasm_bindgen::from_value(mappings).map_err(js_error)?;
+    let previews = web::preview_equipment_mappings(&patch, &mappings).map_err(js_error)?;
+    serde_wasm_bindgen::to_value(&previews).map_err(js_error)
+}
+
+#[wasm_bindgen]
+pub async fn analyze_equipment_patch_with_source(
+    patch_name: String,
+    toc: Vec<u8>,
+    data_source: JsValue,
+) -> WasmResult<JsValue> {
+    let patch = toc_only_patch(patch_name, toc);
+    let source = JsDataSource::from_js(data_source)?;
+    let analysis = web::analyze_equipment_patch_with_source(&patch, &source)
+        .await
+        .map_err(js_error)?;
+    serde_wasm_bindgen::to_value(&analysis).map_err(js_error)
 }
 
 /// Full cross-archive migration backed by a JS-supplied `DataSource`.
@@ -183,6 +210,15 @@ pub async fn repatch_units(
         &serde_wasm_bindgen::to_value(&output.summary).map_err(js_error)?,
     )?;
     Ok(result.into())
+}
+
+fn toc_only_patch(name: String, toc: Vec<u8>) -> PatchBytes {
+    PatchBytes {
+        name,
+        toc,
+        gpu: Vec::new(),
+        stream: Vec::new(),
+    }
 }
 
 fn patch_bytes_from_js(patch: &JsValue) -> WasmResult<PatchBytes> {

@@ -35,10 +35,7 @@ const sourceHash = "5fb542484cb2c2a5";
     const zip = process.env.HD2_E2E_BUILD_ZIP === "1" ? new StoreZipBuilder() : null;
 
     const result = await migrate_equipment_variants(
-      patchName,
-      patch.toc,
-      patch.gpu,
-      patch.stream,
+      { name: patchName, ...patch },
       options,
       nativeDataSource(gameDataDir),
       {
@@ -98,6 +95,7 @@ function migrationOptions(
     patchSuffix: patchName,
     noPadding: false,
     unmatchedUnitPolicy: "keep",
+    unitBehavior: { disabledMappings: [], exportOverrides: [], conflictResolutions: [] },
   };
 }
 

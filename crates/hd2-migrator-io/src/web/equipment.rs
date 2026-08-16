@@ -270,7 +270,7 @@ fn options_by_name(
         .collect())
 }
 
-fn patch_unit_ids(toc: &[u8]) -> crate::Result<HashSet<u64>> {
+pub(super) fn patch_unit_ids(toc: &[u8]) -> crate::Result<HashSet<u64>> {
     Ok(archive::list_file_ids_from_bytes(toc)?
         .remove(&UNIT_ID)
         .unwrap_or_default()

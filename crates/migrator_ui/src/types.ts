@@ -14,6 +14,101 @@ export interface PatchInspection {
   sources: DetectedSource[];
 }
 
+export interface EquipmentPatchAnalysis {
+  inspection: PatchInspection;
+  equipmentGraph: EquipmentPartGraph;
+}
+
+export interface EquipmentMappingPreview {
+  schemaVersion: number;
+  sourceEquipment: GraphEquipment;
+  targetEquipment: GraphEquipment;
+  units: MappingPreviewUnit[];
+  mappings: UnitMappingPreview[];
+  summary: MappingPreviewSummary;
+}
+
+export interface MappingPreviewUnit {
+  id: string;
+  fileId: string;
+  presentInPatch: boolean;
+  sourceRoles: EquipmentPartRole[];
+  targetRoles: EquipmentPartRole[];
+}
+
+export interface UnitMappingPreview {
+  id: string;
+  sourceUnitId: string;
+  targetUnitId: string;
+  role: EquipmentPartRole;
+  action: "replace" | "reuse";
+}
+
+export interface MappingPreviewSummary {
+  mappedUnitCount: number;
+  replacedUnitCount: number;
+  unchangedUnitCount: number;
+  reusedSourceUnitCount: number;
+}
+
+export interface EquipmentPartGraph {
+  schemaVersion: number;
+  patch: EquipmentGraphSummary;
+  equipments: GraphEquipment[];
+  components: GraphComponent[];
+  relations: EquipmentPartRelation[];
+  diagnostics: EquipmentGraphDiagnostic[];
+}
+
+export interface EquipmentGraphSummary {
+  name: string;
+  unitCount: number;
+  mappedUnitCount: number;
+  unmappedUnitCount: number;
+  equipmentCount: number;
+  relationCount: number;
+}
+
+export interface GraphEquipment {
+  id: string;
+  category: EquipmentCategory;
+  hash: string | null;
+  name: string;
+}
+
+export interface GraphComponent {
+  id: string;
+  fileId: string;
+  kind: "unit";
+  presentInPatch: boolean;
+}
+
+export type EquipmentPartRole =
+  | "slimWaist"
+  | "stockyRightArm"
+  | "slimRightArm"
+  | "stockyBody"
+  | "stockyWaist"
+  | "slimLeftArm"
+  | "stockyLeftArm"
+  | "slimBody"
+  | "leftLeg"
+  | "rightLeg"
+  | "helmet";
+
+export interface EquipmentPartRelation {
+  id: string;
+  equipmentId: string;
+  componentId: string;
+  role: EquipmentPartRole;
+}
+
+export interface EquipmentGraphDiagnostic {
+  code: "unmappedUnit";
+  componentId: string;
+  fileId: string;
+}
+
 export interface DetectedSource {
   id: string;
   category: EquipmentCategory;
@@ -55,9 +150,31 @@ export interface UnifiedMigrateOptions {
   patchSuffix: string | null;
   noPadding: boolean;
   unmatchedUnitPolicy: UnmatchedUnitPolicy;
+  unitBehavior: UnitBehaviorOptions;
 }
 
 export type UnmatchedUnitPolicy = "drop" | "keep";
+
+export interface UnitBehaviorOptions {
+  disabledMappings: UnitMappingBehaviorKey[];
+  exportOverrides: UnitExportOverride[];
+  conflictResolutions: UnitConflictResolution[];
+}
+
+export interface UnitMappingBehaviorKey {
+  sourceFileId: string;
+  targetFileId: string;
+}
+
+export interface UnitExportOverride {
+  fileId: string;
+  export: boolean;
+}
+
+export interface UnitConflictResolution {
+  targetFileId: string;
+  preferredSourceFileId: string;
+}
 
 export interface MigrationResult {
   zipBlob: Blob;

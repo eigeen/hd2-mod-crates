@@ -8,6 +8,7 @@ description = "Native filesystem migrator adapter for Helldivers 2 armor mods"
 [dependencies]
 byteorder.workspace = true
 eyre.workspace = true
+hd2-archive-format = { path = "../hd2-archive-format" }
 hd2-migrator-data = { path = "../hd2-migrator-data" }
 lz4_flex.workspace = true
 rayon.workspace = true

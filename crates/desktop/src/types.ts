@@ -12,9 +12,13 @@ export type {
 
 import type {
   DetectedSource,
+  EquipmentMappingPreview,
+  EquipmentPartGraph,
   UnifiedMigrateOptions,
   UnitRepatchOptions,
 } from "@hd2-mod-tools/migrator-ui";
+
+export type { EquipmentMappingPreview };
 
 export interface PatchDescriptor {
   path: string;
@@ -26,6 +30,7 @@ export interface PatchDescriptor {
 export interface InspectPatchResult {
   patch: PatchDescriptor;
   inspection: { sources: DetectedSource[] };
+  equipmentGraph: EquipmentPartGraph;
 }
 
 export interface GameDataDiscovery {

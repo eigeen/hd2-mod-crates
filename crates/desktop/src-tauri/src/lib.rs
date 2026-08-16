@@ -21,6 +21,8 @@ pub fn run() {
             game_discovery::validate_game_data_dir,
             migration::load_equipment_options,
             migration::inspect_patch,
+            migration::preview_equipment_mapping,
+            migration::preview_equipment_mappings,
             migration::migrate_equipment,
             migration::repatch_mod,
             migration::cancel_task,

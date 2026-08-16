@@ -2,11 +2,13 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   EquipmentOption,
+  EquipmentMappingPreview,
   GameDataDiscovery,
   InspectPatchResult,
   MigrateRequest,
   MigrationProgressEvent,
   MigrationSummary,
+  MigrationMapping,
   RepatchRequest,
   UnitRepatchSummary,
 } from "./types";
@@ -25,6 +27,20 @@ export function validateGameDataDir(path: string): Promise<void> {
 
 export function inspectPatch(paths: string[], dataDir: string | null): Promise<InspectPatchResult> {
   return invoke("inspect_patch", { request: { paths, dataDir } });
+}
+
+export function previewEquipmentMapping(
+  patchPaths: string[],
+  mapping: MigrationMapping,
+): Promise<EquipmentMappingPreview> {
+  return invoke("preview_equipment_mapping", { request: { patchPaths, mapping } });
+}
+
+export function previewEquipmentMappings(
+  patchPaths: string[],
+  mappings: MigrationMapping[],
+): Promise<EquipmentMappingPreview[]> {
+  return invoke("preview_equipment_mappings", { request: { patchPaths, mappings } });
 }
 
 export async function choosePatchPaths(): Promise<string[] | null> {

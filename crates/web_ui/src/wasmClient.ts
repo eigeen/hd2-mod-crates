@@ -4,8 +4,11 @@ import {
   TaskError,
   normalizeTaskError,
   type TaskErrorCode,
+  EquipmentPatchAnalysis,
+  EquipmentMappingPreview,
   EquipmentOption,
   MigrationResult,
+  MigrationMapping,
   PatchFiles,
   PatchInspection,
   TargetOption,
@@ -87,6 +90,41 @@ export async function inspectEquipmentContents(
   return callWasm("inspect_equipment", () =>
     wasm.inspect_equipment(patch.name, patch.toc),
   ) as Promise<PatchInspection>;
+}
+
+export async function analyzeEquipmentContents(
+  patch: PatchFiles,
+  dataSource?: GameDataSource,
+) {
+  const wasm = await loadWasm();
+  if (dataSource) {
+    return callWasm("analyze_equipment_patch_with_source", () =>
+      wasm.analyze_equipment_patch_with_source(patch.name, patch.toc, dataSource),
+    ) as Promise<EquipmentPatchAnalysis>;
+  }
+  return callWasm("analyze_equipment_patch", () =>
+    wasm.analyze_equipment_patch(patch.name, patch.toc),
+  ) as Promise<EquipmentPatchAnalysis>;
+}
+
+export async function previewEquipmentMapping(
+  patch: PatchFiles,
+  mapping: MigrationMapping,
+): Promise<EquipmentMappingPreview> {
+  const wasm = await loadWasm();
+  return callWasm("preview_equipment_mapping", () =>
+    wasm.preview_equipment_mapping(patch.name, patch.toc, mapping),
+  ) as Promise<EquipmentMappingPreview>;
+}
+
+export async function previewEquipmentMappings(
+  patch: PatchFiles,
+  mappings: MigrationMapping[],
+): Promise<EquipmentMappingPreview[]> {
+  const wasm = await loadWasm();
+  return callWasm("preview_equipment_mappings", () =>
+    wasm.preview_equipment_mappings(patch.name, patch.toc, mappings),
+  ) as Promise<EquipmentMappingPreview[]>;
 }
 
 export async function migrateEquipmentVariants(
@@ -184,7 +222,7 @@ function wasmErrorCode(label: string): TaskErrorCode {
   if (label === "builtin_equipment_options" || label === "builtin_target_options") {
     return "equipment.loadFailed";
   }
-  if (label.startsWith("inspect_") || label === "detect_source") {
+  if (label.startsWith("inspect_") || label.startsWith("analyze_") || label === "detect_source") {
     return "patch.inspectFailed";
   }
   if (label === "repatch_units") return "repatch.failed";

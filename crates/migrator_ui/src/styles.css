@@ -8,6 +8,8 @@
   --color-hd2-yellow:     #fee70f; /* primary accent */
   --color-hd2-yellow-dim: #a1920b; /* accent dimmed / hover */
   --color-hd2-yellow-bg:  #211f06; /* accent hover background */
+  --color-hd2-related:    #6fa8b8; /* reverse/shared graph relationship */
+  --color-hd2-danger:     #d86868; /* destructive / excluded Unit state */
   --color-hd2-bg:         #111820; /* page background, text-on-accent */
   --color-hd2-surface:    #0c0c0c; /* panels / cards */
   --color-hd2-sunken:     #080808; /* inner panels, mapping grid */
@@ -81,6 +83,165 @@ html.desktop-app::-webkit-scrollbar-corner {
 body {
   margin: 0;
   min-width: 20rem;
+}
+
+.hd2-equipment-graph .react-flow__edge-path {
+  stroke: var(--color-hd2-line);
+  stroke-linecap: round;
+  stroke-width: 1.5;
+}
+
+.hd2-equipment-graph .hd2-preview-remap-edge .react-flow__edge-path {
+  stroke: var(--color-hd2-yellow);
+  stroke-width: 2;
+}
+
+.hd2-equipment-graph .hd2-preview-conflict-edge .react-flow__edge-path {
+  stroke: var(--color-hd2-danger);
+  stroke-width: 2.5;
+}
+
+.hd2-equipment-graph .hd2-preview-resolved-edge .react-flow__edge-path {
+  stroke: var(--color-hd2-related);
+  stroke-width: 2;
+}
+
+.hd2-equipment-graph .hd2-preview-ownership-edge .react-flow__edge-path {
+  stroke: var(--color-hd2-line);
+}
+
+.hd2-equipment-graph .react-flow__handle {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-color: var(--color-hd2-yellow);
+  background: var(--color-hd2-bg);
+}
+
+.hd2-equipment-graph .react-flow__arrowhead polyline {
+  stroke: var(--color-hd2-line);
+  fill: var(--color-hd2-line);
+}
+
+.hd2-equipment-graph .react-flow__node {
+  cursor: pointer;
+  transition: opacity 140ms ease, filter 140ms ease;
+}
+
+.hd2-equipment-graph .hd2-unit-node {
+  --hd2-unit-source-corner: var(--color-hd2-yellow-dim);
+  --hd2-unit-target-corner: var(--color-hd2-related);
+  --hd2-unit-behavior-corner: var(--color-hd2-yellow);
+  position: relative;
+}
+
+.hd2-equipment-graph .hd2-unit-corner {
+  display: block;
+  height: 0.875rem;
+  pointer-events: none;
+  position: absolute;
+  width: 0.875rem;
+  z-index: 2;
+}
+
+.hd2-equipment-graph .hd2-unit-corner-source {
+  border-left: 0.1875rem solid var(--hd2-unit-source-corner);
+  border-top: 0.1875rem solid var(--hd2-unit-source-corner);
+  left: -0.375rem;
+  top: -0.375rem;
+}
+
+.hd2-equipment-graph .hd2-unit-corner-target {
+  border-right: 0.1875rem solid var(--hd2-unit-target-corner);
+  border-top: 0.1875rem solid var(--hd2-unit-target-corner);
+  right: -0.375rem;
+  top: -0.375rem;
+}
+
+.hd2-equipment-graph .hd2-unit-corner-behavior {
+  border-bottom: 0.1875rem solid var(--hd2-unit-behavior-corner);
+  border-right: 0.1875rem solid var(--hd2-unit-behavior-corner);
+  bottom: -0.375rem;
+  right: -0.375rem;
+}
+
+.hd2-equipment-graph .hd2-unit-direct-reuse {
+  --hd2-unit-target-corner: #75b78e;
+}
+
+.hd2-equipment-graph .hd2-unit-direct-reuse:not(.hd2-unit-replacement-source) {
+  --hd2-unit-source-corner: #75b78e;
+}
+
+.hd2-equipment-graph .hd2-unit-unrecognized {
+  border-style: dashed;
+}
+
+.hd2-equipment-graph .react-flow__node.selected > div,
+.hd2-equipment-graph .react-flow__node.hd2-graph-active > div {
+  box-shadow: 0 0 0 2px var(--color-hd2-yellow);
+}
+
+.hd2-equipment-graph .hd2-graph-active .react-flow__edge-path {
+  stroke: var(--color-hd2-yellow);
+  stroke-width: 2;
+}
+
+.hd2-equipment-graph .react-flow__node.hd2-graph-reverse > div {
+  box-shadow: 0 0 0 1px var(--color-hd2-related);
+}
+
+.hd2-equipment-graph .hd2-graph-reverse .react-flow__edge-path {
+  stroke: var(--color-hd2-related);
+  stroke-dasharray: 5 4;
+  stroke-width: 1.5;
+}
+
+.hd2-equipment-graph .hd2-graph-dimmed {
+  opacity: 0.18;
+}
+
+.hd2-equipment-graph .hd2-unit-mapping-disabled .react-flow__edge-path {
+  stroke: var(--color-hd2-danger);
+  stroke-dasharray: 3 5;
+  stroke-width: 1.5;
+}
+
+.hd2-equipment-graph .react-flow__node.hd2-unit-custom > div {
+  --hd2-unit-behavior-corner: var(--color-hd2-yellow);
+}
+
+.hd2-equipment-graph .react-flow__node.hd2-unit-excluded > div {
+  --hd2-unit-behavior-corner: var(--color-hd2-danger);
+  opacity: 0.62;
+}
+
+.hd2-equipment-graph .react-flow__node.hd2-unit-conflict-unresolved > div {
+  --hd2-unit-source-corner: var(--color-hd2-danger);
+  --hd2-unit-target-corner: var(--color-hd2-danger);
+  border-color: var(--color-hd2-danger);
+  box-shadow: 0 0 0 1px rgba(216, 104, 104, 0.35);
+}
+
+.hd2-equipment-graph .react-flow__node.hd2-unit-conflict-resolved > div {
+  --hd2-unit-source-corner: var(--color-hd2-related);
+  --hd2-unit-target-corner: var(--color-hd2-related);
+  border-color: var(--color-hd2-related);
+}
+
+.hd2-equipment-graph .react-flow__controls {
+  border: 1px solid var(--color-hd2-border);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.hd2-equipment-graph .react-flow__controls-button {
+  background: var(--color-hd2-surface);
+  border-bottom-color: var(--color-hd2-border);
+  fill: var(--color-hd2-text);
+}
+
+.hd2-equipment-graph .react-flow__controls-button:hover {
+  background: var(--color-hd2-yellow-bg);
 }
 
 .faqDrawer {
@@ -388,6 +549,39 @@ textarea {
 .MuiMenu-list .MuiDivider-root {
   border-color: var(--color-hd2-border) !important;
   margin: 0.25rem 0 !important;
+}
+
+.unitContextMenuHeader.MuiListSubheader-root,
+.unitContextMenuSection.MuiListSubheader-root {
+  background: var(--color-hd2-sunken);
+  color: var(--color-hd2-muted);
+  line-height: 1.35;
+}
+
+.unitContextMenuHeader.MuiListSubheader-root {
+  padding: 0.75rem 1rem;
+}
+
+.unitContextMenuHeader code {
+  color: var(--color-hd2-text);
+  font-size: 0.6875rem;
+}
+
+.unitContextMenuSection.MuiListSubheader-root {
+  padding: 0.375rem 1rem 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.625rem;
+}
+
+.MuiMenuItem-root .MuiListItemIcon-root {
+  color: var(--color-hd2-muted);
+  min-width: 2rem;
+}
+
+.MuiMenuItem-root .MuiListItemText-secondary {
+  color: var(--color-hd2-faint);
+  font-size: 0.625rem;
 }
 
 .MuiTooltip-tooltip {

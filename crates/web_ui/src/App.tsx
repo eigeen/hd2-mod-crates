@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast, Toaster } from "sonner";
 import {
   LanguageMenu,
+  MappingPreviewAccordion,
   MAX_WEB_SINGLE_PATCH_MAPPINGS,
   OptionsPanel,
   PatchPanel,
@@ -21,6 +22,7 @@ import {
   configuredMappings as collectConfiguredMappings,
   createMigrationProgressCounter,
   copyTaskErrorDiagnostic,
+  emptyUnitBehavior,
   exceedsWebMappingLimit,
   maxWebSeparateOutputsForPatch,
   migrationMappingLabel,
@@ -36,6 +38,7 @@ import {
   useTaskReportHistory,
   type DetectedSource,
   type EquipmentOption,
+  type EquipmentPartGraph,
   type MissingUnitPolicy,
   type MigrationMapping,
   type MigrationSummary,
@@ -44,6 +47,7 @@ import {
   type PatchInfo,
   type Translate,
   type TranslationKey,
+  type UnitBehaviorOptions,
   type UnmatchedUnitPolicy,
 } from "@hd2-mod-tools/migrator-ui";
 import { downloadRepatchedPatch, downloadZip, patchFilesFromList } from "./fileInputs";
@@ -52,9 +56,10 @@ import { GameDataDirPanel, type GameDirSelection } from "./GameDataDirPanel";
 import { GameDataSource } from "./gameDataSource";
 import {
   builtinEquipmentOptions,
-  inspectEquipmentContents,
+  analyzeEquipmentContents,
   isWasmRuntimeTrapError,
   migrateEquipmentVariants,
+  previewEquipmentMappings,
   repatchUnits,
   type MigrationProgressSink,
 } from "./wasmClient";
@@ -70,6 +75,8 @@ function App() {
   // 因此把字节存到 ref，state 只留小元数据用于驱动 UI。
   const patchRef = useRef<PatchFiles | null>(null);
   const [patchInfo, setPatchInfo] = useState<PatchInfo | null>(null);
+  const [patchRevision, setPatchRevision] = useState(0);
+  const [equipmentGraph, setEquipmentGraph] = useState<EquipmentPartGraph | null>(null);
   const [sources, setSources] = useState<DetectedSource[]>([]);
   const [activeSourceId, setActiveSourceId] = useState("");
   const [targetsBySource, setTargetsBySource] = useState<Record<string, string[]>>({});
@@ -77,6 +84,7 @@ function App() {
   const [singlePatch, setSinglePatch] = useState(false);
   const [noPadding, setNoPadding] = useState(false);
   const [unmatchedUnitPolicy, setUnmatchedUnitPolicy] = useState<UnmatchedUnitPolicy>("keep");
+  const [unitBehavior, setUnitBehavior] = useState<UnitBehaviorOptions>(emptyUnitBehavior);
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [progressLabel, setProgressLabel] = useState("");
@@ -172,31 +180,43 @@ function App() {
   const applyPatch = useCallback(async (nextPatch: PatchFiles) => {
     patchRef.current = nextPatch;
     setPatchInfo({ name: nextPatch.name });
+    setPatchRevision((revision) => revision + 1);
+    setEquipmentGraph(null);
     setTargetsBySource({});
     setMultiTarget(false);
     setSinglePatch(false);
+    setUnitBehavior(emptyUnitBehavior());
     const dataSource = gameDir ? new GameDataSource(gameDir.handle) : undefined;
-    const inspection = await inspectEquipmentContents(nextPatch, dataSource);
-    setSources(inspection.sources);
-    setActiveSourceId(inspection.sources[0]?.id ?? "");
-    setMultiTarget(canUseMultiTarget(inspection.sources));
+    const analysis = await analyzeEquipmentContents(nextPatch, dataSource);
+    setEquipmentGraph(analysis.equipmentGraph);
+    setSources(analysis.inspection.sources);
+    setActiveSourceId(analysis.inspection.sources[0]?.id ?? "");
+    setMultiTarget(canUseMultiTarget(analysis.inspection.sources));
   }, [gameDir]);
 
   useEffect(() => {
     const patch = patchRef.current;
     if (!patch || !gameDir) return;
     void runTask(setBusy, async () => {
-      const inspection = await inspectEquipmentContents(
+      const analysis = await analyzeEquipmentContents(
         patch,
         new GameDataSource(gameDir.handle),
       );
-      setSources(inspection.sources);
-      setActiveSourceId(inspection.sources[0]?.id ?? "");
+      setEquipmentGraph(analysis.equipmentGraph);
+      setSources(analysis.inspection.sources);
+      setActiveSourceId(analysis.inspection.sources[0]?.id ?? "");
       setTargetsBySource({});
-      setMultiTarget(canUseMultiTarget(inspection.sources));
+      setMultiTarget(canUseMultiTarget(analysis.inspection.sources));
       setSinglePatch(false);
+      setUnitBehavior(emptyUnitBehavior());
     }, t);
   }, [gameDir, t]);
+
+  const loadMappingPreviews = useCallback((mappings: MigrationMapping[]) => {
+    const patch = patchRef.current;
+    if (!patch) return Promise.reject(new Error("Patch is not loaded"));
+    return previewEquipmentMappings(patch, mappings);
+  }, []);
 
   const importPatchFiles = useCallback(
     async (files: FileList | File[] | null, originalName?: string) => {
@@ -295,6 +315,7 @@ function App() {
         setProgressLabel,
         signal,
         unmatchedUnitPolicy,
+        unitBehavior,
         variants,
       });
       reportHistory.recordReport({ kind: "migration", output: result.output, summary: result.summary });
@@ -312,6 +333,7 @@ function App() {
     singlePatchMappingLimit,
     t,
     unmatchedUnitPolicy,
+    unitBehavior,
     runCancellableTask,
     reportHistory.recordReport,
   ]);
@@ -432,7 +454,8 @@ function App() {
           </div>
 
           <div className="border-t border-hd2-border">
-            {toolMode === "migrate" ? <TargetPanel
+            {toolMode === "migrate" ? <>
+              <TargetPanel
               activeSourceId={activeSourceId}
               equipmentOptions={equipmentOptions}
               multiTarget={multiTarget}
@@ -451,7 +474,17 @@ function App() {
               targetOptions={targetOptions}
               targetSelectionEnabled={Boolean(activeSource?.resolvedHash)}
               targetsBySource={targetsBySource}
-            /> : <UnitUpdaterPanel
+              />
+                <MappingPreviewAccordion
+                  contextKey={`${patchRevision}`}
+                  loadPreviews={loadMappingPreviews}
+                  mappings={configuredMappings}
+                  patchGraph={equipmentGraph}
+                  unitBehavior={unitBehavior}
+                  unmatchedUnitPolicy={unmatchedUnitPolicy}
+                  onUnitBehaviorChange={setUnitBehavior}
+                />
+            </> : <UnitUpdaterPanel
               missingUnitPolicy={missingUnitPolicy}
               onMissingUnitPolicyChange={setMissingUnitPolicy}
             />}
@@ -568,6 +601,7 @@ interface VariantMigrationRequest {
   setProgressLabel: (label: string) => void;
   signal: AbortSignal;
   unmatchedUnitPolicy: UnmatchedUnitPolicy;
+  unitBehavior: UnitBehaviorOptions;
   variants: MigrationVariant[];
 }
 
@@ -611,13 +645,14 @@ function migrationOutputFilename(
 
 function unifiedOptions(
   variants: MigrationVariant[],
-  settings: Pick<VariantMigrationRequest, "noPadding" | "unmatchedUnitPolicy">,
+  settings: Pick<VariantMigrationRequest, "noPadding" | "unitBehavior" | "unmatchedUnitPolicy">,
 ) {
   return {
     variants,
     patchSuffix: PATCH_SUFFIX,
     noPadding: settings.noPadding,
     unmatchedUnitPolicy: settings.unmatchedUnitPolicy,
+    unitBehavior: settings.unitBehavior,
   };
 }
 

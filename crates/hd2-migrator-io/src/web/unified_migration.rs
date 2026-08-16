@@ -15,11 +15,17 @@ use std::collections::{HashMap, HashSet};
 #[cfg(not(target_family = "wasm"))]
 mod parallel;
 mod prepared;
+mod unit_behavior;
 mod unit_plan;
 
 #[cfg(not(target_family = "wasm"))]
 pub use parallel::{ParallelVariantPatchCallbacks, migrate_variants_to_patch_sink_parallel};
 use prepared::MigrationExecutor;
+use unit_behavior::CompiledUnitBehavior;
+pub use unit_behavior::{
+    WebUnitBehaviorOptions, WebUnitConflictResolution, WebUnitExportOverride,
+    WebUnitMappingBehaviorKey,
+};
 use unit_plan::UnitMappingEdge;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,6 +42,8 @@ pub struct WebUnifiedMigrateOptions {
     pub no_padding: bool,
     #[serde(default)]
     pub unmatched_unit_policy: UnmatchedUnitPolicy,
+    #[serde(default)]
+    pub unit_behavior: WebUnitBehaviorOptions,
 }
 
 pub struct VariantMigrationCallbacks<'a, F> {
@@ -121,7 +129,8 @@ where
     F: FnMut(VariantPatchOutput) -> crate::Result<()>,
 {
     validate_variants(&options.variants)?;
-    let unit_plans = unit_plan::build_variant_plans(&options.variants)?;
+    let unit_behavior = CompiledUnitBehavior::compile(&options.unit_behavior)?;
+    let unit_plans = unit_plan::build_variant_plans(&options.variants, &unit_behavior)?;
     let suffix = options
         .patch_suffix
         .as_deref()
@@ -134,6 +143,7 @@ where
         executor,
         original: &original,
         unmatched_unit_policy: options.unmatched_unit_policy,
+        unit_behavior,
     };
     for (variant_index, (variant, unit_plan)) in
         options.variants.iter().zip(unit_plans.iter()).enumerate()
@@ -168,6 +178,7 @@ struct VariantMigrationContext<'a, S: DataSource + ?Sized> {
     executor: MigrationExecutor<'a, S>,
     original: &'a StreamToc,
     unmatched_unit_policy: UnmatchedUnitPolicy,
+    unit_behavior: CompiledUnitBehavior,
 }
 
 async fn migrate_variant<S: DataSource + ?Sized>(
@@ -178,8 +189,12 @@ async fn migrate_variant<S: DataSource + ?Sized>(
     if variant.mappings.len() == 1 {
         return migrate_single_mapping_variant(context, variant, unit_plan).await;
     }
-    let mut assembly =
-        VariantAssembly::new(context.original, variant, context.unmatched_unit_policy);
+    let mut assembly = VariantAssembly::new(
+        context.original,
+        variant,
+        context.unmatched_unit_policy,
+        context.unit_behavior.clone(),
+    );
     for (mapping, authoritative_edges) in variant.mappings.iter().zip(&unit_plan.mapping_edges) {
         let result = migrate_mapping(context, mapping).await?;
         assembly.merge(mapping, authoritative_edges, result)?;
@@ -200,11 +215,12 @@ impl<'a> VariantAssembly<'a> {
         original: &'a StreamToc,
         variant: &'a WebMigrationVariant,
         policy: UnmatchedUnitPolicy,
+        unit_behavior: CompiledUnitBehavior,
     ) -> Self {
         let mut report = empty_report(variant);
         report.unmatched_unit_policy = policy;
         Self {
-            builder: VariantPatchBuilder::new(original),
+            builder: VariantPatchBuilder::new(original, unit_behavior),
             original,
             policy,
             report,
@@ -254,6 +270,7 @@ async fn migrate_single_mapping_variant<S: DataSource + ?Sized>(
             original: context.original,
             policy: context.unmatched_unit_policy,
             variant,
+            unit_behavior: context.unit_behavior.clone(),
         },
         result,
     )
@@ -265,13 +282,14 @@ struct SingleMappingAssembly<'a> {
     original: &'a StreamToc,
     policy: UnmatchedUnitPolicy,
     variant: &'a WebMigrationVariant,
+    unit_behavior: CompiledUnitBehavior,
 }
 
 fn assemble_single_mapping(
     context: SingleMappingAssembly<'_>,
     mut result: mode_a_web::WebTargetResult,
 ) -> crate::Result<VariantResult> {
-    let mut builder = VariantPatchBuilder::new(context.original);
+    let mut builder = VariantPatchBuilder::new(context.original, context.unit_behavior);
     builder.merge_mapping(
         context.original,
         context.mapping,
@@ -303,6 +321,7 @@ struct VariantPatchBuilder {
     claimed_source_units: HashSet<u64>,
     claimed_target_units: HashMap<u64, UnitClaim>,
     preserved_source_units: HashSet<u64>,
+    unit_behavior: CompiledUnitBehavior,
 }
 
 struct UnitClaim {
@@ -324,7 +343,7 @@ impl UnitClaim {
 }
 
 impl VariantPatchBuilder {
-    fn new(original: &StreamToc) -> Self {
+    fn new(original: &StreamToc, unit_behavior: CompiledUnitBehavior) -> Self {
         Self {
             output: StreamToc {
                 types: original.types.clone(),
@@ -336,6 +355,7 @@ impl VariantPatchBuilder {
             claimed_source_units: HashSet::new(),
             claimed_target_units: HashMap::new(),
             preserved_source_units: HashSet::new(),
+            unit_behavior,
         }
     }
 
@@ -360,7 +380,18 @@ impl VariantPatchBuilder {
         output_units: &mut HashSet<u64>,
         unit_edges: &[UnitMappingEdge],
     ) -> crate::Result<()> {
-        for edge in unit_edges {
+        let selected_edges = unit_edges
+            .iter()
+            .filter(|edge| self.unit_behavior.selects_edge(edge))
+            .collect::<Vec<_>>();
+        let selected_targets = selected_edges
+            .iter()
+            .map(|edge| edge.target_file_id)
+            .collect::<HashSet<_>>();
+        for target in unit_edge_target_ids(unit_edges).difference(&selected_targets) {
+            output_units.remove(target);
+        }
+        for edge in selected_edges {
             if output_units.contains(&edge.target_file_id)
                 && !self.claim_unit_edge(mapping, edge)?
             {
@@ -420,15 +451,31 @@ impl VariantPatchBuilder {
     }
 
     fn finish(mut self, original: &StreamToc, policy: UnmatchedUnitPolicy) -> StreamToc {
-        if policy == UnmatchedUnitPolicy::Keep {
-            preserve_original_units(
-                &mut self.output,
-                original,
-                &self.claimed_source_units,
-                &self.preserved_source_units,
-            );
-        }
+        self.preserve_selected_original_units(original, policy);
         self.output
+    }
+
+    fn preserve_selected_original_units(
+        &mut self,
+        original: &StreamToc,
+        policy: UnmatchedUnitPolicy,
+    ) {
+        let retained_units = crate::web::migration::unit_file_ids(original)
+            .into_iter()
+            .filter(|file_id| self.should_preserve_original_unit(*file_id, policy))
+            .collect::<HashSet<_>>();
+        let entries = source_selection::unit_dependency_entries(original, &retained_units);
+        mode_a_common::merge_preserved_entries(&mut self.output, &entries);
+    }
+
+    fn should_preserve_original_unit(&self, file_id: u64, policy: UnmatchedUnitPolicy) -> bool {
+        let unclaimed = !self.claimed_source_units.contains(&file_id)
+            || self.preserved_source_units.contains(&file_id);
+        match self.unit_behavior.export_override(file_id) {
+            Some(false) => false,
+            Some(true) => unclaimed,
+            None => policy == UnmatchedUnitPolicy::Keep && unclaimed,
+        }
     }
 
     fn unconverted_original_units(&self, original: &StreamToc) -> HashSet<u64> {
@@ -653,22 +700,6 @@ fn preserve_unmapped_source_units(
     );
 }
 
-fn preserve_original_units(
-    output: &mut StreamToc,
-    original: &StreamToc,
-    claimed_source_units: &HashSet<u64>,
-    preserved_source_units: &HashSet<u64>,
-) {
-    let original_units = crate::web::migration::unit_file_ids(original);
-    let mut retained_units = original_units
-        .difference(claimed_source_units)
-        .copied()
-        .collect::<HashSet<_>>();
-    retained_units.extend(preserved_source_units);
-    let entries = source_selection::unit_dependency_entries(original, &retained_units);
-    mode_a_common::merge_preserved_entries(output, &entries);
-}
-
 fn entries_by_key(patch: &StreamToc) -> HashMap<(u64, u64), &TocEntry> {
     patch
         .entries
@@ -868,7 +899,7 @@ mod tests {
 
     #[test]
     fn repeated_unit_mapping_edge_is_emitted_only_once() {
-        let mut builder = VariantPatchBuilder::new(&archive(&[]));
+        let mut builder = VariantPatchBuilder::new(&archive(&[]), Default::default());
         let first_mapping = mapping_with_hashes(EquipmentCategory::Armor, "source", "target-a");
         let repeated_mapping = mapping_with_hashes(EquipmentCategory::Armor, "source", "target-b");
         let first_edge = UnitMappingEdge::test_edge(1, 9);
@@ -906,7 +937,7 @@ mod tests {
 
     #[test]
     fn different_source_equipment_unit_edges_conflict() {
-        let mut builder = VariantPatchBuilder::new(&archive(&[]));
+        let mut builder = VariantPatchBuilder::new(&archive(&[]), Default::default());
         let first_mapping = mapping_with_hashes(EquipmentCategory::Armor, "source-a", "target-a");
         let second_mapping = mapping_with_hashes(EquipmentCategory::Armor, "source-b", "target-b");
         let mut first_output = HashSet::from([9]);
@@ -931,6 +962,81 @@ mod tests {
     }
 
     #[test]
+    fn preferred_conflict_source_suppresses_the_other_unit_output() {
+        let behavior = CompiledUnitBehavior::compile(&WebUnitBehaviorOptions {
+            conflict_resolutions: vec![WebUnitConflictResolution {
+                target_file_id: "9".to_string(),
+                preferred_source_file_id: "2".to_string(),
+            }],
+            ..Default::default()
+        })
+        .unwrap();
+        let mut builder = VariantPatchBuilder::new(&archive(&[]), behavior);
+        let mut first_output = HashSet::from([9]);
+        let mut second_output = HashSet::from([9]);
+
+        builder
+            .remove_redundant_unit_outputs(
+                &mapping_with_hashes(EquipmentCategory::Armor, "source-a", "target"),
+                &mut first_output,
+                &[UnitMappingEdge::test_edge(1, 9)],
+            )
+            .unwrap();
+        builder
+            .remove_redundant_unit_outputs(
+                &mapping_with_hashes(EquipmentCategory::Armor, "source-b", "target"),
+                &mut second_output,
+                &[UnitMappingEdge::test_edge(2, 9)],
+            )
+            .unwrap();
+
+        assert!(first_output.is_empty());
+        assert_eq!(second_output, HashSet::from([9]));
+    }
+
+    #[test]
+    fn export_override_removes_a_converted_unit() {
+        let behavior = CompiledUnitBehavior::compile(&WebUnitBehaviorOptions {
+            export_overrides: vec![WebUnitExportOverride {
+                file_id: "9".to_string(),
+                export: false,
+            }],
+            ..Default::default()
+        })
+        .unwrap();
+        let mut builder = VariantPatchBuilder::new(&archive(&[]), behavior);
+        let mut output = HashSet::from([9]);
+
+        builder
+            .remove_redundant_unit_outputs(
+                &mapping_with_hashes(EquipmentCategory::Armor, "source", "target"),
+                &mut output,
+                &[UnitMappingEdge::test_edge(1, 9)],
+            )
+            .unwrap();
+
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn export_override_can_keep_an_unrecognized_unit_under_drop_policy() {
+        let original = archive(&[entry(7, vec![1])]);
+        let behavior = CompiledUnitBehavior::compile(&WebUnitBehaviorOptions {
+            export_overrides: vec![WebUnitExportOverride {
+                file_id: "7".to_string(),
+                export: true,
+            }],
+            ..Default::default()
+        })
+        .unwrap();
+        let builder = VariantPatchBuilder::new(&original, behavior);
+
+        let output = builder.finish(&original, UnmatchedUnitPolicy::Drop);
+
+        assert!(output.find(7, UNIT_ID).is_some());
+    }
+
+    #[test]
     fn combines_independent_outputs_from_sources_that_share_units() {
         let original = archive(&[
             entry(1, vec![1]),
@@ -940,7 +1046,7 @@ mod tests {
         ]);
         let first = archive(&[entry(10, vec![1]), entry(11, vec![2])]);
         let second = archive(&[entry(20, vec![1]), entry(21, vec![3])]);
-        let mut builder = VariantPatchBuilder::new(&original);
+        let mut builder = VariantPatchBuilder::new(&original, Default::default());
 
         builder
             .merge_selected_output(&HashSet::from([1, 2]), &HashSet::from([10, 11]), first)
@@ -959,7 +1065,7 @@ mod tests {
     #[test]
     fn combined_warning_is_empty_when_every_original_unit_is_mapped() {
         let original = archive(&[entry(1, vec![1]), entry(2, vec![2])]);
-        let mut builder = VariantPatchBuilder::new(&original);
+        let mut builder = VariantPatchBuilder::new(&original, Default::default());
         builder
             .merge_selected_output(
                 &HashSet::from([1, 2]),
@@ -977,7 +1083,7 @@ mod tests {
     #[test]
     fn combined_warning_reports_units_outside_configured_mappings() {
         let original = archive(&[entry(1, vec![1]), entry(2, vec![2])]);
-        let mut builder = VariantPatchBuilder::new(&original);
+        let mut builder = VariantPatchBuilder::new(&original, Default::default());
         builder
             .merge_selected_output(
                 &HashSet::from([1]),

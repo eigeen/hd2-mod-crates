@@ -22,5 +22,9 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "typescript": "~7.0.2"
+  },
+  "dependencies": {
+    "@dagrejs/dagre": "^3.1.1",
+    "@xyflow/react": "^12.11.3"
   }
 }

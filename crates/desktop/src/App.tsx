@@ -8,6 +8,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   LanguageMenu,
+  MappingPreviewAccordion,
   OptionsPanel,
   ResultReportDialog,
   TaskReportHistoryButton,
@@ -18,6 +19,7 @@ import {
   buildMigrationVariants,
   configuredMappings as collectConfiguredMappings,
   createMigrationProgressCounter,
+  emptyUnitBehavior,
   multiTargetEligible as canUseMultiTarget,
   presentTaskError,
   selectTarget,
@@ -28,7 +30,10 @@ import {
   useI18n,
   useTaskReportHistory,
   type CompletedTaskReport,
+  type EquipmentPartGraph,
+  type MigrationMapping,
   type Translate,
+  type UnitBehaviorOptions,
 } from "@hd2-mod-tools/migrator-ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast, Toaster } from "sonner";
@@ -41,6 +46,7 @@ import {
   detectGameDataDir,
   inspectPatch,
   loadEquipmentOptions,
+  previewEquipmentMappings,
   startMigration,
   startRepatch,
   validateGameDataDir,
@@ -66,6 +72,7 @@ function App() {
   const [equipmentOptions, setEquipmentOptions] = useState<EquipmentOption[]>([]);
   const [patchPaths, setPatchPaths] = useState<string[]>([]);
   const [patch, setPatch] = useState<PatchDescriptor | null>(null);
+  const [equipmentGraph, setEquipmentGraph] = useState<EquipmentPartGraph | null>(null);
   const [gameDir, setGameDir] = useState<string | null>(null);
   const [sources, setSources] = useState<DetectedSource[]>([]);
   const [activeSourceId, setActiveSourceId] = useState("");
@@ -74,6 +81,7 @@ function App() {
   const [singlePatch, setSinglePatch] = useState(false);
   const [noPadding, setNoPadding] = useState(false);
   const [unmatchedUnitPolicy, setUnmatchedUnitPolicy] = useState<UnmatchedUnitPolicy>("keep");
+  const [unitBehavior, setUnitBehavior] = useState<UnitBehaviorOptions>(emptyUnitBehavior);
   const [missingUnitPolicy, setMissingUnitPolicy] = useState<MissingUnitPolicy>("drop");
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -113,12 +121,19 @@ function App() {
 
   const applyInspection = useCallback((result: Awaited<ReturnType<typeof inspectPatch>>) => {
     setPatch(result.patch);
+    setEquipmentGraph(result.equipmentGraph);
     setSources(result.inspection.sources);
     setActiveSourceId(result.inspection.sources[0]?.id ?? "");
     setTargetsBySource({});
     setMultiTarget(canUseMultiTarget(result.inspection.sources));
     setSinglePatch(false);
+    setUnitBehavior(emptyUnitBehavior());
   }, []);
+
+  const loadMappingPreviews = useCallback(
+    (mappings: MigrationMapping[]) => previewEquipmentMappings(patchPaths, mappings),
+    [patchPaths],
+  );
 
   useEffect(() => {
     if (!patchPaths.length) return;
@@ -137,6 +152,7 @@ function App() {
   }, [applyInspection, gameDir, patchPaths]);
 
   const importPatchPaths = useCallback(async (selected: string[]) => {
+    setEquipmentGraph(null);
     setPatchPaths(selected);
   }, []);
 
@@ -212,14 +228,14 @@ function App() {
         patchPaths,
         dataDir: gameDir,
         outputPath,
-        options: { variants, patchSuffix: PATCH_SUFFIX, noPadding, unmatchedUnitPolicy },
+        options: { variants, patchSuffix: PATCH_SUFFIX, noPadding, unmatchedUnitPolicy, unitBehavior },
       }, onProgress);
       activeTaskRef.current = task;
       const summary = await task.result;
       reportHistory.recordReport({ kind: "migration", output: outputPath, summary });
     });
     setProgressLabel("");
-  }, [configuredMappings, equipmentOptions, gameDir, noPadding, outputAsSinglePatch, patch, patchPaths, reportHistory.recordReport, t, unmatchedUnitPolicy]);
+  }, [configuredMappings, equipmentOptions, gameDir, noPadding, outputAsSinglePatch, patch, patchPaths, reportHistory.recordReport, t, unmatchedUnitPolicy, unitBehavior]);
 
   const runRepatch = useCallback(async () => {
     if (!gameDir || !patch) return;
@@ -299,7 +315,7 @@ function App() {
               </div>
             </div>
             <div className="border-t border-hd2-border">
-              {toolMode === "migrate" ? (
+              {toolMode === "migrate" ? <>
                 <TargetPanel
                   activeSourceId={activeSourceId}
                   equipmentOptions={equipmentOptions}
@@ -322,7 +338,16 @@ function App() {
                   targetSelectionEnabled={Boolean(activeSource?.resolvedHash)}
                   targetsBySource={targetsBySource}
                 />
-              ) : (
+                <MappingPreviewAccordion
+                  contextKey={patchPaths.join("|")}
+                  loadPreviews={loadMappingPreviews}
+                  mappings={configuredMappings}
+                  patchGraph={equipmentGraph}
+                  unitBehavior={unitBehavior}
+                  unmatchedUnitPolicy={unmatchedUnitPolicy}
+                  onUnitBehaviorChange={setUnitBehavior}
+                />
+              </> : (
                 <UnitUpdaterPanel missingUnitPolicy={missingUnitPolicy} onMissingUnitPolicyChange={setMissingUnitPolicy} />
               )}
             </div>

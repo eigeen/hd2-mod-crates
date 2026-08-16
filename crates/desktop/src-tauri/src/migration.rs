@@ -11,7 +11,8 @@ use crate::task::TaskRegistry;
 use hd2_migrator_io::io::NativeDataSource;
 use hd2_migrator_io::web::{
     self, ParallelVariantPatchCallbacks, UnitRepatchOptions, VariantPatchOutput,
-    WebEquipmentInspection, WebEquipmentOption, WebMigrationSummary, WebProgress,
+    WebEquipmentInspection, WebEquipmentMappingPreview, WebEquipmentOption, WebEquipmentPartGraph,
+    WebEquipmentPatchAnalysis, WebMigrationMapping, WebMigrationSummary, WebProgress,
     WebUnifiedMigrateOptions,
 };
 use serde::{Deserialize, Serialize};
@@ -33,6 +34,7 @@ pub struct InspectPatchRequest {
 pub struct InspectPatchResult {
     patch: PatchDescriptor,
     inspection: WebEquipmentInspection,
+    equipment_graph: WebEquipmentPartGraph,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,6 +44,20 @@ pub struct MigrateRequest {
     data_dir: PathBuf,
     output_path: PathBuf,
     options: WebUnifiedMigrateOptions,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewMappingRequest {
+    patch_paths: Vec<PathBuf>,
+    mapping: WebMigrationMapping,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewMappingsRequest {
+    patch_paths: Vec<PathBuf>,
+    mappings: Vec<WebMigrationMapping>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -87,6 +103,32 @@ pub async fn inspect_patch(
         .await
         .map_err(|error| CommandError::from_display("task.joinFailed", error))?
         .map_err(|error| CommandError::new("patch.inspectFailed", error))
+}
+
+#[tauri::command]
+pub async fn preview_equipment_mapping(
+    request: PreviewMappingRequest,
+) -> Result<WebEquipmentMappingPreview, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let patch = load_patch(&request.patch_paths)?;
+        web::preview_equipment_mapping(patch.bytes(), &request.mapping).map_err(display_error)
+    })
+    .await
+    .map_err(|error| CommandError::from_display("task.joinFailed", error))?
+    .map_err(|error| CommandError::new("migration.failed", error))
+}
+
+#[tauri::command]
+pub async fn preview_equipment_mappings(
+    request: PreviewMappingsRequest,
+) -> Result<Vec<WebEquipmentMappingPreview>, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let patch = load_patch(&request.patch_paths)?;
+        web::preview_equipment_mappings(patch.bytes(), &request.mappings).map_err(display_error)
+    })
+    .await
+    .map_err(|error| CommandError::from_display("task.joinFailed", error))?
+    .map_err(|error| CommandError::new("migration.failed", error))
 }
 
 #[tauri::command]
@@ -136,23 +178,24 @@ pub fn cancel_task(task_id: String, tasks: State<'_, TaskRegistry>) -> bool {
 
 fn inspect_patch_blocking(request: InspectPatchRequest) -> Result<InspectPatchResult, String> {
     let patch = load_patch(&request.paths)?;
-    let inspection = inspect_with_optional_source(patch.bytes(), request.data_dir)?;
+    let analysis = analyze_with_optional_source(patch.bytes(), request.data_dir)?;
     Ok(InspectPatchResult {
         patch: patch.descriptor(),
-        inspection,
+        inspection: analysis.inspection,
+        equipment_graph: analysis.equipment_graph,
     })
 }
 
-fn inspect_with_optional_source(
+fn analyze_with_optional_source(
     patch: &web::PatchBytes,
     data_dir: Option<PathBuf>,
-) -> Result<WebEquipmentInspection, String> {
+) -> Result<WebEquipmentPatchAnalysis, String> {
     let result = match data_dir {
-        Some(path) => pollster::block_on(web::inspect_equipment_with_source(
+        Some(path) => pollster::block_on(web::analyze_equipment_patch_with_source(
             patch,
             &NativeDataSource::new(path),
         )),
-        None => web::inspect_equipment(patch),
+        None => web::analyze_equipment_patch(patch),
     };
     result.map_err(display_error)
 }
@@ -438,6 +481,7 @@ mod real_data_tests {
                 patch_suffix: Some(web::migration::DEFAULT_PATCH_SUFFIX.to_owned()),
                 no_padding: false,
                 unmatched_unit_policy: UnmatchedUnitPolicy::Keep,
+                unit_behavior: Default::default(),
             },
         };
 
@@ -474,6 +518,7 @@ mod real_data_tests {
                 patch_suffix: Some(web::migration::DEFAULT_PATCH_SUFFIX.to_owned()),
                 no_padding: false,
                 unmatched_unit_policy: UnmatchedUnitPolicy::Keep,
+                unit_behavior: Default::default(),
             },
         };
 

@@ -23,6 +23,7 @@ struct ParallelRunState<'a, S: DataSource + ?Sized> {
     original: &'a StreamToc,
     progress: Option<&'a (dyn mode_a_web::WebProgress + Sync)>,
     unit_plans: &'a [unit_plan::VariantUnitPlan],
+    unit_behavior: &'a CompiledUnitBehavior,
 }
 
 struct ParallelWriteContext<'a> {
@@ -60,7 +61,8 @@ where
     F: FnMut(VariantPatchOutput) -> crate::Result<()>,
 {
     validate_variants(&options.variants)?;
-    let unit_plans = unit_plan::build_variant_plans(&options.variants)?;
+    let unit_behavior = CompiledUnitBehavior::compile(&options.unit_behavior)?;
+    let unit_plans = unit_plan::build_variant_plans(&options.variants, &unit_behavior)?;
     let original = parse_patch(&patch_bytes)?;
     let executor = ParallelMigrationExecutor::new(&original, source, options.no_padding).await?;
     let suffix = options
@@ -73,6 +75,7 @@ where
         original: &original,
         progress: callbacks.progress,
         unit_plans: &unit_plans,
+        unit_behavior: &unit_behavior,
     };
     let write_context = ParallelWriteContext {
         options: &options,
@@ -171,6 +174,7 @@ async fn prepare_single_batch<'a, S: DataSource + Sync + ?Sized>(
                 original: state.original,
                 policy: state.options.unmatched_unit_policy,
                 variant,
+                unit_behavior: (*state.unit_behavior).clone(),
             },
             index,
             work,
@@ -250,8 +254,12 @@ async fn migrate_combined_variant<S: DataSource + Sync + ?Sized>(
     index: usize,
 ) -> crate::Result<VariantResult> {
     let variant = &state.options.variants[index];
-    let mut assembly =
-        VariantAssembly::new(state.original, variant, state.options.unmatched_unit_policy);
+    let mut assembly = VariantAssembly::new(
+        state.original,
+        variant,
+        state.options.unmatched_unit_policy,
+        (*state.unit_behavior).clone(),
+    );
     for start in (0..variant.mappings.len()).step_by(parallel_batch_size()) {
         let end = (start + parallel_batch_size()).min(variant.mappings.len());
         let batch = prepare_mapping_batch(state, index, start..end).await?;

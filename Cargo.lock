@@ -1900,6 +1900,7 @@ version = "0.1.0"
 dependencies = [
  "byteorder",
  "eyre",
+ "hd2-archive-format",
  "hd2-migrator-data",
  "lz4_flex",
  "pollster",

@@ -1,4 +1,5 @@
 use super::WebMigrationVariant;
+use super::unit_behavior::CompiledUnitBehavior;
 use crate::unit::authority::ArmorMappingTable;
 use crate::unit::direct_mapping::match_unit_parts;
 use crate::unit::helmet_authority::HelmetMappingTable;
@@ -40,6 +41,7 @@ struct UnitPlanTables {
 /// Build and validate all authoritative Unit assignments before archive I/O starts.
 pub(super) fn build_variant_plans(
     variants: &[WebMigrationVariant],
+    behavior: &CompiledUnitBehavior,
 ) -> crate::Result<Vec<VariantUnitPlan>> {
     let tables = UnitPlanTables {
         armor: ArmorMappingTable::bundled()?,
@@ -47,20 +49,21 @@ pub(super) fn build_variant_plans(
     };
     variants
         .iter()
-        .map(|variant| build_variant_plan(variant, &tables))
+        .map(|variant| build_variant_plan(variant, &tables, behavior))
         .collect()
 }
 
 fn build_variant_plan(
     variant: &WebMigrationVariant,
     tables: &UnitPlanTables,
+    behavior: &CompiledUnitBehavior,
 ) -> crate::Result<VariantUnitPlan> {
     let mapping_edges = variant
         .mappings
         .iter()
         .map(|mapping| mapping_edges(mapping, tables))
         .collect::<crate::Result<Vec<_>>>()?;
-    validate_target_owners(&variant.mappings, &mapping_edges)?;
+    validate_target_owners(&variant.mappings, &mapping_edges, behavior)?;
     Ok(VariantUnitPlan { mapping_edges })
 }
 
@@ -118,14 +121,49 @@ fn helmet_unit_id(table: &HelmetMappingTable, name: &str) -> crate::Result<u64> 
 fn validate_target_owners(
     mappings: &[WebMigrationMapping],
     mapping_edges: &[Vec<UnitMappingEdge>],
+    behavior: &CompiledUnitBehavior,
 ) -> crate::Result<()> {
+    validate_preferred_sources(mapping_edges, behavior)?;
     let mut owners = HashMap::<u64, (&WebMigrationMapping, UnitMappingEdge)>::new();
     for (mapping, edges) in mappings.iter().zip(mapping_edges) {
         for edge in edges {
+            if !behavior.selects_edge(edge) {
+                continue;
+            }
             validate_target_owner(&mut owners, mapping, edge)?;
         }
     }
     Ok(())
+}
+
+fn validate_preferred_sources(
+    mapping_edges: &[Vec<UnitMappingEdge>],
+    behavior: &CompiledUnitBehavior,
+) -> crate::Result<()> {
+    for (target_file_id, sources) in candidate_sources_by_target(mapping_edges) {
+        let Some(preferred) = behavior.preferred_source(target_file_id) else {
+            continue;
+        };
+        if !sources.contains(&preferred) {
+            eyre::bail!(
+                "preferred source Unit 0x{preferred:016x} does not map to target FileID 0x{target_file_id:016x}"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn candidate_sources_by_target(
+    mapping_edges: &[Vec<UnitMappingEdge>],
+) -> HashMap<u64, std::collections::HashSet<u64>> {
+    let mut candidates = HashMap::<u64, std::collections::HashSet<u64>>::new();
+    for edge in mapping_edges.iter().flatten() {
+        candidates
+            .entry(edge.target_file_id)
+            .or_default()
+            .insert(edge.source_file_id);
+    }
+    candidates
 }
 
 fn validate_target_owner<'a>(
@@ -164,6 +202,7 @@ fn plan_claims_are_compatible(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::web::unified_migration::{WebUnitBehaviorOptions, WebUnitConflictResolution};
 
     const FS_55_ARMOR: &str = "1308bf1fbd277eb2";
     const CE_07_ARMOR: &str = "ffcad1f7ff9888d7";
@@ -175,23 +214,49 @@ mod tests {
     #[test]
     fn allows_repeated_identical_unit_edges() {
         let edges = vec![vec![edge(1, 9, "first"), edge(1, 9, "second")]];
-        assert!(validate_target_owners(&[armor_mapping("a", "b")], &edges).is_ok());
+        assert!(
+            validate_target_owners(
+                &[armor_mapping("a", "b")],
+                &edges,
+                &CompiledUnitBehavior::default(),
+            )
+            .is_ok()
+        );
     }
 
     #[test]
     fn rejects_distinct_sources_claiming_one_target() {
         let edges = vec![vec![edge(1, 9, "first"), edge(2, 9, "second")]];
-        let error = validate_target_owners(&[armor_mapping("a", "b")], &edges)
-            .unwrap_err()
-            .to_string();
+        let error = validate_target_owners(
+            &[armor_mapping("a", "b")],
+            &edges,
+            &CompiledUnitBehavior::default(),
+        )
+        .unwrap_err()
+        .to_string();
         assert!(error.contains("different source Units"));
         assert!(error.contains("0x0000000000000009"));
     }
 
     #[test]
+    fn preferred_source_resolves_distinct_target_claims() {
+        let edges = vec![vec![edge(1, 9, "first"), edge(2, 9, "second")]];
+        let behavior = CompiledUnitBehavior::compile(&WebUnitBehaviorOptions {
+            conflict_resolutions: vec![WebUnitConflictResolution {
+                target_file_id: "9".to_string(),
+                preferred_source_file_id: "2".to_string(),
+            }],
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert!(validate_target_owners(&[armor_mapping("a", "b")], &edges, &behavior).is_ok());
+    }
+
+    #[test]
     fn real_shared_armor_part_is_one_compatible_edge() {
         let variant = variant(&[(FS_55_ARMOR, SC_34_ARMOR), (FS_55_ARMOR, B_22_ARMOR)]);
-        let plans = build_variant_plans(&[variant]).unwrap();
+        let plans = build_variant_plans(&[variant], &CompiledUnitBehavior::default()).unwrap();
         let shared_edges = plans[0]
             .mapping_edges
             .iter()
@@ -210,7 +275,9 @@ mod tests {
     #[test]
     fn real_distinct_armor_parts_are_rejected_before_migration() {
         let variant = variant(&[(FS_55_ARMOR, B_22_ARMOR), (CE_07_ARMOR, B_22_ARMOR)]);
-        let error = build_variant_plans(&[variant]).unwrap_err().to_string();
+        let error = build_variant_plans(&[variant], &CompiledUnitBehavior::default())
+            .unwrap_err()
+            .to_string();
 
         assert!(error.contains("different source Units"));
     }
@@ -218,7 +285,7 @@ mod tests {
     #[test]
     fn fs_55_armor_and_helmet_quick_select_has_no_structural_conflict() {
         let variant = fs_55_quick_select_variant();
-        build_variant_plans(&[variant]).unwrap();
+        build_variant_plans(&[variant], &CompiledUnitBehavior::default()).unwrap();
     }
 
     fn fs_55_quick_select_variant() -> WebMigrationVariant {

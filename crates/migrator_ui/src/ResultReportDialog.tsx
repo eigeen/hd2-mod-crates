@@ -33,7 +33,7 @@ export function ResultReportDialog(props: ResultReportDialogProps) {
       </Hd2DialogTitle>
       <Hd2DialogContent>
         {props.report && (
-          <div className="max-h-[70vh] space-y-4 overflow-y-auto pr-1 text-sm text-hd2-text">
+          <div className="hd2-scroll max-h-[70vh] space-y-4 overflow-y-auto pr-1 text-sm text-hd2-text">
             <StatusBanner hasWarnings={hasWarnings} t={t} />
             <OutputPath output={props.report.output} t={t} />
             {props.report.kind === "migration" ? (
