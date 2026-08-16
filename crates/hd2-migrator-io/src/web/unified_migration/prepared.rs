@@ -8,12 +8,21 @@ use crate::web::migration::UnmatchedUnitPolicy;
 use std::sync::Arc;
 
 pub(super) struct MigrationExecutor<'a, S: DataSource + ?Sized> {
+    core: MigrationExecutorCore<'a, S>,
+    progress: Option<&'a dyn mode_a_web::WebProgress>,
+}
+
+struct MigrationExecutorCore<'a, S: DataSource + ?Sized> {
     archive_cache: MigrationArchiveCache,
     no_padding: bool,
     original: &'a StreamToc,
     prepared: Vec<PreparedEntry>,
-    progress: Option<&'a dyn mode_a_web::WebProgress>,
     source: &'a S,
+}
+
+#[cfg(not(target_family = "wasm"))]
+pub(super) struct ParallelMigrationExecutor<'a, S: DataSource + ?Sized> {
+    core: MigrationExecutorCore<'a, S>,
 }
 
 struct PreparedEntry {
@@ -53,12 +62,8 @@ impl<'a, S: DataSource + ?Sized> MigrationExecutor<'a, S> {
         no_padding: bool,
     ) -> crate::Result<Self> {
         Ok(Self {
-            archive_cache: MigrationArchiveCache::open(source).await?,
-            no_padding,
-            original,
-            prepared: Vec::new(),
+            core: MigrationExecutorCore::new(original, source, no_padding).await?,
             progress,
-            source,
         })
     }
 
@@ -66,19 +71,44 @@ impl<'a, S: DataSource + ?Sized> MigrationExecutor<'a, S> {
         &mut self,
         mapping: &WebMigrationMapping,
     ) -> crate::Result<mode_a_web::WebTargetResult> {
-        let work = self.prepare_work(mapping, self.progress).await?;
+        let work = self.core.prepare_work(mapping, self.progress).await?;
         work.migration
             .compute_prepared_target(work.target, self.progress)
     }
+}
 
-    #[cfg(not(target_family = "wasm"))]
+#[cfg(not(target_family = "wasm"))]
+impl<'a, S: DataSource + ?Sized> ParallelMigrationExecutor<'a, S> {
+    pub(super) async fn new(
+        original: &'a StreamToc,
+        source: &'a S,
+        no_padding: bool,
+    ) -> crate::Result<Self> {
+        Ok(Self {
+            core: MigrationExecutorCore::new(original, source, no_padding).await?,
+        })
+    }
+
     pub(super) async fn prepare_parallel_work(
         &mut self,
         mapping: &WebMigrationMapping,
         progress: Option<&(dyn mode_a_web::WebProgress + Sync)>,
     ) -> crate::Result<PreparedWork> {
-        self.prepare_work(mapping, progress.map(as_web_progress))
+        self.core
+            .prepare_work(mapping, progress.map(as_web_progress))
             .await
+    }
+}
+
+impl<'a, S: DataSource + ?Sized> MigrationExecutorCore<'a, S> {
+    async fn new(original: &'a StreamToc, source: &'a S, no_padding: bool) -> crate::Result<Self> {
+        Ok(Self {
+            archive_cache: MigrationArchiveCache::open(source).await?,
+            no_padding,
+            original,
+            prepared: Vec::new(),
+            source,
+        })
     }
 
     async fn prepare_work(

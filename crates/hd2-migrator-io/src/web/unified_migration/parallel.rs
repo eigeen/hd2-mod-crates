@@ -1,6 +1,7 @@
-use super::prepared::{MigrationExecutor, PreparedWork};
+use super::prepared::{ParallelMigrationExecutor, PreparedWork};
 use super::*;
 use rayon::prelude::*;
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 
 pub struct ParallelVariantPatchCallbacks<'a, F> {
     progress: Option<&'a (dyn mode_a_web::WebProgress + Sync)>,
@@ -17,12 +18,22 @@ impl<'a, F> ParallelVariantPatchCallbacks<'a, F> {
 }
 
 struct ParallelRunState<'a, S: DataSource + ?Sized> {
-    executor: MigrationExecutor<'a, S>,
+    executor: ParallelMigrationExecutor<'a, S>,
     options: &'a WebUnifiedMigrateOptions,
     original: &'a StreamToc,
     progress: Option<&'a (dyn mode_a_web::WebProgress + Sync)>,
-    suffix: &'a str,
     unit_plans: &'a [unit_plan::VariantUnitPlan],
+}
+
+struct ParallelWriteContext<'a> {
+    options: &'a WebUnifiedMigrateOptions,
+    suffix: &'a str,
+}
+
+#[derive(Clone, Copy)]
+enum ParallelWorkShape {
+    Combined,
+    Single,
 }
 
 struct SingleVariantWork<'a> {
@@ -51,54 +62,89 @@ where
     validate_variants(&options.variants)?;
     let unit_plans = unit_plan::build_variant_plans(&options.variants)?;
     let original = parse_patch(&patch_bytes)?;
-    let web_progress = callbacks
-        .progress
-        .map(|progress| progress as &dyn mode_a_web::WebProgress);
-    let executor =
-        MigrationExecutor::new(&original, source, web_progress, options.no_padding).await?;
+    let executor = ParallelMigrationExecutor::new(&original, source, options.no_padding).await?;
     let suffix = options
         .patch_suffix
         .as_deref()
         .unwrap_or(super::super::migration::DEFAULT_PATCH_SUFFIX);
-    let mut state = ParallelRunState {
+    let state = ParallelRunState {
         executor,
         options: &options,
         original: &original,
         progress: callbacks.progress,
-        suffix,
         unit_plans: &unit_plans,
     };
-    let reports = if options
-        .variants
-        .iter()
-        .all(|variant| variant.mappings.len() == 1)
-    {
-        migrate_single_variants(&mut state, &mut callbacks.write_patch).await?
-    } else {
-        migrate_combined_variants(&mut state, &mut callbacks.write_patch).await?
+    let write_context = ParallelWriteContext {
+        options: &options,
+        suffix,
     };
+    let shape = if variants_have_single_mapping(&options) {
+        ParallelWorkShape::Single
+    } else {
+        ParallelWorkShape::Combined
+    };
+    let reports =
+        migrate_variants_pipelined(state, write_context, &mut callbacks.write_patch, shape)?;
     Ok(summary_from_reports(reports))
 }
 
-async fn migrate_single_variants<S, F>(
-    state: &mut ParallelRunState<'_, S>,
+fn variants_have_single_mapping(options: &WebUnifiedMigrateOptions) -> bool {
+    options
+        .variants
+        .iter()
+        .all(|variant| variant.mappings.len() == 1)
+}
+
+fn migrate_variants_pipelined<S, F>(
+    mut state: ParallelRunState<'_, S>,
+    write_context: ParallelWriteContext<'_>,
     write_patch: &mut F,
+    shape: ParallelWorkShape,
 ) -> crate::Result<Vec<WebMigrationReportRow>>
 where
     S: DataSource + Sync + ?Sized,
     F: FnMut(VariantPatchOutput) -> crate::Result<()>,
 {
-    let mut reports = Vec::with_capacity(state.options.variants.len());
+    let (sender, receiver) = sync_channel(0);
+    std::thread::scope(|scope| {
+        let producer = scope.spawn(move || produce_results(&mut state, shape, sender));
+        let write_result = write_received_results(write_context, write_patch, receiver);
+        let producer_result = producer
+            .join()
+            .map_err(|_| eyre::eyre!("parallel migration producer panicked"))?;
+        let reports = write_result?;
+        producer_result?;
+        Ok(reports)
+    })
+}
+
+fn produce_results<S: DataSource + Sync + ?Sized>(
+    state: &mut ParallelRunState<'_, S>,
+    shape: ParallelWorkShape,
+    sender: SyncSender<Vec<(usize, VariantResult)>>,
+) -> crate::Result<()> {
+    match shape {
+        ParallelWorkShape::Single => produce_single_variants(state, sender),
+        ParallelWorkShape::Combined => produce_combined_variants(state, sender),
+    }
+}
+
+fn produce_single_variants<S: DataSource + Sync + ?Sized>(
+    state: &mut ParallelRunState<'_, S>,
+    sender: SyncSender<Vec<(usize, VariantResult)>>,
+) -> crate::Result<()> {
     for start in (0..state.options.variants.len()).step_by(parallel_batch_size()) {
         let end = (start + parallel_batch_size()).min(state.options.variants.len());
-        let batch = prepare_single_batch(state, start..end).await?;
+        let batch = pollster::block_on(prepare_single_batch(state, start..end))?;
         let results = batch
             .into_par_iter()
             .map(|item| compute_single_variant(item, state.progress))
             .collect::<crate::Result<Vec<_>>>()?;
-        write_parallel_results(state, write_patch, results, &mut reports)?;
+        if sender.send(results).is_err() {
+            return Ok(());
+        }
     }
-    Ok(reports)
+    Ok(())
 }
 
 async fn prepare_single_batch<'a, S: DataSource + Sync + ?Sized>(
@@ -142,7 +188,7 @@ fn compute_single_variant(
 }
 
 fn write_parallel_results<F>(
-    state: &ParallelRunState<'_, impl DataSource + Sync + ?Sized>,
+    context: &ParallelWriteContext<'_>,
     write_patch: &mut F,
     results: Vec<(usize, VariantResult)>,
     reports: &mut Vec<WebMigrationReportRow>,
@@ -151,37 +197,52 @@ where
     F: FnMut(VariantPatchOutput) -> crate::Result<()>,
 {
     for (index, result) in results {
-        let variant = &state.options.variants[index];
+        let variant = &context.options.variants[index];
         let directory = variant_directory(
             variant,
             &result.report.target_name,
             index,
-            state.options.variants.len(),
+            context.options.variants.len(),
         );
         write_patch(VariantPatchOutput {
             patch: result.patch,
             directory,
-            suffix: state.suffix.to_owned(),
+            suffix: context.suffix.to_owned(),
         })?;
         reports.push(result.report);
     }
     Ok(())
 }
 
-async fn migrate_combined_variants<S, F>(
-    state: &mut ParallelRunState<'_, S>,
+fn write_received_results<F>(
+    context: ParallelWriteContext<'_>,
     write_patch: &mut F,
+    receiver: Receiver<Vec<(usize, VariantResult)>>,
 ) -> crate::Result<Vec<WebMigrationReportRow>>
 where
-    S: DataSource + Sync + ?Sized,
     F: FnMut(VariantPatchOutput) -> crate::Result<()>,
 {
-    let mut reports = Vec::with_capacity(state.options.variants.len());
-    for index in 0..state.options.variants.len() {
-        let result = migrate_combined_variant(state, index).await?;
-        write_parallel_results(state, write_patch, vec![(index, result)], &mut reports)?;
+    let mut reports = Vec::with_capacity(context.options.variants.len());
+    for results in receiver {
+        write_parallel_results(&context, write_patch, results, &mut reports)?;
     }
     Ok(reports)
+}
+
+fn produce_combined_variants<S>(
+    state: &mut ParallelRunState<'_, S>,
+    sender: SyncSender<Vec<(usize, VariantResult)>>,
+) -> crate::Result<()>
+where
+    S: DataSource + Sync + ?Sized,
+{
+    for index in 0..state.options.variants.len() {
+        let result = pollster::block_on(migrate_combined_variant(state, index))?;
+        if sender.send(vec![(index, result)]).is_err() {
+            return Ok(());
+        }
+    }
+    Ok(())
 }
 
 async fn migrate_combined_variant<S: DataSource + Sync + ?Sized>(

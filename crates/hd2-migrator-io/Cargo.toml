@@ -16,6 +16,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
-[dev-dependencies]
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 pollster.workspace = true
+
+[dev-dependencies]
 tempfile.workspace = true
