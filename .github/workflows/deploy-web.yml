@@ -54,6 +54,11 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Setup Node.js for Netlify CLI
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
       - name: Install JS dependencies
         working-directory: crates/web_ui
         run: bun install --frozen-lockfile
@@ -64,18 +69,30 @@ jobs:
 
       - name: Deploy to Netlify (production)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: netlify/actions/cli@master
-        with:
-          args: deploy --dir=crates/web_ui/dist --prod --message "${{ github.sha }}"
+        run: >-
+          bunx netlify-cli@27.1.1 deploy
+          --filter=hd2-migrator-web-ui
+          --dir=crates/web_ui/dist
+          --site="$NETLIFY_SITE_ID"
+          --auth="$NETLIFY_AUTH_TOKEN"
+          --no-build
+          --prod
+          --message="${{ github.sha }}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
 
       - name: Deploy to Netlify (preview)
         if: github.event_name == 'pull_request'
-        uses: netlify/actions/cli@master
-        with:
-          args: deploy --dir=crates/web_ui/dist --alias="pr-${{ github.event.pull_request.number }}" --message "PR #${{ github.event.pull_request.number }} (${{ github.sha }})"
+        run: >-
+          bunx netlify-cli@27.1.1 deploy
+          --filter=hd2-migrator-web-ui
+          --dir=crates/web_ui/dist
+          --site="$NETLIFY_SITE_ID"
+          --auth="$NETLIFY_AUTH_TOKEN"
+          --no-build
+          --alias="pr-${{ github.event.pull_request.number }}"
+          --message="PR #${{ github.event.pull_request.number }} (${{ github.sha }})"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
