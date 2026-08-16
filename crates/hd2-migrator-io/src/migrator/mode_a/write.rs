@@ -247,8 +247,8 @@ mod tests {
     fn entry(file_id: u64, marker: u8) -> TocEntry {
         let mut entry = TocEntry::new(file_id, TEST_TYPE_ID);
         entry.toc_data = vec![marker];
-        entry.gpu_data = vec![marker + 1];
-        entry.stream_data = vec![marker + 2];
+        entry.gpu_data = vec![marker + 1].into();
+        entry.stream_data = vec![marker + 2].into();
         entry
     }
 }

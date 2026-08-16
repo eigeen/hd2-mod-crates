@@ -312,8 +312,8 @@ mod tests {
     fn round_trip_preserves_sidecar_layout() {
         let mut entry = TocEntry::new(7, UNIT_ID);
         entry.toc_data = vec![1; 128];
-        entry.gpu_data = vec![2; 11];
-        entry.stream_data = vec![3; 13];
+        entry.gpu_data = vec![2; 11].into();
+        entry.stream_data = vec![3; 13].into();
         let mut original = StreamToc {
             entries: vec![entry],
             ..Default::default()
@@ -323,8 +323,8 @@ mod tests {
         let updated = parsed.serialize().expect("serialize TOC-only");
         let full = StreamToc::from_buffers(&updated, &gpu, &stream, "test".into())
             .expect("parse with original sidecars");
-        assert_eq!(full.entries[0].gpu_data, vec![2; 11]);
-        assert_eq!(full.entries[0].stream_data, vec![3; 13]);
+        assert_eq!(full.entries[0].gpu_data.as_ref(), &[2; 11]);
+        assert_eq!(full.entries[0].stream_data.as_ref(), &[3; 13]);
     }
 
     #[test]

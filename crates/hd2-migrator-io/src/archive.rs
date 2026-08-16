@@ -30,6 +30,7 @@ use eyre::WrapErr;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const TOC_FILE_TYPE_SIZE: usize = 32;
 const TOC_ENTRY_SIZE: usize = 80;
@@ -86,8 +87,9 @@ pub struct TocEntry {
     pub unknown4: u32,
     pub entry_index: u32,
     pub toc_data: Vec<u8>,
-    pub gpu_data: Vec<u8>,
-    pub stream_data: Vec<u8>,
+    /// Resource sidecars are immutable during migration and shared across variants.
+    pub gpu_data: Arc<[u8]>,
+    pub stream_data: Arc<[u8]>,
 }
 
 impl TocEntry {
@@ -101,8 +103,8 @@ impl TocEntry {
             unknown4: 64,
             entry_index: 0,
             toc_data: Vec::new(),
-            gpu_data: Vec::new(),
-            stream_data: Vec::new(),
+            gpu_data: Arc::default(),
+            stream_data: Arc::default(),
         }
     }
 }
@@ -500,8 +502,8 @@ impl StreamToc {
                 unknown4,
                 entry_index,
                 toc_data: toc_body.to_vec(),
-                gpu_data: gpu_body.to_vec(),
-                stream_data: stream_body.to_vec(),
+                gpu_data: Arc::from(gpu_body),
+                stream_data: Arc::from(stream_body),
             });
         }
 
@@ -735,8 +737,8 @@ mod tests {
     fn make_entry(file_id: u64, type_id: u64, toc: &[u8], gpu: &[u8], stream: &[u8]) -> TocEntry {
         let mut e = TocEntry::new(file_id, type_id);
         e.toc_data = toc.to_vec();
-        e.gpu_data = gpu.to_vec();
-        e.stream_data = stream.to_vec();
+        e.gpu_data = Arc::from(gpu);
+        e.stream_data = Arc::from(stream);
         e
     }
 
@@ -755,11 +757,21 @@ mod tests {
         assert_eq!(parsed.entries[0].file_id, 0xAA);
         assert_eq!(parsed.entries[0].type_id, UNIT_ID);
         assert_eq!(parsed.entries[0].toc_data.len(), 100);
-        assert_eq!(parsed.entries[0].gpu_data, vec![2u8; 50]);
-        assert_eq!(parsed.entries[0].stream_data, vec![3u8; 20]);
+        assert_eq!(parsed.entries[0].gpu_data.as_ref(), &[2u8; 50]);
+        assert_eq!(parsed.entries[0].stream_data.as_ref(), &[3u8; 20]);
         assert_eq!(parsed.entries[1].file_id, 0xBB);
         assert_eq!(parsed.entries[1].toc_data, vec![4u8; 60]);
         assert!(parsed.entries[1].gpu_data.is_empty());
+    }
+
+    #[test]
+    fn cloned_entries_share_immutable_resource_sidecars() {
+        let original = make_entry(1, UNIT_ID, b"toc", b"gpu", b"stream");
+        let cloned = original.clone();
+
+        assert!(Arc::ptr_eq(&original.gpu_data, &cloned.gpu_data));
+        assert!(Arc::ptr_eq(&original.stream_data, &cloned.stream_data));
+        assert_ne!(original.toc_data.as_ptr(), cloned.toc_data.as_ptr());
     }
 
     #[test]

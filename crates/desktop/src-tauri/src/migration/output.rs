@@ -445,8 +445,8 @@ mod tests {
     fn sample_patch() -> StreamToc {
         let mut entry = TocEntry::new(1, 2);
         entry.toc_data = b"toc body".to_vec();
-        entry.gpu_data = b"gpu body".to_vec();
-        entry.stream_data = b"stream body".to_vec();
+        entry.gpu_data = b"gpu body".to_vec().into();
+        entry.stream_data = b"stream body".to_vec().into();
         StreamToc {
             entries: vec![entry],
             ..StreamToc::default()
