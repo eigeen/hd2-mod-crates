@@ -58,6 +58,7 @@ import { FrequentlyAskedQuestions } from "./FrequentlyAskedQuestions";
 import { GameDataDirPanel, type GameDirSelection } from "./GameDataDirPanel";
 import { GameDataSource } from "./gameDataSource";
 import { ManualMergePanel } from "./ManualMergePanel";
+import { useToolModeRoute, type ToolMode } from "./toolModeRoute";
 import {
   builtinEquipmentOptions,
   analyzeEquipmentContents,
@@ -69,11 +70,10 @@ import {
 } from "./wasmClient";
 
 const PATCH_SUFFIX = "9ba626afa44a3aa3.patch_0";
-type ToolMode = "migrate" | "repatch" | "merge";
 
 function App() {
   const { t } = useI18n();
-  const [toolMode, setToolMode] = useState<ToolMode>("migrate");
+  const [toolMode, navigateToToolMode] = useToolModeRoute();
   const [equipmentOptions, setEquipmentOptions] = useState<EquipmentOption[]>([]);
   // patch 的 Uint8Array 可能上百 MB，放在 React state 里会被 React DevTools 扩展枚举/序列化导致 CPU 拉满 + 堆 OOM。
   // 因此把字节存到 ref，state 只留小元数据用于驱动 UI。
@@ -434,7 +434,7 @@ function App() {
 
           <Tabs
             centered
-            onChange={(_, value: ToolMode) => setToolMode(value)}
+            onChange={(_, value: ToolMode) => navigateToToolMode(value)}
             value={toolMode}
           >
             <Tab label={t("mode.migrate")} value="migrate" />
