@@ -13,7 +13,7 @@ fn lists_targets_from_builtin_index() {
 fn lists_unexcluded_helmet_targets() {
     let targets = list_target_options("Helmet").unwrap();
 
-    assert_eq!(targets.len(), 106);
+    assert_eq!(targets.len(), 108);
     assert!(targets.iter().all(|target| !target.excluded));
     assert!(
         targets
@@ -28,12 +28,12 @@ fn lists_unexcluded_helmet_targets() {
     assert!(
         targets
             .iter()
-            .all(|target| target.name != "UF-84 Doubt Killer")
+            .any(|target| target.name == "UF-84 Doubt Killer")
     );
     assert!(
         targets
             .iter()
-            .all(|target| target.name != "O-44 Bonded Pilot")
+            .any(|target| target.name == "O-44 Bonded Pilot")
     );
 }
 

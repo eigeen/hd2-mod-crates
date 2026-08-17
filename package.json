@@ -1,6 +1,6 @@
 {
   "name": "hd2-mod-crates",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "workspaces": ["crates/*"],
   "packageManager": "bun@1.3.13",
