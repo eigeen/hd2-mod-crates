@@ -7,6 +7,7 @@ pub mod equipment;
 pub mod equipment_graph;
 pub mod mapping_preview;
 pub mod migration;
+pub mod patch_merge;
 pub mod repatch;
 pub mod unified_migration;
 
@@ -32,6 +33,9 @@ pub use migration::{
     WebMigrationReportRow, WebMigrationSummary, WebOutputFile, WebPatchInspection, WebTargetOption,
     detect_patch_models, detect_source_archive, inspect_patch, list_target_options,
     migrate_many_with_source,
+};
+pub use patch_merge::{
+    PatchMergeResult, PatchMergeSourceSummary, PatchMergeSummary, merge_patches,
 };
 pub use repatch::{
     MissingUnitPolicy, UnitRepatchOptions, UnitRepatchPlan, UnitRepatchResult, UnitRepatchSummary,

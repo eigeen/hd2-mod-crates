@@ -57,6 +57,7 @@ import { downloadRepatchedPatch, downloadZip, patchFilesFromList } from "./fileI
 import { FrequentlyAskedQuestions } from "./FrequentlyAskedQuestions";
 import { GameDataDirPanel, type GameDirSelection } from "./GameDataDirPanel";
 import { GameDataSource } from "./gameDataSource";
+import { ManualMergePanel } from "./ManualMergePanel";
 import {
   builtinEquipmentOptions,
   analyzeEquipmentContents,
@@ -68,7 +69,7 @@ import {
 } from "./wasmClient";
 
 const PATCH_SUFFIX = "9ba626afa44a3aa3.patch_0";
-type ToolMode = "migrate" | "repatch";
+type ToolMode = "migrate" | "repatch" | "merge";
 
 function App() {
   const { t } = useI18n();
@@ -438,10 +439,12 @@ function App() {
           >
             <Tab label={t("mode.migrate")} value="migrate" />
             <Tab label={t("mode.repatch")} value="repatch" />
+            <Tab label={t("mode.merge")} value="merge" />
           </Tabs>
 
           <ToolIntro mode={toolMode} />
 
+          {toolMode === "merge" ? <ManualMergePanel /> : <>
           {/* Row 1: game data dir + patch */}
           <div className="flex flex-col min-[51.25rem]:flex-row">
             <div className="flex min-w-0 flex-1">
@@ -547,6 +550,7 @@ function App() {
               )}
             </div>
           </div>
+          </>}
         </div>
         <FrequentlyAskedQuestions
           attentionQuestion={faqAttention}

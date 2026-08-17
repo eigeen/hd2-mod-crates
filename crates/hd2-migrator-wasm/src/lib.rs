@@ -9,6 +9,6 @@ mod zip_store;
 
 pub use api::{
     builtin_equipment_options, builtin_target_options, detect_source, inspect_equipment,
-    inspect_equipment_with_source, inspect_patch, migrate_cross_archive,
+    inspect_equipment_with_source, inspect_patch, merge_patches, migrate_cross_archive,
     migrate_equipment_variants, repatch_units,
 };

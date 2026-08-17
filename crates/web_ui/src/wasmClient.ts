@@ -62,6 +62,30 @@ export async function builtinEquipmentOptions() {
   ) as Promise<EquipmentOption[]>;
 }
 
+export interface PatchMergeSummary {
+  inputCount: number;
+  resourceCount: number;
+  conflictCount: number;
+  duplicateCount: number;
+  repairedMetadataCount: number;
+  sources: Array<{
+    name: string;
+    resourceCount: number;
+    repairedMetadataCount: number;
+    replacedResourceCount: number;
+  }>;
+}
+
+export async function mergePatches(
+  inputs: PatchFiles[],
+  outputName: string,
+): Promise<{ patch: PatchFiles; summary: PatchMergeSummary }> {
+  const wasm = await loadWasm();
+  return callWasm("merge_patches", () =>
+    wasm.merge_patches(inputs, outputName),
+  ) as Promise<{ patch: PatchFiles; summary: PatchMergeSummary }>;
+}
+
 export async function detectSource(patch: PatchFiles, category = "Armor") {
   const wasm = await loadWasm();
   // 只传 toc，gpu/stream 不参与来源识别；避免把数百 MB 数据拷贝进 WASM 线性内存触发 OOM。
@@ -226,6 +250,7 @@ function wasmErrorCode(label: string): TaskErrorCode {
     return "patch.inspectFailed";
   }
   if (label === "repatch_units") return "repatch.failed";
+  if (label === "merge_patches") return "patch.inspectFailed";
   if (label.includes("migrate")) return "migration.failed";
   return "unknown";
 }

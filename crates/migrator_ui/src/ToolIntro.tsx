@@ -2,11 +2,11 @@ import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { useI18n } from "./i18n";
 
-type ToolMode = "migrate" | "repatch";
+type ToolMode = "migrate" | "repatch" | "merge";
 
 export function ToolIntro({ mode }: { mode: ToolMode }) {
   const { t } = useI18n();
-  const isRepatch = mode === "repatch";
+  const intro = introKeys(mode);
 
   return (
     <section className="border-t border-hd2-border bg-hd2-surface/35 px-5 py-4 min-[51.25rem]:px-6">
@@ -14,21 +14,45 @@ export function ToolIntro({ mode }: { mode: ToolMode }) {
         <InfoOutlinedIcon className="mt-0.5 shrink-0 text-hd2-yellow" fontSize="small" />
         <div className="min-w-0">
           <h2 className="m-0 text-sm font-bold text-hd2-text">
-            {t(isRepatch ? "intro.repatchTitle" : "intro.migrateTitle")}
+            {t(intro.title)}
           </h2>
-          <p className="mb-0 mt-1.5 text-xs leading-5 text-hd2-muted">
-            {t(isRepatch ? "intro.repatchPrinciple" : "intro.migratePrinciple")}
-          </p>
+          {intro.principle && (
+            <p className="mb-0 mt-1.5 text-xs leading-5 text-hd2-muted">
+              {t(intro.principle)}
+            </p>
+          )}
           <p className="mb-0 mt-2 flex items-start gap-1.5 text-xs leading-5 text-hd2-yellow/90">
             <WarningAmberIcon className="mt-0.5 shrink-0" sx={{ fontSize: "0.875rem" }} />
-            <span>{t(isRepatch ? "intro.repatchWarning" : "intro.migrateWarning")}</span>
+            <span>{t(intro.warning)}</span>
           </p>
-          {isRepatch && <RepatchCredit />}
-          {!isRepatch && <MigrationCredit />}
+          {mode === "repatch" && <RepatchCredit />}
+          {mode === "migrate" && <MigrationCredit />}
         </div>
       </div>
     </section>
   );
+}
+
+function introKeys(mode: ToolMode) {
+  if (mode === "merge") {
+    return {
+      title: "intro.mergeTitle",
+      principle: null,
+      warning: "intro.mergeWarning",
+    } as const;
+  }
+  if (mode === "repatch") {
+    return {
+      title: "intro.repatchTitle",
+      principle: "intro.repatchPrinciple",
+      warning: "intro.repatchWarning",
+    } as const;
+  }
+  return {
+    title: "intro.migrateTitle",
+    principle: "intro.migratePrinciple",
+    warning: "intro.migrateWarning",
+  } as const;
 }
 
 function MigrationCredit() {

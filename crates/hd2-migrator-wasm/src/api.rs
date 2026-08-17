@@ -8,7 +8,7 @@ use hd2_migrator_io::{
     target_exclusions::is_default_excluded_target,
     web::{self, PatchBytes, WebMigrateOptions, WebMigrationSummary, WebTargetOption},
 };
-use js_sys::{Object, Reflect, Uint8Array};
+use js_sys::{Array, Object, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
 
 const DEFAULT_CATEGORY: &str = "Armor";
@@ -34,6 +34,19 @@ pub fn builtin_target_options(category: Option<String>) -> WasmResult<JsValue> {
 pub fn builtin_equipment_options() -> WasmResult<JsValue> {
     let options = web::list_equipment_options().map_err(js_error)?;
     serde_wasm_bindgen::to_value(&options).map_err(js_error)
+}
+
+#[wasm_bindgen]
+pub fn merge_patches(inputs: JsValue, output_name: String) -> WasmResult<JsValue> {
+    if !Array::is_array(&inputs) {
+        return Err(js_error("merge inputs must be an array"));
+    }
+    let inputs = Array::from(&inputs)
+        .iter()
+        .map(|value| patch_bytes_from_js(&value))
+        .collect::<WasmResult<Vec<_>>>()?;
+    let result = web::merge_patches(inputs, output_name).map_err(js_error)?;
+    patch_merge_result(result)
 }
 
 #[wasm_bindgen]
@@ -283,4 +296,44 @@ fn summary_result(summary: WebMigrationSummary) -> WasmResult<JsValue> {
         &serde_wasm_bindgen::to_value(&summary).map_err(js_error)?,
     )?;
     Ok(result.into())
+}
+
+fn patch_merge_result(result: web::PatchMergeResult) -> WasmResult<JsValue> {
+    let output = Object::new();
+    Reflect::set(
+        &output,
+        &JsValue::from_str("patch"),
+        &patch_bytes_to_js(result.patch)?,
+    )?;
+    Reflect::set(
+        &output,
+        &JsValue::from_str("summary"),
+        &serde_wasm_bindgen::to_value(&result.summary).map_err(js_error)?,
+    )?;
+    Ok(output.into())
+}
+
+fn patch_bytes_to_js(patch: PatchBytes) -> WasmResult<JsValue> {
+    let output = Object::new();
+    Reflect::set(
+        &output,
+        &JsValue::from_str("name"),
+        &JsValue::from_str(&patch.name),
+    )?;
+    Reflect::set(
+        &output,
+        &JsValue::from_str("toc"),
+        &Uint8Array::from(patch.toc.as_slice()),
+    )?;
+    Reflect::set(
+        &output,
+        &JsValue::from_str("gpu"),
+        &Uint8Array::from(patch.gpu.as_slice()),
+    )?;
+    Reflect::set(
+        &output,
+        &JsValue::from_str("stream"),
+        &Uint8Array::from(patch.stream.as_slice()),
+    )?;
+    Ok(output.into())
 }
