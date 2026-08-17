@@ -76,13 +76,19 @@ export function downloadRepatchedPatch(
   tocBytes: Uint8Array,
   filename: string,
 ) {
+  downloadBlob(buildRepatchedPatchZip(patch, tocBytes), filename);
+}
+
+export function buildRepatchedPatchZip(
+  patch: PatchFiles,
+  tocBytes: Uint8Array,
+): Blob {
   const entries = [
     { name: patch.name, bytes: tocBytes },
     { name: `${patch.name}${GPU_SUFFIX}`, bytes: patch.gpu },
     { name: `${patch.name}${STREAM_SUFFIX}`, bytes: patch.stream },
-  ].filter((entry) => entry.bytes.length > 0 || entry.name === patch.name);
-  const blob = storeZip(entries);
-  downloadBlob(blob, filename);
+  ];
+  return storeZip(entries);
 }
 
 interface StoreZipEntry {

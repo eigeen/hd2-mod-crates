@@ -325,6 +325,22 @@ mod tests {
     }
 
     #[test]
+    fn writes_empty_zip_entry() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let output = directory.path().join("output.zip");
+        let mut zip = create_zip(&output).expect("create ZIP");
+        write_zip_entry_with_progress(&mut zip, "example.patch_0.stream", b"", None)
+            .expect("write empty entry");
+        finish_zip(zip).expect("finish ZIP");
+
+        let file = File::open(output).expect("open ZIP");
+        let mut archive = zip::ZipArchive::new(file).expect("read ZIP");
+        let entry = archive.by_index(0).expect("empty entry");
+        assert_eq!(entry.name(), "example.patch_0.stream");
+        assert_eq!(entry.size(), 0);
+    }
+
+    #[test]
     fn rejects_parent_path_components() {
         assert!(validate_entry_path("../outside").is_err());
     }

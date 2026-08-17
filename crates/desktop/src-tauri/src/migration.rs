@@ -292,9 +292,6 @@ fn write_sidecar(
     bytes: &[u8],
     progress: Option<&dyn output::OutputProgress>,
 ) -> Result<(), String> {
-    if bytes.is_empty() {
-        return Ok(());
-    }
     write_zip_entry_with_progress(zip, path, bytes, progress).map_err(display_error)
 }
 

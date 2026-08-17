@@ -1850,7 +1850,7 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
 name = "hd2-archive-format"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "byteorder",
  "eyre",
@@ -1861,7 +1861,7 @@ dependencies = [
 
 [[package]]
 name = "hd2-migrator-cli"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "clap",
  "color-eyre",
@@ -1880,7 +1880,7 @@ dependencies = [
 
 [[package]]
 name = "hd2-migrator-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "eyre",
  "hd2-archive-format",
@@ -1892,11 +1892,11 @@ dependencies = [
 
 [[package]]
 name = "hd2-migrator-data"
-version = "1.0.0"
+version = "1.0.1"
 
 [[package]]
 name = "hd2-migrator-io"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "byteorder",
  "eyre",
@@ -1914,7 +1914,7 @@ dependencies = [
 
 [[package]]
 name = "hd2-migrator-wasm"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "crc32fast",
  "eyre",
@@ -1929,7 +1929,7 @@ dependencies = [
 
 [[package]]
 name = "hd2-unit-matching"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "eyre",
  "hd2-archive-format",
@@ -1940,7 +1940,7 @@ dependencies = [
 
 [[package]]
 name = "hd2_migrator_desktop"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "eyre",
  "hd2-migrator-core",
@@ -4098,7 +4098,7 @@ dependencies = [
 
 [[package]]
 name = "svd-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "indicatif",
  "rayon",
@@ -4111,7 +4111,7 @@ dependencies = [
 
 [[package]]
 name = "svd-export"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "iocraft",
  "smol",
@@ -4121,7 +4121,7 @@ dependencies = [
 
 [[package]]
 name = "svd-pack"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "svd-core",
 ]
