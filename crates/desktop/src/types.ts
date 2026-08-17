@@ -60,3 +60,11 @@ export interface MigrationProgressEvent {
   kind: "outputProgress" | "targetStart" | "stage" | "targetFinish";
   totalBytes: number;
 }
+
+export interface AppUpdateMetadata {
+  currentVersion: string;
+  date: string;
+  notes: string | null;
+  target: string;
+  version: string;
+}

@@ -1,4 +1,5 @@
 export { EquipmentCategoryIcon } from "./EquipmentCategoryIcon";
+export { Hd2Dialog, Hd2DialogActions, Hd2DialogContent, Hd2DialogTitle } from "./Hd2Dialog";
 export { MappingPreviewAccordion } from "./MappingPreviewAccordion";
 export { LanguageMenu } from "./LanguageMenu";
 export { OptionsPanel, PatchPanel, PerformanceDialog, TargetPanel } from "./MigratorPanels";

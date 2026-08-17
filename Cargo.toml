@@ -11,6 +11,7 @@ members = [
     "crates/svd-core",
     "crates/svd-export",
     "crates/svd-pack",
+    "crates/update-archive-verifier",
 ]
 resolver = "3"
 

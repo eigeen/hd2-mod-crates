@@ -2,6 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   EquipmentOption,
+  AppUpdateMetadata,
   EquipmentMappingPreview,
   GameDataDiscovery,
   InspectPatchResult,
@@ -12,6 +13,14 @@ import type {
   RepatchRequest,
   UnitRepatchSummary,
 } from "./types";
+
+export function checkAppUpdate(): Promise<AppUpdateMetadata | null> {
+  return invoke("check_app_update");
+}
+
+export function installAppUpdate(version: string): Promise<void> {
+  return invoke("install_app_update", { version });
+}
 
 export function loadEquipmentOptions(): Promise<EquipmentOption[]> {
   return invoke("load_equipment_options");

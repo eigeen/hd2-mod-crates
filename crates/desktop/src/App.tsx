@@ -40,6 +40,7 @@ import {
 } from "@hd2-mod-tools/migrator-ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast, Toaster } from "sonner";
+import { AppUpdateButton, AppUpdateDialog } from "./AppUpdateDialog";
 import { DesktopGameDataPanel, DesktopPatchPanel } from "./DesktopPanels";
 import { dropZoneFromPhysicalPosition, type DropZone } from "./dropTarget";
 import {
@@ -64,6 +65,7 @@ import type {
   PatchDescriptor,
   UnmatchedUnitPolicy,
 } from "./types";
+import { useAppUpdate, type AppUpdateController } from "./useAppUpdate";
 
 const PATCH_SUFFIX = "9ba626afa44a3aa3.patch_0";
 const GAME_DATA_STORAGE_KEY = "hd2-migrator-native-game-data";
@@ -92,6 +94,7 @@ function App() {
   const [hoveredDropZone, setHoveredDropZone] = useState<DropZone | null>(null);
   const reportHistory = useTaskReportHistory();
   const updateInfo = useUpdateInfo();
+  const appUpdate = useAppUpdate();
   const hoveredDropZoneRef = useRef<DropZone | null>(null);
   const activeTaskRef = useRef<DesktopTask<unknown> | null>(null);
 
@@ -289,10 +292,12 @@ function App() {
         report={reportHistory.activeReport}
       />
       <UpdateInfoDialog controller={updateInfo} />
+      <AppUpdateDialog controller={appUpdate} taskBusy={busy} />
       <div className="relative z-[1] min-h-screen">
         <main className="min-h-screen w-full">
           <div className="min-h-screen overflow-hidden bg-black/60" data-desktop-shell>
             <Header
+              appUpdate={appUpdate}
               onClearReports={reportHistory.clearHistory}
               onOpenReport={reportHistory.openReport}
               onOpenUpdateInfo={updateInfo.openLatest}
@@ -380,6 +385,7 @@ function App() {
 }
 
 interface HeaderProps {
+  appUpdate: AppUpdateController;
   onClearReports: () => void;
   onOpenReport: (id: string) => void;
   onOpenUpdateInfo: () => void;
@@ -408,6 +414,7 @@ function Header(props: HeaderProps) {
               <GitHubIcon fontSize="small" />
             </IconButton>
           </Tooltip>
+          <AppUpdateButton controller={props.appUpdate} />
           <UpdateInfoButton available={props.updateInfoAvailable} openLatest={props.onOpenUpdateInfo} />
           <TaskReportHistoryButton
             onClear={props.onClearReports}

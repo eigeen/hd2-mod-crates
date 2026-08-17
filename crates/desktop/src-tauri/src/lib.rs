@@ -1,3 +1,4 @@
+mod app_update;
 mod command_error;
 mod game_discovery;
 mod migration;
@@ -17,6 +18,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            app_update::check_app_update,
+            app_update::install_app_update,
             game_discovery::detect_game_data_dir,
             game_discovery::validate_game_data_dir,
             migration::load_equipment_options,
