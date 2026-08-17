@@ -3,3 +3,9 @@
 
 /src/wasm/*
   Cache-Control: public, max-age=31536000, immutable
+
+/update-info/index.json
+  Cache-Control: no-cache
+
+/update-info/releases/*.md
+  Cache-Control: no-cache

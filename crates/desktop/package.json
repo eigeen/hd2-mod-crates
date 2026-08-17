@@ -4,8 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "bunx --bun vite",
-    "build": "bunx --bun tsc && bunx --bun vite build",
+    "update-info": "bun run ../web_ui/scripts/build-update-info.ts",
+    "dev": "bun run update-info && bunx --bun vite",
+    "build": "bun run update-info && bunx --bun tsc && bunx --bun vite build",
     "exe:info": "bun run scripts/exe-info.ts",
     "preview": "bunx --bun vite preview",
     "smoke": "bun run scripts/runtime-smoke.ts",

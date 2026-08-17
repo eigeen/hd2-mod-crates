@@ -25,6 +25,8 @@
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",
-    "@xyflow/react": "^12.11.3"
+    "@xyflow/react": "^12.11.3",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   }
 }

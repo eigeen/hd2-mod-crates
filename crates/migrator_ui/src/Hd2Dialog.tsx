@@ -5,10 +5,11 @@ import { createPortal } from "react-dom";
 type AnimPhase = "enter" | "idle" | "exit";
 
 interface Hd2DialogProps {
+  ariaLabel?: string;
   open: boolean;
   onClose?: () => void;
   children: ReactNode;
-  size?: "small" | "large";
+  size?: "small" | "large" | "guide";
 }
 
 /**
@@ -16,7 +17,7 @@ interface Hd2DialogProps {
  * Open animation: top/bottom lines expand from center (clip-path),
  * then content fades in once fully expanded.
  */
-export function Hd2Dialog({ open, onClose, children, size = "small" }: Hd2DialogProps) {
+export function Hd2Dialog({ ariaLabel, open, onClose, children, size = "small" }: Hd2DialogProps) {
   const [mounted, setMounted] = useState(open);
   const [phase, setPhase] = useState<AnimPhase>(open ? "idle" : "exit");
 
@@ -36,6 +37,15 @@ export function Hd2Dialog({ open, onClose, children, size = "small" }: Hd2Dialog
       setPhase("exit");
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !onClose) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose, open]);
 
   // Watch animationName so each phase transitions at the right moment:
   // - "enter" → "idle" only after the content-reveal animation (the last one) finishes
@@ -66,7 +76,10 @@ export function Hd2Dialog({ open, onClose, children, size = "small" }: Hd2Dialog
     >
       {/* Only top + bottom borders, no left/right. bg semi-transparent. */}
       <div
-        className={`w-full ${size === "large" ? "max-w-2xl" : "max-w-sm"} border-t-2 border-b-2 border-hd2-yellow ${panelClass}`}
+        aria-label={ariaLabel}
+        aria-modal="true"
+        className={`w-full ${dialogSizeClass(size)} border-t-2 border-b-2 border-hd2-yellow ${panelClass}`}
+        role="dialog"
         style={{ background: "rgba(8,8,8,0.82)" }}
         onClick={(e) => e.stopPropagation()}
         onAnimationEnd={handleAnimationEnd}
@@ -78,6 +91,11 @@ export function Hd2Dialog({ open, onClose, children, size = "small" }: Hd2Dialog
     </div>,
     document.body,
   );
+}
+
+function dialogSizeClass(size: NonNullable<Hd2DialogProps["size"]>): string {
+  if (size === "guide") return "mx-3 max-w-4xl";
+  return size === "large" ? "max-w-2xl" : "max-w-sm";
 }
 
 export function Hd2DialogTitle({ children }: { children: ReactNode }) {

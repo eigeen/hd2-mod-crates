@@ -22,7 +22,7 @@
       "csp": {
         "default-src": ["'self'"],
         "base-uri": ["'self'"],
-        "connect-src": ["ipc:", "http://ipc.localhost"],
+        "connect-src": ["'self'", "ipc:", "http://ipc.localhost"],
         "font-src": ["'self'", "data:"],
         "frame-ancestors": ["'none'"],
         "img-src": ["'self'", "data:"],

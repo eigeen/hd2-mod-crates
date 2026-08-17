@@ -17,6 +17,8 @@ import {
   TargetPanel,
   ToolIntro,
   UnitUpdaterPanel,
+  UpdateInfoButton,
+  UpdateInfoDialog,
   backgroundUrl,
   buildMigrationVariants,
   configuredMappings as collectConfiguredMappings,
@@ -36,6 +38,7 @@ import {
   uniqueOutputFilename,
   useI18n,
   useTaskReportHistory,
+  useUpdateInfo,
   type DetectedSource,
   type EquipmentOption,
   type EquipmentPartGraph,
@@ -95,6 +98,7 @@ function App() {
   const [faqOpen, setFaqOpen] = useState(false);
   const [faqAttention, setFaqAttention] = useState<TranslationKey | null>(null);
   const reportHistory = useTaskReportHistory();
+  const updateInfo = useUpdateInfo();
   const activeTaskRef = useRef<AbortController | null>(null);
 
   const runCancellableTask = useCallback(async (
@@ -379,6 +383,7 @@ function App() {
         onClose={reportHistory.closeReport}
         report={reportHistory.activeReport}
       />
+      <UpdateInfoDialog controller={updateInfo} />
 
       <div className="relative z-[1]">
       <main className="mx-auto w-full max-w-[56rem] px-4 py-6 min-[51.25rem]:px-6 min-[51.25rem]:py-10">
@@ -390,7 +395,7 @@ function App() {
               <Tooltip title={t("github.revision", { hash: __GIT_HASH__ })}>
                 <div
                   aria-label={t("github.revision", { hash: __GIT_HASH__ })}
-                  className="flex w-[4.75rem] shrink-0 items-center gap-1 font-mono text-[0.625rem] tracking-wide text-hd2-faint min-[35rem]:w-24 min-[35rem]:text-[0.6875rem]"
+                  className="flex w-28 shrink-0 items-center gap-1 font-mono text-[0.625rem] tracking-wide text-hd2-faint min-[35rem]:w-32 min-[35rem]:text-[0.6875rem]"
                 >
                   <AccountTreeIcon sx={{ fontSize: "0.875rem" }} />
                   <span>{__GIT_HASH__}</span>
@@ -401,7 +406,7 @@ function App() {
               <h1 className="m-0 text-center text-lg font-bold text-hd2-yellow min-[35rem]:text-xl min-[51.25rem]:text-2xl">{t("app.title")}</h1>
               <img alt="" className="hidden min-[40rem]:block" draggable={false} src={titleUrl} style={{ height: "2rem" }} />
               </div>
-              <div className="flex w-[4.75rem] shrink-0 items-center justify-end min-[35rem]:w-24">
+              <div className="flex w-28 shrink-0 items-center justify-end min-[35rem]:w-32">
                 <Tooltip title={t("github.openRepository")}>
                   <IconButton
                     aria-label={t("github.openRepository")}
@@ -415,6 +420,7 @@ function App() {
                     <GitHubIcon fontSize="small" />
                   </IconButton>
                 </Tooltip>
+                <UpdateInfoButton available={updateInfo.available} openLatest={updateInfo.openLatest} />
                 <TaskReportHistoryButton
                   onClear={reportHistory.clearHistory}
                   onSelect={reportHistory.openReport}

@@ -15,6 +15,8 @@ import {
   TargetPanel,
   ToolIntro,
   UnitUpdaterPanel,
+  UpdateInfoButton,
+  UpdateInfoDialog,
   backgroundUrl,
   buildMigrationVariants,
   configuredMappings as collectConfiguredMappings,
@@ -29,6 +31,7 @@ import {
   uniqueOutputFilename,
   useI18n,
   useTaskReportHistory,
+  useUpdateInfo,
   type CompletedTaskReport,
   type EquipmentPartGraph,
   type MigrationMapping,
@@ -88,6 +91,7 @@ function App() {
   const [progressLabel, setProgressLabel] = useState("");
   const [hoveredDropZone, setHoveredDropZone] = useState<DropZone | null>(null);
   const reportHistory = useTaskReportHistory();
+  const updateInfo = useUpdateInfo();
   const hoveredDropZoneRef = useRef<DropZone | null>(null);
   const activeTaskRef = useRef<DesktopTask<unknown> | null>(null);
 
@@ -284,13 +288,16 @@ function App() {
         onRevealOutput={(output) => void revealItemInDir(output).catch((error) => showError(error, t))}
         report={reportHistory.activeReport}
       />
+      <UpdateInfoDialog controller={updateInfo} />
       <div className="relative z-[1] min-h-screen">
         <main className="min-h-screen w-full">
           <div className="min-h-screen overflow-hidden bg-black/60" data-desktop-shell>
             <Header
               onClearReports={reportHistory.clearHistory}
               onOpenReport={reportHistory.openReport}
+              onOpenUpdateInfo={updateInfo.openLatest}
               reports={reportHistory.history}
+              updateInfoAvailable={updateInfo.available}
             />
             <Tabs centered onChange={(_, value: ToolMode) => setToolMode(value)} value={toolMode}>
               <Tab label={t("mode.migrate")} value="migrate" />
@@ -375,7 +382,9 @@ function App() {
 interface HeaderProps {
   onClearReports: () => void;
   onOpenReport: (id: string) => void;
+  onOpenUpdateInfo: () => void;
   reports: CompletedTaskReport[];
+  updateInfoAvailable: boolean;
 }
 
 function Header(props: HeaderProps) {
@@ -384,7 +393,7 @@ function Header(props: HeaderProps) {
     <div className="flex flex-col items-center border-b border-hd2-border bg-hd2-surface/70 px-4 py-5">
       <div className="flex w-full items-center gap-3">
         <Tooltip title={t("github.revision", { hash: __GIT_HASH__ })}>
-          <div className="flex w-[4.75rem] shrink-0 items-center gap-1 font-mono text-[0.625rem] tracking-wide text-hd2-faint min-[35rem]:w-24 min-[35rem]:text-[0.6875rem]">
+          <div className="flex w-28 shrink-0 items-center gap-1 font-mono text-[0.625rem] tracking-wide text-hd2-faint min-[35rem]:w-32 min-[35rem]:text-[0.6875rem]">
             <AccountTreeIcon sx={{ fontSize: "0.875rem" }} /><span>{__GIT_HASH__}</span>
           </div>
         </Tooltip>
@@ -393,12 +402,13 @@ function Header(props: HeaderProps) {
           <h1 className="m-0 text-center text-lg font-bold text-hd2-yellow min-[35rem]:text-xl min-[51.25rem]:text-2xl">{t("app.title")}</h1>
           <img alt="" className="hidden min-[40rem]:block" draggable={false} src={titleUrl} style={{ height: "2rem" }} />
         </div>
-        <div className="flex w-[4.75rem] shrink-0 items-center justify-end min-[35rem]:w-24">
+        <div className="flex w-28 shrink-0 items-center justify-end min-[35rem]:w-32">
           <Tooltip title={t("github.openRepository")}>
             <IconButton className="headerIconBtn" component="a" href="https://github.com/eigeen/hd2-mod-crates" rel="noreferrer" size="small" target="_blank">
               <GitHubIcon fontSize="small" />
             </IconButton>
           </Tooltip>
+          <UpdateInfoButton available={props.updateInfoAvailable} openLatest={props.onOpenUpdateInfo} />
           <TaskReportHistoryButton
             onClear={props.onClearReports}
             onSelect={props.onOpenReport}

@@ -4,9 +4,10 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "update-info": "bun run scripts/build-update-info.ts",
     "wasm": "wasm-pack build ../hd2-migrator-wasm --target web --out-dir ../web_ui/src/wasm/hd2_migrator_wasm",
-    "dev": "bun run wasm && bunx --bun vite",
-    "build": "bun run wasm && bunx --bun tsc && bunx --bun vite build",
+    "dev": "bun run update-info && bun run wasm && bunx --bun vite",
+    "build": "bun run update-info && bun run wasm && bunx --bun tsc && bunx --bun vite build",
     "preview": "bunx --bun vite preview"
   },
   "dependencies": {
@@ -27,7 +28,8 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "tailwindcss": "^4.3.3",
-    "wasm-pack": "^0.15.0"
+    "wasm-pack": "^0.15.0",
+    "yaml": "^2.8.2"
   },
   "overrides": {
     "tar": "^7.5.22"
