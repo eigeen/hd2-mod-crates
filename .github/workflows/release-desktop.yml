@@ -14,18 +14,11 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.runner }}
+    name: Build Windows x64
+    runs-on: windows-latest
     env:
-      HD2_UPDATE_PUBLIC_KEY_HEX: ${{ vars.ZIPSIGN_PUBLIC_KEY_HEX }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: windows-latest
-            target: x86_64-pc-windows-msvc
-          - runner: windows-11-arm
-            target: aarch64-pc-windows-msvc
+      HD2_UPDATE_PUBLIC_KEY_HEX: ${{ secrets.ZIPSIGN_PUBLIC_KEY_HEX }}
+      RELEASE_TARGET: x86_64-pc-windows-msvc
     steps:
       - name: Checkout source
         uses: actions/checkout@v7
@@ -38,7 +31,7 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: desktop-${{ matrix.target }}
+          shared-key: desktop-x86_64-pc-windows-msvc
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
@@ -59,11 +52,11 @@ jobs:
             throw "Tag $tag does not match workspace version $($manifestMatch.Groups[1].Value)"
           }
           if ($env:HD2_UPDATE_PUBLIC_KEY_HEX -notmatch '^[0-9A-Fa-f]{64}$') {
-            throw 'Repository variable ZIPSIGN_PUBLIC_KEY_HEX must contain the fixed 32-byte public key as hex'
+            throw 'Repository secret ZIPSIGN_PUBLIC_KEY_HEX must contain the fixed 32-byte public key as hex'
           }
           $hostTarget = (rustc -vV | Select-String '^host: (.+)$').Matches.Groups[1].Value
-          if ($hostTarget -ne '${{ matrix.target }}') {
-            throw "Runner host $hostTarget does not match expected target ${{ matrix.target }}"
+          if ($hostTarget -ne $env:RELEASE_TARGET) {
+            throw "Runner host $hostTarget does not match expected target $env:RELEASE_TARGET"
           }
           "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
@@ -87,11 +80,11 @@ jobs:
         run: |
           $releaseDirectory = Join-Path $PWD 'release'
           New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
-          $archiveName = "hd2-mod-tools-desktop-${{ matrix.target }}-v$env:RELEASE_VERSION.zip"
+          $archiveName = "hd2-mod-tools-desktop-$env:RELEASE_TARGET-v$env:RELEASE_VERSION.zip"
           $archivePath = Join-Path $releaseDirectory $archiveName
           $executablePath = Join-Path $PWD 'target/release/hd2_migrator_desktop.exe'
           Compress-Archive -LiteralPath $executablePath -DestinationPath $archivePath -CompressionLevel Optimal
-          $publicKeyPath = Join-Path $releaseDirectory 'public-key-${{ matrix.target }}.hex'
+          $publicKeyPath = Join-Path $releaseDirectory "public-key-$env:RELEASE_TARGET.hex"
           $env:HD2_UPDATE_PUBLIC_KEY_HEX.ToLowerInvariant() | Set-Content -LiteralPath $publicKeyPath -Encoding utf8 -NoNewline
 
           Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -108,7 +101,7 @@ jobs:
       - name: Upload unsigned archive for signing
         uses: actions/upload-artifact@v7
         with:
-          name: unsigned-desktop-${{ matrix.target }}
+          name: unsigned-desktop-x86_64-pc-windows-msvc
           path: |
             release/*.zip
             release/*.hex
@@ -137,13 +130,19 @@ jobs:
       - name: Build archive signer
         run: cargo install zipsign --version 0.2.1 --locked --root release-tools
 
+      - name: Stage isolated release tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir release-tool-artifact
+          cp target/release/update-archive-verifier release-tool-artifact/
+          cp release-tools/bin/zipsign release-tool-artifact/
+
       - name: Upload isolated release tools
         uses: actions/upload-artifact@v7
         with:
           name: desktop-release-tools
-          path: |
-            target/release/update-archive-verifier
-            release-tools/bin/zipsign
+          path: release-tool-artifact/
           if-no-files-found: error
 
   sign-and-draft-release:
@@ -154,6 +153,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
       - name: Download unsigned archives
         uses: actions/download-artifact@v8
         with:
@@ -201,8 +203,8 @@ jobs:
           fi
           shopt -s nullglob
           key_markers=(release-assets/public-key-*.hex)
-          if [[ ${#key_markers[@]} -ne 2 ]]; then
-            echo "Expected two embedded public-key markers, found ${#key_markers[@]}" >&2
+          if [[ ${#key_markers[@]} -ne 1 ]]; then
+            echo "Expected one embedded public-key marker, found ${#key_markers[@]}" >&2
             exit 1
           fi
           expected_public_key="$(tr -d '\r\n' < "${key_markers[0]}")"
@@ -210,13 +212,6 @@ jobs:
             echo 'Embedded public-key marker is invalid' >&2
             exit 1
           fi
-          for marker in "${key_markers[@]:1}"; do
-            marker_key="$(tr -d '\r\n' < "$marker")"
-            if [[ "${marker_key,,}" != "${expected_public_key,,}" ]]; then
-              echo 'Architecture builds contain different update public keys' >&2
-              exit 1
-            fi
-          done
           python3 - "$private_key" <<'PY'
           import base64
           import os
@@ -241,8 +236,8 @@ jobs:
             exit 1
           fi
           archives=(release-assets/*.zip)
-          if [[ ${#archives[@]} -ne 2 ]]; then
-            echo "Expected exactly two desktop archives, found ${#archives[@]}" >&2
+          if [[ ${#archives[@]} -ne 1 ]]; then
+            echo "Expected exactly one desktop archive, found ${#archives[@]}" >&2
             exit 1
           fi
           for archive in "${archives[@]}"; do
@@ -277,12 +272,35 @@ jobs:
           path: release-assets/*.zip
           if-no-files-found: error
 
+      - name: Build release notes from update changelog
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          release_directory="crates/web_ui/update-info/releases/$RELEASE_TAG"
+          notes_path="release-assets/release-notes.md"
+
+          append_markdown_body() {
+            local source_path="$1"
+            if [[ ! -f "$source_path" || "$(head -n 1 "$source_path")" != '---' ]]; then
+              echo "Invalid localized changelog: $source_path" >&2
+              exit 1
+            fi
+            tail -n +2 "$source_path" | sed '1,/^---$/d'
+          }
+
+          append_markdown_body "$release_directory/zh-CN.md" > "$notes_path"
+          printf '\n---\n\n' >> "$notes_path"
+          append_markdown_body "$release_directory/en.md" >> "$notes_path"
+          test -s "$notes_path"
+
       - name: Create draft GitHub release
         uses: softprops/action-gh-release@v3
         with:
           draft: true
           prerelease: false
-          overwrite_files: false
-          generate_release_notes: true
+          overwrite_files: true
+          body_path: release-assets/release-notes.md
           files: release-assets/*.zip
           fail_on_unmatched_files: true
