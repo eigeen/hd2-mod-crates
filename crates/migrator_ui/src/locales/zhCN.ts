@@ -138,6 +138,7 @@ export const zhCN = {
   "patch.dropActive": "松开鼠标以导入这些补丁文件",
   "patch.empty": "尚未选择补丁",
   "patch.noToc": "请选择补丁 TOC 文件。",
+  "patch.multipleToc": "一次只能选择一个补丁 TOC 文件。",
   "patch.missingIntro": "补丁缺少必要的辅助文件：",
   "patch.missingAction": "请在文件选择对话框中同时选中 {{toc}}、{{gpu}}、{{stream}}（按住 Ctrl 多选）。",
   "patch.missingSidecar": "· 缺少 {{filename}}（TOC 引用了 {{expected}} 字节）",

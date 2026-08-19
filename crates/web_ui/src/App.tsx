@@ -64,6 +64,7 @@ import {
   analyzeEquipmentContents,
   isWasmRuntimeTrapError,
   migrateEquipmentVariants,
+  patchSidecarRequirements,
   previewEquipmentMappings,
   repatchUnits,
   type MigrationProgressSink,
@@ -227,7 +228,12 @@ function App() {
     async (files: FileList | File[] | null, originalName?: string) => {
       if (!files) return;
       await runTask(setBusy, async () => {
-        const nextPatch = await patchFilesFromList(files, patchMessages, originalName);
+        const nextPatch = await patchFilesFromList(
+          files,
+          patchMessages,
+          patchSidecarRequirements,
+          originalName,
+        );
         await applyPatch(nextPatch);
       }, t);
     },
@@ -733,12 +739,13 @@ function copyDiagnostic(diagnostic: string, t: Translate): void {
 function patchFileMessages(t: Translate) {
   return {
     noToc: t("patch.noToc"),
+    multipleToc: t("patch.multipleToc"),
     missingIntro: t("patch.missingIntro"),
     missingAction: (toc: string, gpu: string, stream: string) =>
       t("patch.missingAction", { toc, gpu, stream }),
-    missingSidecar: (filename: string, expected: number) =>
+    missingSidecar: (filename: string, expected: string) =>
       t("patch.missingSidecar", { filename, expected }),
-    shortSidecar: (filename: string, expected: number, actual: number) =>
+    shortSidecar: (filename: string, expected: string, actual: number) =>
       t("patch.shortSidecar", { filename, expected, actual }),
   };
 }

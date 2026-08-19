@@ -3,67 +3,93 @@ import type { PatchFiles } from "@hd2-mod-tools/migrator-ui";
 const GPU_SUFFIX = ".gpu_resources";
 const STREAM_SUFFIX = ".stream";
 
-const TOC_HEADER_BASE = 72;
-const TOC_FILE_TYPE_SIZE = 32;
-const TOC_ENTRY_SIZE = 80;
-const LEGACY_MAGIC = 0xf0000011;
-
 export interface PatchFileMessages {
   noToc: string;
+  multipleToc: string;
   missingIntro: string;
   missingAction: (toc: string, gpu: string, stream: string) => string;
-  missingSidecar: (filename: string, expected: number) => string;
-  shortSidecar: (filename: string, expected: number, actual: number) => string;
+  missingSidecar: (filename: string, expected: string) => string;
+  shortSidecar: (filename: string, expected: string, actual: number) => string;
 }
+
+export interface PatchSidecarRequirements {
+  gpu: string;
+  stream: string;
+}
+
+export type ReadPatchSidecarRequirements = (
+  toc: Uint8Array,
+) => Promise<PatchSidecarRequirements>;
 
 export async function patchFilesFromList(
   files: FileList | File[],
   messages: PatchFileMessages,
+  readRequirements: ReadPatchSidecarRequirements,
   originalName?: string,
 ) {
   const values = Array.from(files);
-  const toc = values.find(isTocFile);
-  if (!toc) {
+  const toc = selectTocFile(values, messages);
+  const tocBytes = await fileBytes(toc);
+  const required = await readRequirements(tocBytes);
+  const loaded = await loadPatchSelection(values, toc, tocBytes, originalName);
+  validatePatchFiles(loaded.patch, loaded.presence, required, messages);
+  return loaded.patch;
+}
+
+function selectTocFile(values: File[], messages: PatchFileMessages): File {
+  const tocFiles = values.filter(isTocFile);
+  if (tocFiles.length === 0) {
     throw new Error(messages.noToc);
   }
+  if (tocFiles.length > 1) {
+    throw new Error(messages.multipleToc);
+  }
+  return tocFiles[0];
+}
+
+async function loadPatchSelection(
+  values: File[],
+  toc: File,
+  tocBytes: Uint8Array,
+  originalName?: string,
+) {
   const gpuFile = values.find((file) => file.name === `${toc.name}${GPU_SUFFIX}`);
   const streamFile = values.find((file) => file.name === `${toc.name}${STREAM_SUFFIX}`);
-  const tocBytes = await fileBytes(toc);
-  const gpuBytes = gpuFile ? await fileBytes(gpuFile) : new Uint8Array();
-  const streamBytes = streamFile ? await fileBytes(streamFile) : new Uint8Array();
-  const patch: PatchFiles = {
-    name: toc.name,
-    originalName: originalName ?? originalNameFromRelativePath(toc),
-    toc: tocBytes,
-    gpu: gpuBytes,
-    stream: streamBytes,
+  return {
+    patch: {
+      name: toc.name,
+      originalName: originalName ?? originalNameFromRelativePath(toc),
+      toc: tocBytes,
+      gpu: gpuFile ? await fileBytes(gpuFile) : new Uint8Array(),
+      stream: streamFile ? await fileBytes(streamFile) : new Uint8Array(),
+    } satisfies PatchFiles,
+    presence: {
+      hasGpuFile: Boolean(gpuFile),
+      hasStreamFile: Boolean(streamFile),
+    },
   };
-  validatePatchFiles(patch, {
-    hasGpuFile: Boolean(gpuFile),
-    hasStreamFile: Boolean(streamFile),
-    messages,
-  });
-  return patch;
 }
 
 function originalNameFromRelativePath(file: File): string | undefined {
-  const [root, child] = file.webkitRelativePath.split(/[\\/]/);
+  const [root, child] = (file.webkitRelativePath ?? "").split(/[\\/]/);
   return root && child ? root : undefined;
 }
 
-// 校验已加载的 PatchFiles 是否满足 TOC 引用的 sidecar 尺寸；任何路径加载后都应调用。
+/** Validate loaded sidecars against requirements calculated by the shared Rust core. */
 export function validatePatchFiles(
   patch: PatchFiles,
-  presence: { hasGpuFile: boolean; hasStreamFile: boolean; messages: PatchFileMessages },
+  presence: { hasGpuFile: boolean; hasStreamFile: boolean },
+  required: PatchSidecarRequirements,
+  messages: PatchFileMessages,
 ) {
   validatePatchSidecars({
     name: patch.name,
-    toc: patch.toc,
     gpuLen: patch.gpu.length,
     streamLen: patch.stream.length,
     hasGpuFile: presence.hasGpuFile,
     hasStreamFile: presence.hasStreamFile,
-    messages: presence.messages,
+    required,
+    messages,
   });
 }
 
@@ -225,25 +251,31 @@ function downloadBlob(blob: Blob, filename: string): void {
 
 interface PatchSidecarCheck {
   name: string;
-  toc: Uint8Array;
   gpuLen: number;
   streamLen: number;
   hasGpuFile: boolean;
   hasStreamFile: boolean;
+  required: PatchSidecarRequirements;
   messages: PatchFileMessages;
 }
 
 function validatePatchSidecars(check: PatchSidecarCheck) {
-  const required = patchSidecarRequirements(check.toc);
-  if (!required) {
-    return;
-  }
   const missing: string[] = [];
-  if (required.gpu > check.gpuLen) {
-    missing.push(buildSidecarHint(check.name, GPU_SUFFIX, required.gpu, check.gpuLen, check.hasGpuFile, check.messages));
+  if (BigInt(check.required.gpu) > BigInt(check.gpuLen)) {
+    missing.push(buildSidecarHint(check, {
+      suffix: GPU_SUFFIX,
+      expected: check.required.gpu,
+      actual: check.gpuLen,
+      provided: check.hasGpuFile,
+    }));
   }
-  if (required.stream > check.streamLen) {
-    missing.push(buildSidecarHint(check.name, STREAM_SUFFIX, required.stream, check.streamLen, check.hasStreamFile, check.messages));
+  if (BigInt(check.required.stream) > BigInt(check.streamLen)) {
+    missing.push(buildSidecarHint(check, {
+      suffix: STREAM_SUFFIX,
+      expected: check.required.stream,
+      actual: check.streamLen,
+      provided: check.hasStreamFile,
+    }));
   }
   if (missing.length === 0) {
     return;
@@ -255,57 +287,19 @@ function validatePatchSidecars(check: PatchSidecarCheck) {
   );
 }
 
-function buildSidecarHint(
-  baseName: string,
-  suffix: string,
-  expected: number,
-  actual: number,
-  provided: boolean,
-  messages: PatchFileMessages,
-) {
-  const filename = `${baseName}${suffix}`;
-  if (!provided) {
-    return messages.missingSidecar(filename, expected);
-  }
-  return messages.shortSidecar(filename, expected, actual);
+interface SidecarHintInput {
+  suffix: string;
+  expected: string;
+  actual: number;
+  provided: boolean;
 }
 
-interface SidecarRequirements {
-  gpu: number;
-  stream: number;
-}
-
-function patchSidecarRequirements(toc: Uint8Array): SidecarRequirements | null {
-  if (toc.length < TOC_HEADER_BASE) {
-    return null;
+function buildSidecarHint(check: PatchSidecarCheck, input: SidecarHintInput) {
+  const filename = `${check.name}${input.suffix}`;
+  if (!input.provided) {
+    return check.messages.missingSidecar(filename, input.expected);
   }
-  const view = new DataView(toc.buffer, toc.byteOffset, toc.byteLength);
-  if (view.getUint32(0, true) !== LEGACY_MAGIC) {
-    return null;
-  }
-  const numTypes = view.getUint32(4, true);
-  const numFiles = view.getUint32(8, true);
-  const entriesStart = TOC_HEADER_BASE + numTypes * TOC_FILE_TYPE_SIZE;
-  const bodiesStart = entriesStart + numFiles * TOC_ENTRY_SIZE;
-  if (toc.length < bodiesStart) {
-    return null;
-  }
-  let gpuEnd = 0;
-  let streamEnd = 0;
-  for (let i = 0; i < numFiles; i += 1) {
-    const off = entriesStart + i * TOC_ENTRY_SIZE;
-    const streamOff = Number(view.getBigUint64(off + 24, true));
-    const gpuOff = Number(view.getBigUint64(off + 32, true));
-    const streamSz = view.getUint32(off + 60, true);
-    const gpuSz = view.getUint32(off + 64, true);
-    if (gpuSz > 0) {
-      gpuEnd = Math.max(gpuEnd, gpuOff + gpuSz);
-    }
-    if (streamSz > 0) {
-      streamEnd = Math.max(streamEnd, streamOff + streamSz);
-    }
-  }
-  return { gpu: gpuEnd, stream: streamEnd };
+  return check.messages.shortSidecar(filename, input.expected, input.actual);
 }
 
 function isTocFile(file: File) {

@@ -138,6 +138,7 @@ export const en = {
   "patch.dropActive": "Release to import these patch files",
   "patch.empty": "No patch selected",
   "patch.noToc": "Choose a patch TOC file.",
+  "patch.multipleToc": "Choose one patch TOC at a time.",
   "patch.missingIntro": "The patch is missing required sidecar files:",
   "patch.missingAction": "Select {{toc}}, {{gpu}}, and {{stream}} together in the file picker. Hold Ctrl to multi-select.",
   "patch.missingSidecar": "· Missing {{filename}}. The TOC references {{expected}} bytes.",

@@ -9,9 +9,28 @@ use hd2_migrator_io::{
     web::{self, PatchBytes, WebMigrateOptions, WebMigrationSummary, WebTargetOption},
 };
 use js_sys::{Array, Object, Reflect, Uint8Array};
+use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 const DEFAULT_CATEGORY: &str = "Armor";
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsSidecarRequirements {
+    gpu: String,
+    stream: String,
+}
+
+#[wasm_bindgen]
+pub fn patch_sidecar_requirements(toc: Vec<u8>) -> WasmResult<JsValue> {
+    let required =
+        hd2_migrator_io::archive::sidecar::patch_sidecar_requirements(&toc).map_err(js_error)?;
+    serde_wasm_bindgen::to_value(&JsSidecarRequirements {
+        gpu: required.gpu.to_string(),
+        stream: required.stream.to_string(),
+    })
+    .map_err(js_error)
+}
 
 #[wasm_bindgen]
 pub fn builtin_target_options(category: Option<String>) -> WasmResult<JsValue> {

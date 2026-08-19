@@ -1,4 +1,4 @@
-use hd2_migrator_io::archive::toc_only::TocOnlyPackage;
+use hd2_migrator_io::archive::sidecar::patch_sidecar_requirements;
 use hd2_migrator_io::web::PatchBytes;
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -133,21 +133,10 @@ fn validate_sidecars(
     stream_len: usize,
     name: &str,
 ) -> Result<(), String> {
-    let package = TocOnlyPackage::parse(toc).map_err(|error| format!("Parse {name}: {error}"))?;
-    let required_gpu = package
-        .entries
-        .iter()
-        .map(|entry| entry.gpu_offset + u64::from(entry.gpu_size))
-        .max()
-        .unwrap_or(0);
-    let required_stream = package
-        .entries
-        .iter()
-        .map(|entry| entry.stream_offset + u64::from(entry.stream_size))
-        .max()
-        .unwrap_or(0);
-    validate_sidecar_len(name, GPU_SUFFIX, required_gpu, gpu_len)?;
-    validate_sidecar_len(name, STREAM_SUFFIX, required_stream, stream_len)
+    let required =
+        patch_sidecar_requirements(toc).map_err(|error| format!("Parse {name}: {error}"))?;
+    validate_sidecar_len(name, GPU_SUFFIX, required.gpu, gpu_len)?;
+    validate_sidecar_len(name, STREAM_SUFFIX, required.stream, stream_len)
 }
 
 fn validate_sidecar_len(
@@ -189,6 +178,7 @@ fn original_name(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hd2_migrator_io::archive::TocFileType;
     use hd2_migrator_io::archive::toc_only::TocOnlyPackage;
 
     #[test]
@@ -218,6 +208,60 @@ mod tests {
             .expect("multiple TOCs must fail");
 
         assert!(error.contains("Multiple patch TOC files"));
+    }
+
+    #[test]
+    fn accepts_empty_sidecar_intervals_at_aligned_offsets() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let toc_path = directory.path().join("example.patch_0");
+        std::fs::write(&toc_path, sidecar_toc(198_525_248, 0, 1_398_144, 0)).expect("write TOC");
+
+        let patch = load_patch(&[toc_path]).expect("load patch");
+
+        assert!(patch.bytes().gpu.is_empty());
+        assert!(patch.bytes().stream.is_empty());
+    }
+
+    #[test]
+    fn rejects_non_empty_sidecar_interval_beyond_file() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let toc_path = directory.path().join("example.patch_0");
+        std::fs::write(&toc_path, sidecar_toc(0, 0, 16, 1)).expect("write TOC");
+
+        let error = load_patch(&[toc_path])
+            .err()
+            .expect("short stream must fail");
+
+        assert!(error.contains("requires 17 bytes, found 0"));
+    }
+
+    fn sidecar_toc(
+        gpu_offset: u64,
+        gpu_size: u32,
+        stream_offset: u64,
+        stream_size: u32,
+    ) -> Vec<u8> {
+        let type_id = hd2_migrator_io::constants::UNIT_ID;
+        TocOnlyPackage {
+            types: vec![TocFileType::new(type_id, 1)],
+            entries: vec![hd2_migrator_io::archive::toc_only::TocOnlyEntry {
+                file_id: 42,
+                type_id,
+                unknown1: 0,
+                unknown2: 0,
+                unknown3: 16,
+                unknown4: 64,
+                toc_data: Vec::new(),
+                stream_offset,
+                gpu_offset,
+                stream_size,
+                gpu_size,
+            }],
+            unknown: 0,
+            unk4_data: [0; 56],
+        }
+        .serialize()
+        .expect("serialize TOC")
     }
 
     fn empty_toc() -> Vec<u8> {

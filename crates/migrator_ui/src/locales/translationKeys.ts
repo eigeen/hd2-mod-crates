@@ -136,6 +136,7 @@ export const translationKeys = [
   "patch.dropActive",
   "patch.empty",
   "patch.noToc",
+  "patch.multipleToc",
   "patch.missingIntro",
   "patch.missingAction",
   "patch.missingSidecar",

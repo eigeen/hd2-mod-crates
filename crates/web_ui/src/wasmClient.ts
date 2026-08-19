@@ -62,6 +62,13 @@ export async function builtinEquipmentOptions() {
   ) as Promise<EquipmentOption[]>;
 }
 
+export async function patchSidecarRequirements(toc: Uint8Array) {
+  const wasm = await loadWasm();
+  return callWasm("patch_sidecar_requirements", () =>
+    wasm.patch_sidecar_requirements(toc),
+  ) as Promise<{ gpu: string; stream: string }>;
+}
+
 export interface PatchMergeSummary {
   inputCount: number;
   resourceCount: number;
