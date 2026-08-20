@@ -11,7 +11,6 @@ import {
   MAX_WEB_SINGLE_PATCH_MAPPINGS,
   OptionsPanel,
   PatchPanel,
-  PerformanceDialog,
   ResultReportDialog,
   TaskReportHistoryButton,
   TargetPanel,
@@ -56,6 +55,14 @@ import {
   type UnmatchedUnitPolicy,
 } from "@hd2-mod-tools/migrator-ui";
 import { downloadRepatchedPatch, downloadZip, patchFilesFromList } from "./fileInputs";
+import {
+  DesktopDownloadEntry,
+  DesktopErrorRecommendation,
+  DesktopRecommendation,
+  MultiTargetGuidanceDialog,
+  WebMappingLimitDialog,
+} from "./DesktopGuidance";
+import { shouldRecommendDesktop } from "./desktopGuidancePolicy";
 import { FrequentlyAskedQuestions } from "./FrequentlyAskedQuestions";
 import { GameDataDirPanel, type GameDirSelection } from "./GameDataDirPanel";
 import { GameDataSource } from "./gameDataSource";
@@ -99,6 +106,7 @@ function App() {
   const [progressLabel, setProgressLabel] = useState("");
   const [warningOpen, setWarningOpen] = useState(false);
   const [multiConfirmed, setMultiConfirmed] = useState(false);
+  const [mappingLimitWarning, setMappingLimitWarning] = useState<{ count: number; max: number } | null>(null);
   const [gameDir, setGameDir] = useState<GameDirSelection | null>(null);
   const [missingUnitPolicy, setMissingUnitPolicy] = useState<MissingUnitPolicy>("drop");
   const [faqOpen, setFaqOpen] = useState(false);
@@ -162,6 +170,7 @@ function App() {
     configuredMappings,
     webMappingLimit,
   );
+  const largeMigration = shouldRecommendDesktop(selectedTargetCount, webMappingLimit);
   const multiTargetEligible = canUseMultiTarget(sources);
   const crossArchiveReady = gameDir !== null && gameDir.status.kind !== "empty";
   const canMigrate = Boolean(
@@ -270,8 +279,8 @@ function App() {
       setSinglePatch(enabled);
       return;
     }
-    showWebMappingLimitWarning(configuredMappings.length, nextLimit, t);
-  }, [configuredMappings.length, separateOutputMappingLimit, singlePatchMappingLimit, t]);
+    setMappingLimitWarning({ count: configuredMappings.length, max: nextLimit });
+  }, [configuredMappings.length, separateOutputMappingLimit, singlePatchMappingLimit]);
 
   const chooseSource = useCallback((sourceId: string) => {
     setActiveSourceId(sourceId);
@@ -297,7 +306,7 @@ function App() {
     const reducesMappingCount = nextMappings.length < configuredMappings.length;
     if (!reducesMappingCount
       && exceedsWebMappingLimit(nextMappings, nextMappingLimit)) {
-      showWebMappingLimitWarning(nextMappings.length, nextMappingLimit, t);
+      setMappingLimitWarning({ count: nextMappings.length, max: nextMappingLimit });
       return;
     }
     setTargetsBySource(nextTargetsBySource);
@@ -308,7 +317,6 @@ function App() {
     singlePatchMappingLimit,
     separateOutputMappingLimit,
     sources,
-    t,
     targetsBySource,
   ]);
 
@@ -320,7 +328,7 @@ function App() {
     const patch = patchRef.current;
     if (!patch) return;
     if (webMappingLimitExceeded) {
-      showWebMappingLimitWarning(selectedTargetCount, webMappingLimit, t);
+      setMappingLimitWarning({ count: selectedTargetCount, max: webMappingLimit });
       return;
     }
     const variants = buildMigrationVariants(configuredMappings, outputAsSinglePatch);
@@ -456,6 +464,8 @@ function App() {
             </div>
           </div>
 
+          <DesktopDownloadEntry />
+
           <Tabs
             centered
             onChange={(_, value: ToolMode) => navigateToToolMode(value)}
@@ -508,6 +518,13 @@ function App() {
               targetSelectionEnabled={Boolean(activeSource?.resolvedHash)}
               targetsBySource={targetsBySource}
               />
+                {largeMigration && !webMappingLimitExceeded && (
+                  <DesktopRecommendation
+                    body="desktopGuide.largeMigrationBody"
+                    title="desktopGuide.largeMigrationTitle"
+                    values={{ count: selectedTargetCount, max: webMappingLimit }}
+                  />
+                )}
                 <MappingPreviewAccordion
                   cullingPolicy={cullingPolicy}
                   contextKey={`${patchRevision}:${cullingPolicy}`}
@@ -518,13 +535,19 @@ function App() {
                   unmatchedUnitPolicy={unmatchedUnitPolicy}
                   onUnitBehaviorChange={setUnitBehavior}
                 />
-            </> : <UnitUpdaterPanel
-              cullingPolicy={cullingPolicy}
-              cullingSummary={cullingSummary}
-              missingUnitPolicy={missingUnitPolicy}
-              onCullingPolicyChange={setCullingPolicy}
-              onMissingUnitPolicyChange={setMissingUnitPolicy}
-            />}
+            </> : <>
+              <UnitUpdaterPanel
+                cullingPolicy={cullingPolicy}
+                cullingSummary={cullingSummary}
+                missingUnitPolicy={missingUnitPolicy}
+                onCullingPolicyChange={setCullingPolicy}
+                onMissingUnitPolicyChange={setMissingUnitPolicy}
+              />
+              <DesktopRecommendation
+                body="desktopGuide.repatchBody"
+                title="desktopGuide.repatchTitle"
+              />
+            </>}
           </div>
 
           {/* Action row: options + blocker hint + execute */}
@@ -593,16 +616,22 @@ function App() {
       </main>
       </div>
 
-      <PerformanceDialog
+      <MultiTargetGuidanceDialog
         open={warningOpen}
         onCancel={() => {
           setWarningOpen(false);
           setMultiTarget(false);
         }}
-        onConfirm={() => {
+        onContinue={() => {
           setMultiConfirmed(true);
           setWarningOpen(false);
         }}
+      />
+      <WebMappingLimitDialog
+        count={mappingLimitWarning?.count ?? 0}
+        max={mappingLimitWarning?.max ?? 0}
+        onClose={() => setMappingLimitWarning(null)}
+        open={mappingLimitWarning !== null}
       />
     </div>
   );
@@ -627,10 +656,6 @@ function nextBlockerHint(input: BlockerHintInput, t: Translate): string {
     });
   }
   return "";
-}
-
-function showWebMappingLimitWarning(count: number, max: number, t: Translate): void {
-  toast.warning(t("app.blockerWebMappingLimit", { count, max }));
 }
 
 interface VariantMigrationRequest {
@@ -747,8 +772,11 @@ function showTaskError(error: unknown, t: Translate): void {
     toast.info(t("task.cancelled"));
     return;
   }
+  const description = presentation.error.code === "wasm.runtime"
+    ? <DesktopErrorRecommendation>{presentation.description}</DesktopErrorRecommendation>
+    : presentation.description;
   toast.error(presentation.title, {
-    description: presentation.description,
+    description,
     action: {
       label: t("error.copyDiagnostics"),
       onClick: () => copyDiagnostic(presentation.diagnostic, t),

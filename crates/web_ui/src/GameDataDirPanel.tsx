@@ -4,6 +4,7 @@ import FolderOffIcon from "@mui/icons-material/FolderOff";
 import { Alert, Button } from "@mui/material";
 import { useDropZone, useI18n } from "@hd2-mod-tools/migrator-ui";
 import { useCallback, useEffect, useState } from "react";
+import { DesktopDownloadButton } from "./DesktopGuidance";
 import {
   droppedGameDirectory,
   ensureReadPermission,
@@ -115,7 +116,10 @@ export function GameDataDirPanel({ selection, onChange, onDirectoryAccessAborted
       <div className={panelClass}>
         <Header />
         <Alert severity="info" sx={{ mt: 2 }}>
-          {t("gameData.unsupported")}
+          <div className="flex flex-col items-start gap-3">
+            <span>{t("gameData.unsupported")}</span>
+            <DesktopDownloadButton />
+          </div>
         </Alert>
       </div>
     );
