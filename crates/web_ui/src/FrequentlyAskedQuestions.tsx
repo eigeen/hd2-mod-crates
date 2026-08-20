@@ -4,9 +4,11 @@ import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import { IconButton } from "@mui/material";
 import { useI18n, type LanguageCode, type TranslationKey } from "@hd2-mod-tools/migrator-ui";
 import { useEffect, useRef } from "react";
+import { DesktopDownloadButton } from "./DesktopGuidance";
 
 interface FaqEntry {
   answer: TranslationKey;
+  desktopDownload?: boolean;
   href?: string;
   language?: LanguageCode;
   question: TranslationKey;
@@ -18,6 +20,7 @@ const entries: FaqEntry[] = [
     question: "faq.workaroundQuestion",
     recommendation: "faq.workaroundRecommendation",
     answer: "faq.workaroundAnswer",
+    desktopDownload: true,
   },
   { question: "faq.readOnlyQuestion", answer: "faq.readOnlyAnswer" },
   {
@@ -115,9 +118,7 @@ function FaqItem({ attention, entry }: { attention: boolean; entry: FaqEntry }) 
       </summary>
       <div className="border-t border-hd2-border px-5 py-3 text-xs leading-6">
         {entry.recommendation && (
-          <p className="m-0 border-l-2 border-hd2-yellow bg-hd2-yellow-bg px-3 py-2 font-semibold text-hd2-text">
-            {t(entry.recommendation)}
-          </p>
+          <FaqRecommendation entry={entry} />
         )}
         <p className={`m-0 text-hd2-muted ${entry.recommendation ? "mt-3" : ""}`}>
           {entry.href ? (
@@ -133,6 +134,21 @@ function FaqItem({ attention, entry }: { attention: boolean; entry: FaqEntry }) 
         </p>
       </div>
     </details>
+  );
+}
+
+function FaqRecommendation({ entry }: { entry: FaqEntry }) {
+  const { t } = useI18n();
+  if (!entry.recommendation) return null;
+  return (
+    <div className="border-l-2 border-hd2-yellow bg-hd2-yellow-bg px-3 py-3 text-hd2-text">
+      <p className="m-0 font-semibold">{t(entry.recommendation)}</p>
+      {entry.desktopDownload && (
+        <div className="mt-3">
+          <DesktopDownloadButton fullWidth />
+        </div>
+      )}
+    </div>
   );
 }
 

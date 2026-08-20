@@ -71,13 +71,13 @@ export function DesktopRecommendation(props: DesktopRecommendationProps) {
   );
 }
 
-interface MultiTargetGuidanceDialogProps {
+interface ContinueWebGuidanceDialogProps {
   onCancel: () => void;
   onContinue: () => void;
   open: boolean;
 }
 
-export function MultiTargetGuidanceDialog(props: MultiTargetGuidanceDialogProps) {
+export function MultiTargetGuidanceDialog(props: ContinueWebGuidanceDialogProps) {
   const { t } = useI18n();
 
   return (
@@ -91,13 +91,21 @@ export function MultiTargetGuidanceDialog(props: MultiTargetGuidanceDialogProps)
           </p>
         </GuidanceBody>
       </Hd2DialogContent>
-      <Hd2DialogActions>
-        <Button onClick={props.onCancel}>{t("dialog.cancel")}</Button>
-        <DesktopDownloadButton />
-        <Button onClick={props.onContinue} variant="contained">
-          {t("desktopGuide.continueWeb")}
-        </Button>
-      </Hd2DialogActions>
+      <ContinueWebDialogActions onCancel={props.onCancel} onContinue={props.onContinue} />
+    </Hd2Dialog>
+  );
+}
+
+export function RepatchGuidanceDialog(props: ContinueWebGuidanceDialogProps) {
+  const { t } = useI18n();
+
+  return (
+    <Hd2Dialog onClose={props.onCancel} open={props.open}>
+      <Hd2DialogTitle>{t("desktopGuide.repatchTitle")}</Hd2DialogTitle>
+      <Hd2DialogContent>
+        <GuidanceBody>{t("desktopGuide.repatchBody")}</GuidanceBody>
+      </Hd2DialogContent>
+      <ContinueWebDialogActions onCancel={props.onCancel} onContinue={props.onContinue} />
     </Hd2Dialog>
   );
 }
@@ -153,5 +161,18 @@ function GuidanceBody({ children }: { children: ReactNode }) {
     <div className="border border-hd2-yellow/30 bg-hd2-yellow-bg px-4 py-3 text-sm leading-6 text-hd2-muted">
       {children}
     </div>
+  );
+}
+
+function ContinueWebDialogActions(props: Pick<ContinueWebGuidanceDialogProps, "onCancel" | "onContinue">) {
+  const { t } = useI18n();
+  return (
+    <Hd2DialogActions>
+      <Button onClick={props.onCancel}>{t("dialog.cancel")}</Button>
+      <DesktopDownloadButton />
+      <Button onClick={props.onContinue} variant="contained">
+        {t("desktopGuide.continueWeb")}
+      </Button>
+    </Hd2DialogActions>
   );
 }

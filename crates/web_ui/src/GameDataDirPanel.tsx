@@ -5,6 +5,7 @@ import { Alert, Button } from "@mui/material";
 import { useDropZone, useI18n } from "@hd2-mod-tools/migrator-ui";
 import { useCallback, useEffect, useState } from "react";
 import { DesktopDownloadButton } from "./DesktopGuidance";
+import { isDesktopRecoverableWebError } from "./desktopGuidancePolicy";
 import {
   droppedGameDirectory,
   ensureReadPermission,
@@ -43,6 +44,7 @@ export function GameDataDirPanel({ selection, onChange, onDirectoryAccessAborted
     isDirectoryAccessSupported() ? { kind: "empty" } : { kind: "unsupported" },
   );
   const [error, setError] = useState("");
+  const [errorDesktopFallback, setErrorDesktopFallback] = useState(false);
   const [busy, setBusy] = useState(false);
 
   // 当外部 selection 改变（例如 App 主动清除），同步本地状态。
@@ -72,20 +74,26 @@ export function GameDataDirPanel({ selection, onChange, onDirectoryAccessAborted
 
   const handlePick = useCallback(async () => {
     setError("");
+    setErrorDesktopFallback(false);
     setBusy(true);
     try {
       await selectDirectory(await pickGameDirectory());
     } catch (e) {
       if (!isCancelError(e)) {
-        setError(messageOf(e));
+        const message = messageOf(e);
+        setError(message);
+        setErrorDesktopFallback(
+          isDesktopRecoverableWebError(e) || message === t("gameData.permissionDenied"),
+        );
       }
     } finally {
       setBusy(false);
     }
-  }, [selectDirectory]);
+  }, [selectDirectory, t]);
 
   const handleDrop = useCallback(async (dataTransfer: DataTransfer) => {
     setError("");
+    setErrorDesktopFallback(false);
     setBusy(true);
     try {
       const handle = await droppedGameDirectory(dataTransfer.items);
@@ -94,9 +102,11 @@ export function GameDataDirPanel({ selection, onChange, onDirectoryAccessAborted
     } catch (e) {
       if (isFileSystemAbort(e)) {
         setError(t("gameData.dropAborted"));
+        setErrorDesktopFallback(true);
         onDirectoryAccessAborted();
       } else {
         setError(messageOf(e));
+        setErrorDesktopFallback(isDesktopRecoverableWebError(e));
       }
     } finally {
       setBusy(false);
@@ -106,6 +116,7 @@ export function GameDataDirPanel({ selection, onChange, onDirectoryAccessAborted
 
   const handleForget = useCallback(async () => {
     setError("");
+    setErrorDesktopFallback(false);
     await forgetRememberedDirectory();
     setState({ kind: "empty" });
     onChange(null);
@@ -140,7 +151,10 @@ export function GameDataDirPanel({ selection, onChange, onDirectoryAccessAborted
       />
       {error && (
         <Alert severity="error" sx={{ mt: 2 }}>
-          {error}
+          <div className="flex flex-col items-start gap-3">
+            <span>{error}</span>
+            {errorDesktopFallback && <DesktopDownloadButton />}
+          </div>
         </Alert>
       )}
     </div>

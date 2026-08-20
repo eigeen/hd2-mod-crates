@@ -60,9 +60,10 @@ import {
   DesktopErrorRecommendation,
   DesktopRecommendation,
   MultiTargetGuidanceDialog,
+  RepatchGuidanceDialog,
   WebMappingLimitDialog,
 } from "./DesktopGuidance";
-import { shouldRecommendDesktop } from "./desktopGuidancePolicy";
+import { isDesktopRecoverableWebError, shouldRecommendDesktop } from "./desktopGuidancePolicy";
 import { FrequentlyAskedQuestions } from "./FrequentlyAskedQuestions";
 import { GameDataDirPanel, type GameDirSelection } from "./GameDataDirPanel";
 import { GameDataSource } from "./gameDataSource";
@@ -107,6 +108,7 @@ function App() {
   const [warningOpen, setWarningOpen] = useState(false);
   const [multiConfirmed, setMultiConfirmed] = useState(false);
   const [mappingLimitWarning, setMappingLimitWarning] = useState<{ count: number; max: number } | null>(null);
+  const [repatchGuideOpen, setRepatchGuideOpen] = useState(false);
   const [gameDir, setGameDir] = useState<GameDirSelection | null>(null);
   const [missingUnitPolicy, setMissingUnitPolicy] = useState<MissingUnitPolicy>("drop");
   const [faqOpen, setFaqOpen] = useState(false);
@@ -401,7 +403,13 @@ function App() {
     setProgressLabel("");
   }, [cullingPolicy, gameDir, missingUnitPolicy, reportHistory.recordReport, runCancellableTask, t]);
 
-  const runSelectedTool = toolMode === "migrate" ? runMigration : runUnitRepatch;
+  const requestRunSelectedTool = useCallback(() => {
+    if (toolMode === "migrate") {
+      void runMigration();
+      return;
+    }
+    setRepatchGuideOpen(true);
+  }, [runMigration, toolMode]);
 
   return (
     <div className="min-h-screen">
@@ -496,8 +504,8 @@ function App() {
             </div>
           </div>
 
-          <div className="border-t border-hd2-border">
-            {toolMode === "migrate" ? <>
+          {toolMode === "migrate" && (
+            <div className="border-t border-hd2-border">
               <TargetPanel
               activeSourceId={activeSourceId}
               equipmentOptions={equipmentOptions}
@@ -535,25 +543,13 @@ function App() {
                   unmatchedUnitPolicy={unmatchedUnitPolicy}
                   onUnitBehaviorChange={setUnitBehavior}
                 />
-            </> : <>
-              <UnitUpdaterPanel
-                cullingPolicy={cullingPolicy}
-                cullingSummary={cullingSummary}
-                missingUnitPolicy={missingUnitPolicy}
-                onCullingPolicyChange={setCullingPolicy}
-                onMissingUnitPolicyChange={setMissingUnitPolicy}
-              />
-              <DesktopRecommendation
-                body="desktopGuide.repatchBody"
-                title="desktopGuide.repatchTitle"
-              />
-            </>}
-          </div>
+            </div>
+          )}
 
           {/* Action row: options + blocker hint + execute */}
           <div className="flex flex-col items-stretch gap-3 border-t border-hd2-border bg-hd2-pit px-5 py-3 min-[51.25rem]:flex-row min-[51.25rem]:items-center min-[51.25rem]:gap-4">
-            {toolMode === "migrate" && (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 min-[51.25rem]:shrink-0">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 min-[51.25rem]:shrink-0">
+              {toolMode === "migrate" ? (
                 <OptionsPanel
                   cullingPolicy={cullingPolicy}
                   noPadding={noPadding}
@@ -562,8 +558,16 @@ function App() {
                   setUnmatchedUnitPolicy={setUnmatchedUnitPolicy}
                   unmatchedUnitPolicy={unmatchedUnitPolicy}
                 />
-              </div>
-            )}
+              ) : (
+                <UnitUpdaterPanel
+                  cullingPolicy={cullingPolicy}
+                  cullingSummary={cullingSummary}
+                  missingUnitPolicy={missingUnitPolicy}
+                  onCullingPolicyChange={setCullingPolicy}
+                  onMissingUnitPolicyChange={setMissingUnitPolicy}
+                />
+              )}
+            </div>
             <div className="flex min-w-0 flex-1 items-center gap-4">
               <div
                 aria-atomic="true"
@@ -594,7 +598,7 @@ function App() {
                 <Button
                   className="shrink-0"
                   disabled={!canRun}
-                  onClick={runSelectedTool}
+                  onClick={requestRunSelectedTool}
                   startIcon={<PlayArrowIcon />}
                   variant="contained"
                 >
@@ -626,6 +630,14 @@ function App() {
           setMultiConfirmed(true);
           setWarningOpen(false);
         }}
+      />
+      <RepatchGuidanceDialog
+        onCancel={() => setRepatchGuideOpen(false)}
+        onContinue={() => {
+          setRepatchGuideOpen(false);
+          void runUnitRepatch();
+        }}
+        open={repatchGuideOpen}
       />
       <WebMappingLimitDialog
         count={mappingLimitWarning?.count ?? 0}
@@ -772,7 +784,9 @@ function showTaskError(error: unknown, t: Translate): void {
     toast.info(t("task.cancelled"));
     return;
   }
-  const description = presentation.error.code === "wasm.runtime"
+  const desktopCanHelp = presentation.error.code === "wasm.runtime"
+    || isDesktopRecoverableWebError(error);
+  const description = desktopCanHelp
     ? <DesktopErrorRecommendation>{presentation.description}</DesktopErrorRecommendation>
     : presentation.description;
   toast.error(presentation.title, {

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   DESKTOP_RELEASE_URL,
   desktopRecommendationThreshold,
+  isDesktopRecoverableWebError,
   shouldRecommendDesktop,
 } from "../src/desktopGuidancePolicy";
 
@@ -26,4 +27,22 @@ describe("desktop guidance policy", () => {
       "https://github.com/eigeen/hd2-mod-crates/releases",
     );
   });
+
+  test("recognizes errors caused by browser limits", () => {
+    expect(isDesktopRecoverableWebError(namedError("NotAllowedError"))).toBe(true);
+    expect(isDesktopRecoverableWebError(namedError("NotReadableError"))).toBe(true);
+    expect(isDesktopRecoverableWebError(namedError("QuotaExceededError"))).toBe(true);
+    expect(isDesktopRecoverableWebError(namedError("SecurityError"))).toBe(true);
+  });
+
+  test("does not recommend desktop for cancellation or ordinary task errors", () => {
+    expect(isDesktopRecoverableWebError(namedError("AbortError"))).toBe(false);
+    expect(isDesktopRecoverableWebError(new Error("invalid Patch"))).toBe(false);
+  });
 });
+
+function namedError(name: string): Error {
+  const error = new Error(name);
+  error.name = name;
+  return error;
+}
