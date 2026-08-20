@@ -101,18 +101,22 @@ export function downloadRepatchedPatch(
   patch: PatchFiles,
   tocBytes: Uint8Array,
   filename: string,
+  gpuBytes?: Uint8Array | null,
+  streamBytes?: Uint8Array | null,
 ) {
-  downloadBlob(buildRepatchedPatchZip(patch, tocBytes), filename);
+  downloadBlob(buildRepatchedPatchZip(patch, tocBytes, gpuBytes, streamBytes), filename);
 }
 
 export function buildRepatchedPatchZip(
   patch: PatchFiles,
   tocBytes: Uint8Array,
+  gpuBytes?: Uint8Array | null,
+  streamBytes?: Uint8Array | null,
 ): Blob {
   const entries = [
     { name: patch.name, bytes: tocBytes },
-    { name: `${patch.name}${GPU_SUFFIX}`, bytes: patch.gpu },
-    { name: `${patch.name}${STREAM_SUFFIX}`, bytes: patch.stream },
+    { name: `${patch.name}${GPU_SUFFIX}`, bytes: gpuBytes ?? patch.gpu },
+    { name: `${patch.name}${STREAM_SUFFIX}`, bytes: streamBytes ?? patch.stream },
   ];
   return storeZip(entries);
 }

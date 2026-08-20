@@ -32,6 +32,7 @@ import {
   type PreviewUnitNodeData,
 } from "./mappingPreviewLayout";
 import type {
+  CullingPolicy,
   EquipmentMappingPreview,
   EquipmentPartGraph,
   EquipmentPartRole,
@@ -56,6 +57,7 @@ const nodeTypes: NodeTypes = {
 
 interface CanvasBehaviorProps {
   behavior: UnitBehaviorOptions;
+  cullingPolicy: CullingPolicy;
   onBehaviorChange: (behavior: UnitBehaviorOptions) => void;
   unmatchedUnitPolicy: UnmatchedUnitPolicy;
 }
@@ -204,6 +206,7 @@ function openUnitMenu(
       analysis: context.analysis,
       anchor: { left: event.clientX, top: event.clientY },
       behavior: context.props.behavior,
+      cullingPolicy: context.props.cullingPolicy,
       previews: context.props.previews,
       unmatchedUnitPolicy: context.props.unmatchedUnitPolicy,
     },
@@ -253,6 +256,9 @@ function PreviewUnitNode({ data }: NodeProps<MappingPreviewNode>) {
   const { t } = useI18n();
   const unit = data as PreviewUnitNodeData;
   const related = unit.sourceRoles.length > 0 || unit.targetRoles.length > 0;
+  const showCulling = unit.cullingMeshCount !== null && (
+    (unit.patchCullingMeshCount ?? 0) > 0 || (unit.targetCullingMeshCount ?? 0) > 0
+  );
   const nodeClassName = [
     "hd2-unit-node h-full w-full overflow-visible border border-hd2-line bg-hd2-surface px-3 py-2.5 shadow-lg",
     unit.directReuse ? "hd2-unit-direct-reuse" : "",
@@ -273,6 +279,15 @@ function PreviewUnitNode({ data }: NodeProps<MappingPreviewNode>) {
           <div className="truncate font-mono text-[0.6875rem] text-hd2-text" title={unit.fileId}>{unit.fileId}</div>
           {unit.sourceRoles.length > 0 && <RoleLine label={t("preview.sourceRole")} roles={unit.sourceRoles} />}
           {unit.targetRoles.length > 0 && <RoleLine label={t("preview.targetRole")} roles={unit.targetRoles} />}
+          {showCulling && (
+            <StatusLine
+              className="text-hd2-yellow"
+              text={t("preview.culling", {
+                count: unit.cullingMeshCount ?? 0,
+                source: t(unit.cullingPolicy === "target" ? "preview.cullingTarget" : "preview.cullingPatch"),
+              })}
+            />
+          )}
           {!related && <StatusLine className="text-hd2-faint" text={t("preview.wildUnit")} />}
           {unit.directReuse && <StatusLine className="text-hd2-yellow" text={t("preview.reused")} />}
           {unit.shared && !unit.directReuse && <StatusLine className="text-hd2-related" text={t("preview.shared")} />}
@@ -316,6 +331,7 @@ function decorateNodes(
   const context: UnitDecorationContext = {
     analysis,
     behavior: props.behavior,
+    cullingPolicy: props.cullingPolicy,
     previews: props.previews,
     unmatchedUnitPolicy: props.unmatchedUnitPolicy,
   };
@@ -325,6 +341,7 @@ function decorateNodes(
 interface UnitDecorationContext {
   analysis: MappingGraphAnalysis | null;
   behavior: UnitBehaviorOptions;
+  cullingPolicy: CullingPolicy;
   previews: EquipmentMappingPreview[] | null;
   unmatchedUnitPolicy: UnmatchedUnitPolicy;
 }
@@ -342,7 +359,18 @@ function decorateNode(node: MappingPreviewNode, input: UnitDecorationContext): M
     context.conflictTargetFileId,
   );
   const conflict = input.analysis?.conflictsByTarget.get(node.id);
-  return decorateUnitNode(node, conflict, excluded, customized);
+  const decorated = decorateUnitNode(node, conflict, excluded, customized);
+  const unit = decorated.data as PreviewUnitNodeData;
+  return {
+    ...decorated,
+    data: {
+      ...unit,
+      cullingPolicy: input.cullingPolicy,
+      cullingMeshCount: input.cullingPolicy === "target"
+        ? unit.targetCullingMeshCount
+        : unit.patchCullingMeshCount,
+    },
+  };
 }
 
 function decorateUnitNode(

@@ -141,8 +141,14 @@ export async function analyzeEquipmentContents(
 export async function previewEquipmentMapping(
   patch: PatchFiles,
   mapping: MigrationMapping,
+  dataSource?: GameDataSource,
 ): Promise<EquipmentMappingPreview> {
   const wasm = await loadWasm();
+  if (dataSource) {
+    return callWasm("preview_equipment_mapping_with_source", () =>
+      wasm.preview_equipment_mapping_with_source(patch.name, patch.toc, mapping, dataSource),
+    ) as Promise<EquipmentMappingPreview>;
+  }
   return callWasm("preview_equipment_mapping", () =>
     wasm.preview_equipment_mapping(patch.name, patch.toc, mapping),
   ) as Promise<EquipmentMappingPreview>;
@@ -151,8 +157,14 @@ export async function previewEquipmentMapping(
 export async function previewEquipmentMappings(
   patch: PatchFiles,
   mappings: MigrationMapping[],
+  dataSource?: GameDataSource,
 ): Promise<EquipmentMappingPreview[]> {
   const wasm = await loadWasm();
+  if (dataSource) {
+    return callWasm("preview_equipment_mappings_with_source", () =>
+      wasm.preview_equipment_mappings_with_source(patch.name, patch.toc, mappings, dataSource),
+    ) as Promise<EquipmentMappingPreview[]>;
+  }
   return callWasm("preview_equipment_mappings", () =>
     wasm.preview_equipment_mappings(patch.name, patch.toc, mappings),
   ) as Promise<EquipmentMappingPreview[]>;

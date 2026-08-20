@@ -27,6 +27,7 @@ use crate::io::{BundleSlicer, DataSource};
 use crate::migrator::report::MigrationReport;
 use crate::padding::{self, EmptyUnitTemplate, PaddingMode};
 use crate::unit::authority::ArmorMappingTable;
+use crate::unit::culling::CullingPolicy;
 use crate::unit::helmet_authority::HelmetMappingTable;
 use crate::web::migration::{
     PatchBytes, UnmatchedUnitPolicy, WebMigrateOptions, detect_models_via_authority,
@@ -124,6 +125,7 @@ pub(crate) struct PreparedMigration {
     source_hash: String,
     source_name: String,
     unmatched_unit_policy: UnmatchedUnitPolicy,
+    culling_policy: CullingPolicy,
 }
 
 pub(crate) struct PreparedTarget {
@@ -158,6 +160,7 @@ pub async fn run<S: DataSource + ?Sized>(
             no_padding: options.no_padding,
             source_hash: &source_hash,
             unmatched_unit_policy: options.unmatched_unit_policy,
+            culling_policy: CullingPolicy::Patch,
         },
     )
     .await?;
@@ -178,6 +181,7 @@ pub(crate) struct PreparedMigrationOptions<'a> {
     pub(crate) no_padding: bool,
     pub(crate) source_hash: &'a str,
     pub(crate) unmatched_unit_policy: UnmatchedUnitPolicy,
+    pub(crate) culling_policy: CullingPolicy,
 }
 
 impl PreparedMigration {
@@ -214,6 +218,7 @@ impl PreparedMigration {
             source_hash: options.source_hash.to_owned(),
             source_name,
             unmatched_unit_policy: options.unmatched_unit_policy,
+            culling_policy: options.culling_policy,
         })
     }
 
@@ -309,6 +314,7 @@ impl PreparedMigration {
             empty_unit_template: self.empty_unit_template.as_ref(),
             padding_mode: self.padding_mode,
             unmatched_unit_policy: self.unmatched_unit_policy,
+            culling_policy: self.culling_policy,
         }
     }
 }
@@ -649,6 +655,7 @@ struct MigrationComputeContext<'a> {
     empty_unit_template: Option<&'a EmptyUnitTemplate>,
     padding_mode: PaddingMode,
     unmatched_unit_policy: UnmatchedUnitPolicy,
+    culling_policy: CullingPolicy,
 }
 
 struct TargetIdentity<'a> {
@@ -673,6 +680,7 @@ fn compute_cross_target<F: Fn(&str) -> crate::Result<()>>(
                 empty_unit_template: context.empty_unit_template,
                 padding_mode: context.padding_mode,
                 unmatched_unit_policy: context.unmatched_unit_policy,
+                culling_policy: context.culling_policy,
             };
             helmet::compute_migrated_target(&inputs, target, identity.hash, identity.name)
         }
@@ -702,6 +710,7 @@ fn compute_armor_target<F: Fn(&str) -> crate::Result<()>>(
             UnmatchedUnitPolicy::Drop => IncompleteUnitPolicy::Drop,
             UnmatchedUnitPolicy::Keep => IncompleteUnitPolicy::Keep,
         },
+        culling_policy: context.culling_policy,
     };
     mode_a_common::compute_migrated_target(&common, target, identity.hash, identity.name, on_stage)
 }

@@ -35,6 +35,7 @@ pub struct InspectPatchResult {
     patch: PatchDescriptor,
     inspection: WebEquipmentInspection,
     equipment_graph: WebEquipmentPartGraph,
+    culling_summary: web::RepatchCullingSummary,
 }
 
 #[derive(Debug, Deserialize)]
@@ -51,6 +52,7 @@ pub struct MigrateRequest {
 pub struct PreviewMappingRequest {
     patch_paths: Vec<PathBuf>,
     mapping: WebMigrationMapping,
+    data_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +60,7 @@ pub struct PreviewMappingRequest {
 pub struct PreviewMappingsRequest {
     patch_paths: Vec<PathBuf>,
     mappings: Vec<WebMigrationMapping>,
+    data_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -111,7 +114,15 @@ pub async fn preview_equipment_mapping(
 ) -> Result<WebEquipmentMappingPreview, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
         let patch = load_patch(&request.patch_paths)?;
-        web::preview_equipment_mapping(patch.bytes(), &request.mapping).map_err(display_error)
+        let result = match request.data_dir {
+            Some(path) => pollster::block_on(web::preview_equipment_mapping_with_source(
+                patch.bytes(),
+                &request.mapping,
+                &NativeDataSource::new(path),
+            )),
+            None => web::preview_equipment_mapping(patch.bytes(), &request.mapping),
+        };
+        result.map_err(display_error)
     })
     .await
     .map_err(|error| CommandError::from_display("task.joinFailed", error))?
@@ -124,7 +135,15 @@ pub async fn preview_equipment_mappings(
 ) -> Result<Vec<WebEquipmentMappingPreview>, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
         let patch = load_patch(&request.patch_paths)?;
-        web::preview_equipment_mappings(patch.bytes(), &request.mappings).map_err(display_error)
+        let result = match request.data_dir {
+            Some(path) => pollster::block_on(web::preview_equipment_mappings_with_source(
+                patch.bytes(),
+                &request.mappings,
+                &NativeDataSource::new(path),
+            )),
+            None => web::preview_equipment_mappings(patch.bytes(), &request.mappings),
+        };
+        result.map_err(display_error)
     })
     .await
     .map_err(|error| CommandError::from_display("task.joinFailed", error))?
@@ -183,6 +202,7 @@ fn inspect_patch_blocking(request: InspectPatchRequest) -> Result<InspectPatchRe
         patch: patch.descriptor(),
         inspection: analysis.inspection,
         equipment_graph: analysis.equipment_graph,
+        culling_summary: analysis.culling_summary,
     })
 }
 
@@ -239,48 +259,39 @@ async fn repatch_mod_blocking(
 ) -> Result<web::UnitRepatchSummary, String> {
     validate_output_request(&request.data_dir, &request.output_path)?;
     let patch = load_patch(&request.patch_paths)?;
-    let result = web::repatch_units_plan_with_progress(
-        patch.name(),
-        &patch.bytes().toc,
+    let result = web::repatch_patch_with_progress(
+        patch.bytes().clone(),
         request.options,
         &NativeDataSource::new(request.data_dir),
         progress.map(|value| value as &dyn WebProgress),
     )
     .await
     .map_err(display_error)?;
-    write_repatched_zip(
-        &request.output_path,
-        &patch,
-        result.patch.as_ref(),
-        progress,
-    )?;
+    write_repatched_zip(&request.output_path, &patch, &result, progress)?;
     Ok(result.summary)
 }
 
 fn write_repatched_zip(
     output_path: &Path,
     patch: &LoadedPatch,
-    updated: Option<&hd2_migrator_io::archive::toc_only::TocOnlyPackage>,
+    updated: &web::UnitRepatchResult,
     progress: Option<&DesktopProgress>,
 ) -> Result<(), String> {
     let mut zip = create_zip(output_path)?;
     let output_progress = progress.map(|value| value as &dyn output::OutputProgress);
-    let toc = match updated {
-        Some(package) => RepatchTocSource::Rebuilt(package),
-        None => RepatchTocSource::Original(&patch.bytes().toc),
-    };
+    let toc = RepatchTocSource::Original(&updated.toc);
     write_repatch_toc_to_zip(&mut zip, patch.name(), toc, output_progress)
         .map_err(display_error)?;
     write_sidecar(
         &mut zip,
         &format!("{}.gpu_resources", patch.name()),
-        &patch.bytes().gpu,
+        updated.gpu.as_deref().unwrap_or(&patch.bytes().gpu),
         output_progress,
     )?;
     write_sidecar(
         &mut zip,
         &format!("{}.stream", patch.name()),
-        &patch.bytes().stream,
+        updated.stream.as_deref().unwrap_or(&patch.bytes().stream),
         output_progress,
     )?;
     finish_zip(zip)
@@ -479,6 +490,7 @@ mod real_data_tests {
                 no_padding: false,
                 unmatched_unit_policy: UnmatchedUnitPolicy::Keep,
                 unit_behavior: Default::default(),
+                culling_policy: Default::default(),
             },
         };
 
@@ -516,6 +528,7 @@ mod real_data_tests {
                 no_padding: false,
                 unmatched_unit_policy: UnmatchedUnitPolicy::Keep,
                 unit_behavior: Default::default(),
+                culling_policy: Default::default(),
             },
         };
 

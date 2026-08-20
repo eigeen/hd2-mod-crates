@@ -149,6 +149,40 @@ pub fn preview_equipment_mappings(
 }
 
 #[wasm_bindgen]
+pub async fn preview_equipment_mapping_with_source(
+    patch_name: String,
+    toc: Vec<u8>,
+    mapping: JsValue,
+    data_source: JsValue,
+) -> WasmResult<JsValue> {
+    let patch = toc_only_patch(patch_name, toc);
+    let mapping: web::WebMigrationMapping =
+        serde_wasm_bindgen::from_value(mapping).map_err(js_error)?;
+    let source = JsDataSource::from_js(data_source)?;
+    let preview = web::preview_equipment_mapping_with_source(&patch, &mapping, &source)
+        .await
+        .map_err(js_error)?;
+    serde_wasm_bindgen::to_value(&preview).map_err(js_error)
+}
+
+#[wasm_bindgen]
+pub async fn preview_equipment_mappings_with_source(
+    patch_name: String,
+    toc: Vec<u8>,
+    mappings: JsValue,
+    data_source: JsValue,
+) -> WasmResult<JsValue> {
+    let patch = toc_only_patch(patch_name, toc);
+    let mappings: Vec<web::WebMigrationMapping> =
+        serde_wasm_bindgen::from_value(mappings).map_err(js_error)?;
+    let source = JsDataSource::from_js(data_source)?;
+    let previews = web::preview_equipment_mappings_with_source(&patch, &mappings, &source)
+        .await
+        .map_err(js_error)?;
+    serde_wasm_bindgen::to_value(&previews).map_err(js_error)
+}
+
+#[wasm_bindgen]
 pub async fn analyze_equipment_patch_with_source(
     patch_name: String,
     toc: Vec<u8>,
@@ -214,8 +248,7 @@ pub async fn migrate_equipment_variants(
 
 /// Repatch Unit resources using the latest Unit structures from game data.
 ///
-/// Only the patch TOC crosses the WASM boundary. The caller keeps the original
-/// GPU/stream sidecars and packages them with the returned TOC.
+/// GPU/stream replacements are returned only when target culling is selected.
 #[wasm_bindgen]
 pub async fn repatch_units(
     patch: JsValue,
@@ -227,21 +260,29 @@ pub async fn repatch_units(
         serde_wasm_bindgen::from_value(options).map_err(js_error)?;
     let source = JsDataSource::from_js(data_source)?;
     let progress = JsProgress::from_js(callbacks)?;
-    let patch_name = required_string(&patch, "name")?;
-    let toc = required_bytes(&patch, "toc")?;
-    let output =
-        web::repatch_units_with_progress(&patch_name, &toc, options, &source, Some(&progress))
-            .await
-            .map_err(js_error)?;
+    let patch = patch_bytes_from_js(&patch)?;
+    let output = web::repatch_patch_with_progress(patch, options, &source, Some(&progress))
+        .await
+        .map_err(js_error)?;
     let result = Object::new();
     let toc = Uint8Array::from(output.toc.as_slice());
     Reflect::set(&result, &JsValue::from_str("tocBytes"), &toc)?;
+    set_optional_bytes(&result, "gpuBytes", output.gpu.as_deref())?;
+    set_optional_bytes(&result, "streamBytes", output.stream.as_deref())?;
     Reflect::set(
         &result,
         &JsValue::from_str("summary"),
         &serde_wasm_bindgen::to_value(&output.summary).map_err(js_error)?,
     )?;
     Ok(result.into())
+}
+
+fn set_optional_bytes(result: &Object, key: &str, bytes: Option<&[u8]>) -> WasmResult<()> {
+    let value = bytes
+        .map(|bytes| Uint8Array::from(bytes).into())
+        .unwrap_or(JsValue::NULL);
+    Reflect::set(result, &JsValue::from_str(key), &value)?;
+    Ok(())
 }
 
 fn toc_only_patch(name: String, toc: Vec<u8>) -> PatchBytes {

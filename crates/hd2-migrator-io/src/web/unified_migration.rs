@@ -3,6 +3,7 @@ use crate::constants::UNIT_ID;
 use crate::io::DataSource;
 use crate::migrator::{mode_a_common, mode_a_web, source_selection};
 use crate::unit::authority::ArmorMappingTable;
+use crate::unit::culling::CullingPolicy;
 use crate::unit::helmet_authority::HelmetMappingTable;
 use crate::web::equipment::{EquipmentCategory, WebMigrationMapping};
 use crate::web::migration::{
@@ -44,6 +45,8 @@ pub struct WebUnifiedMigrateOptions {
     pub unmatched_unit_policy: UnmatchedUnitPolicy,
     #[serde(default)]
     pub unit_behavior: WebUnitBehaviorOptions,
+    #[serde(default)]
+    pub culling_policy: CullingPolicy,
 }
 
 pub struct VariantMigrationCallbacks<'a, F> {
@@ -137,8 +140,14 @@ where
         .unwrap_or(super::migration::DEFAULT_PATCH_SUFFIX);
     let mut reports = Vec::new();
     let original = parse_patch(&patch_bytes)?;
-    let executor =
-        MigrationExecutor::new(&original, source, callbacks.progress, options.no_padding).await?;
+    let executor = MigrationExecutor::new(
+        &original,
+        source,
+        callbacks.progress,
+        options.no_padding,
+        options.culling_policy,
+    )
+    .await?;
     let mut context = VariantMigrationContext {
         executor,
         original: &original,
@@ -804,6 +813,18 @@ fn output_files(mut patch: StreamToc, directory: &str, suffix: &str) -> Vec<WebO
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn omitted_culling_policy_defaults_to_patch() {
+        let options: WebUnifiedMigrateOptions = serde_json::from_value(serde_json::json!({
+            "variants": [],
+            "patchSuffix": null,
+            "noPadding": false
+        }))
+        .expect("deserialize legacy migration options");
+
+        assert_eq!(options.culling_policy, CullingPolicy::Patch);
+    }
 
     #[test]
     fn allows_one_source_to_map_to_multiple_targets_in_one_variant() {

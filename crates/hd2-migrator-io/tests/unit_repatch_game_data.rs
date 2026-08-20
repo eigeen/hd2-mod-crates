@@ -20,6 +20,7 @@ fn synthetic_old_unit_is_restored_from_installed_game() {
     let patch_toc = patch.serialize().expect("serialize synthetic old patch");
     let options = UnitRepatchOptions {
         missing_unit_policy: MissingUnitPolicy::Fail,
+        culling_policy: Default::default(),
     };
     let result = pollster::block_on(repatch_units(
         &format!("{archive}.patch_0"),

@@ -35,6 +35,10 @@ pub struct TocEntryLocation {
     pub type_id: u64,
     pub toc_offset: u64,
     pub toc_size: u32,
+    pub stream_offset: u64,
+    pub gpu_offset: u64,
+    pub stream_size: u32,
+    pub gpu_size: u32,
 }
 
 impl TocOnlyPackage {
@@ -205,7 +209,11 @@ fn parse_location(raw: &[u8]) -> TocEntryLocation {
         file_id: LE::read_u64(&raw[0..8]),
         type_id: LE::read_u64(&raw[8..16]),
         toc_offset: LE::read_u64(&raw[16..24]),
+        stream_offset: LE::read_u64(&raw[24..32]),
+        gpu_offset: LE::read_u64(&raw[32..40]),
         toc_size: LE::read_u32(&raw[56..60]),
+        stream_size: LE::read_u32(&raw[60..64]),
+        gpu_size: LE::read_u32(&raw[64..68]),
     }
 }
 

@@ -63,6 +63,7 @@ pub fn write_zip_entry_with_progress(
 #[derive(Clone, Copy)]
 pub enum RepatchTocSource<'a> {
     Original(&'a [u8]),
+    #[allow(dead_code)]
     Rebuilt(&'a TocOnlyPackage),
 }
 

@@ -64,7 +64,13 @@ where
     let unit_behavior = CompiledUnitBehavior::compile(&options.unit_behavior)?;
     let unit_plans = unit_plan::build_variant_plans(&options.variants, &unit_behavior)?;
     let original = parse_patch(&patch_bytes)?;
-    let executor = ParallelMigrationExecutor::new(&original, source, options.no_padding).await?;
+    let executor = ParallelMigrationExecutor::new(
+        &original,
+        source,
+        options.no_padding,
+        options.culling_policy,
+    )
+    .await?;
     let suffix = options
         .patch_suffix
         .as_deref()

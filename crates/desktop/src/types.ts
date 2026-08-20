@@ -14,6 +14,7 @@ import type {
   DetectedSource,
   EquipmentMappingPreview,
   EquipmentPartGraph,
+  RepatchCullingSummary,
   UnifiedMigrateOptions,
   UnitRepatchOptions,
 } from "@hd2-mod-tools/migrator-ui";
@@ -31,6 +32,7 @@ export interface InspectPatchResult {
   patch: PatchDescriptor;
   inspection: { sources: DetectedSource[] };
   equipmentGraph: EquipmentPartGraph;
+  cullingSummary: RepatchCullingSummary;
 }
 
 export interface GameDataDiscovery {

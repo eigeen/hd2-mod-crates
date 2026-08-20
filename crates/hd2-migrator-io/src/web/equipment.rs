@@ -247,7 +247,7 @@ fn unique_best_hash(scores: &[(String, usize)]) -> Option<&str> {
     (best > 0 && winners.len() == 1).then(|| winners[0].0.as_str())
 }
 
-async fn load_toc<S: DataSource + ?Sized>(
+pub(super) async fn load_toc<S: DataSource + ?Sized>(
     source: &S,
     bundle: Option<&BundleSlicer>,
     hash: &str,

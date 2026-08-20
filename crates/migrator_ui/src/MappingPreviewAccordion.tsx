@@ -15,6 +15,7 @@ import {
 } from "./MappingPreviewCanvas";
 import { summarizeMappingGraph } from "./mappingPreviewGraph";
 import type {
+  CullingPolicy,
   EquipmentMappingPreview,
   EquipmentPartGraph,
   MigrationMapping,
@@ -25,6 +26,7 @@ import type {
 const PREVIEW_DEBOUNCE_MS = 220;
 
 interface MappingPreviewAccordionProps {
+  cullingPolicy: CullingPolicy;
   contextKey: string;
   loadPreviews: (mappings: MigrationMapping[]) => Promise<EquipmentMappingPreview[]>;
   mappings: MigrationMapping[];
@@ -112,6 +114,7 @@ function PreviewBody(props: MappingPreviewAccordionProps & {
   if (props.mappings.length === 0 && props.patchGraph) {
     return <PatchGraphCanvas
       behavior={props.unitBehavior}
+      cullingPolicy={props.cullingPolicy}
       graph={props.patchGraph}
       onBehaviorChange={props.onUnitBehaviorChange}
       unmatchedUnitPolicy={props.unmatchedUnitPolicy}
@@ -125,6 +128,7 @@ function PreviewBody(props: MappingPreviewAccordionProps & {
   }
   return <MappingBatchCanvas
     behavior={props.unitBehavior}
+    cullingPolicy={props.cullingPolicy}
     onBehaviorChange={props.onUnitBehaviorChange}
     previews={props.previews}
     unmatchedUnitPolicy={props.unmatchedUnitPolicy}

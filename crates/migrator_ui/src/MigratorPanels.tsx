@@ -30,6 +30,7 @@ import type {
   EquipmentCategory,
   EquipmentOption,
   PatchInfo,
+  CullingPolicy,
   UnmatchedUnitPolicy,
 } from "./types";
 import { EquipmentCategoryIcon } from "./EquipmentCategoryIcon";
@@ -393,7 +394,9 @@ function EmptyMapping({ icon, text }: { icon: ReactNode; text: string }) {
 }
 
 interface OptionsPanelProps {
+  cullingPolicy: CullingPolicy;
   noPadding: boolean;
+  setCullingPolicy: (value: CullingPolicy) => void;
   setNoPadding: (value: boolean) => void;
   setUnmatchedUnitPolicy: (value: UnmatchedUnitPolicy) => void;
   unmatchedUnitPolicy: UnmatchedUnitPolicy;
@@ -404,6 +407,17 @@ export const OptionsPanel = memo(function OptionsPanel(props: OptionsPanelProps)
 
   return (
     <>
+      <FormControlLabel
+        className="optionsControl shrink-0"
+        control={(
+          <Checkbox
+            checked={props.cullingPolicy === "target"}
+            onChange={(event) => props.setCullingPolicy(event.target.checked ? "target" : "patch")}
+          />
+        )}
+        label={t("options.patchCulling")}
+      />
+      <HelpHint title={t("options.patchCullingHelp")} />
       <FormControlLabel
         className="optionsControl shrink-0"
         control={<Checkbox checked={props.noPadding} onChange={(event) => props.setNoPadding(event.target.checked)} />}
