@@ -1,6 +1,7 @@
 import ArchiveIcon from "@mui/icons-material/Archive";
 import CompareArrowsIcon from "@mui/icons-material/CompareArrows";
 import DescriptionIcon from "@mui/icons-material/Description";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutlined";
 import MenuIcon from "@mui/icons-material/Menu";
 import SearchIcon from "@mui/icons-material/Search";
@@ -14,6 +15,7 @@ import {
   InputAdornment,
   Menu,
   MenuItem,
+  Popover,
   Radio,
   Switch,
   TextField,
@@ -404,33 +406,86 @@ interface OptionsPanelProps {
 
 export const OptionsPanel = memo(function OptionsPanel(props: OptionsPanelProps) {
   const { t } = useI18n();
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  const open = Boolean(anchor);
 
   return (
     <>
-      <FormControlLabel
-        className="optionsControl shrink-0"
-        control={(
-          <Checkbox
-            checked={props.cullingPolicy === "target"}
-            onChange={(event) => props.setCullingPolicy(event.target.checked ? "target" : "patch")}
-          />
-        )}
-        label={t("options.patchCulling")}
-      />
-      <HelpHint title={t("options.patchCullingHelp")} />
-      <FormControlLabel
-        className="optionsControl shrink-0"
-        control={<Checkbox checked={props.noPadding} onChange={(event) => props.setNoPadding(event.target.checked)} />}
-        label={t("options.noPadding")}
-      />
-      <HelpHint title={t("options.noPaddingHelp")} />
-      <span className="shrink-0 whitespace-nowrap text-xs text-hd2-muted">{t("options.unmatchedUnits")}</span>
-      <ToggleButtonGroup
-        className="shrink-0"
-        exclusive
-        onChange={(_, value: UnmatchedUnitPolicy | null) => {
-          if (value) props.setUnmatchedUnitPolicy(value);
+      <Button
+        aria-controls={open ? "advanced-options-popover" : undefined}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        endIcon={<ExpandMoreIcon className={`transition-transform ${open ? "rotate-180" : ""}`} />}
+        onClick={(event) => {
+          const button = event.currentTarget;
+          setAnchor((current) => current ? null : button);
         }}
+        variant="outlined"
+      >
+        {t("options.advanced")}
+      </Button>
+      <Popover
+        anchorEl={anchor}
+        anchorOrigin={{ horizontal: "left", vertical: "top" }}
+        id="advanced-options-popover"
+        onClose={() => setAnchor(null)}
+        open={open}
+        slotProps={{ paper: { sx: { backgroundImage: "none", borderRadius: 0 } } }}
+        transformOrigin={{ horizontal: "left", vertical: "bottom" }}
+      >
+        <AdvancedOptionsContent {...props} />
+      </Popover>
+    </>
+  );
+});
+
+function AdvancedOptionsContent(props: OptionsPanelProps) {
+  const { t } = useI18n();
+  return (
+    <div aria-label={t("options.advanced")} className="flex w-[min(30rem,calc(100vw-2rem))] flex-col gap-2 border border-hd2-border bg-hd2-pit p-3" role="dialog">
+      <AdvancedCheckboxOption
+        checked={props.cullingPolicy === "target"}
+        help={t("options.patchCullingHelp")}
+        label={t("options.patchCulling")}
+        onChange={(checked) => props.setCullingPolicy(checked ? "target" : "patch")}
+      />
+      <AdvancedCheckboxOption
+        checked={props.noPadding}
+        help={t("options.noPaddingHelp")}
+        label={t("options.noPadding")}
+        onChange={props.setNoPadding}
+      />
+      <UnmatchedUnitOption {...props} />
+    </div>
+  );
+}
+
+function AdvancedCheckboxOption(props: {
+  checked: boolean;
+  help: string;
+  label: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-1">
+      <FormControlLabel
+        className="optionsControl min-w-0 flex-1"
+        control={<Checkbox checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} />}
+        label={props.label}
+      />
+      <HelpHint title={props.help} />
+    </div>
+  );
+}
+
+function UnmatchedUnitOption(props: OptionsPanelProps) {
+  const { t } = useI18n();
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-hd2-border pt-3">
+      <span className="mr-auto text-xs text-hd2-muted">{t("options.unmatchedUnits")}</span>
+      <ToggleButtonGroup
+        exclusive
+        onChange={(_, value: UnmatchedUnitPolicy | null) => value && props.setUnmatchedUnitPolicy(value)}
         size="small"
         value={props.unmatchedUnitPolicy}
       >
@@ -438,9 +493,9 @@ export const OptionsPanel = memo(function OptionsPanel(props: OptionsPanelProps)
         <ToggleButton value="keep">{t("options.unmatchedKeep")}</ToggleButton>
       </ToggleButtonGroup>
       <HelpHint title={t("options.unmatchedUnitsHelp")} />
-    </>
+    </div>
   );
-});
+}
 
 interface PerformanceDialogProps {
   open: boolean;
