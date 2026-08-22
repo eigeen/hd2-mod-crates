@@ -23,9 +23,18 @@ pub fn build_patch_unit_signatures(
     source_unit_ids: &BTreeSet<u64>,
     settings: &GeometryMatchSettings,
 ) -> HashMap<u64, UnitGeometrySignature> {
+    build_selected_unit_signatures(patch, source_unit_ids, settings)
+}
+
+/// Build signatures only for the selected Unit FileIDs in an archive.
+pub(super) fn build_selected_unit_signatures(
+    toc: &StreamToc,
+    selected_unit_ids: &BTreeSet<u64>,
+    settings: &GeometryMatchSettings,
+) -> HashMap<u64, UnitGeometrySignature> {
     let mut out = HashMap::new();
-    for entry in patch.entries.iter().filter(|e| e.type_id == UNIT_ID) {
-        if !source_unit_ids.contains(&entry.file_id) {
+    for entry in toc.entries.iter().filter(|e| e.type_id == UNIT_ID) {
+        if !selected_unit_ids.contains(&entry.file_id) {
             continue;
         }
         if let Some(sig) = build_unit_signature(entry, settings) {
