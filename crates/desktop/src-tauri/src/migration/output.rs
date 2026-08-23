@@ -1,6 +1,5 @@
 use hd2_migrator_io::archive::toc_only::TocOnlyPackage;
 use hd2_migrator_io::archive::{SerializedPart, StreamToc};
-use std::fs::File;
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use tempfile::NamedTempFile;
@@ -8,8 +7,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 pub struct OutputZip {
-    writer: ZipWriter<File>,
-    temporary: NamedTempFile,
+    writer: ZipWriter<NamedTempFile>,
     output_path: PathBuf,
 }
 
@@ -32,12 +30,8 @@ pub fn create_zip(path: &Path) -> Result<OutputZip, String> {
     }
     let temporary = NamedTempFile::new_in(parent.unwrap_or_else(|| Path::new(".")))
         .map_err(|error| format!("Create temporary output ZIP: {error}"))?;
-    let file = temporary
-        .reopen()
-        .map_err(|error| format!("Open temporary output ZIP: {error}"))?;
     Ok(OutputZip {
-        writer: ZipWriter::new(file),
-        temporary,
+        writer: ZipWriter::new(temporary),
         output_path: path.to_path_buf(),
     })
 }
@@ -164,7 +158,7 @@ fn write_zip_content<F>(
     write: F,
 ) -> hd2_migrator_io::Result<()>
 where
-    F: FnOnce(&mut ProgressWriter<'_, ZipWriter<File>>) -> hd2_migrator_io::Result<()>,
+    F: FnOnce(&mut ProgressWriter<'_, ZipWriter<NamedTempFile>>) -> hd2_migrator_io::Result<()>,
 {
     validate_entry_path(context.path)?;
     ensure_active(context.progress)?;
@@ -240,16 +234,15 @@ fn report_bytes(
 pub fn finish_zip(zip: OutputZip) -> Result<(), String> {
     let OutputZip {
         writer,
-        temporary,
         output_path,
     } = zip;
-    let completed_file = writer
+    let temporary = writer
         .finish()
         .map_err(|error| format!("Finish output ZIP: {error}"))?;
-    completed_file
+    temporary
+        .as_file()
         .sync_all()
         .map_err(|error| format!("Flush output ZIP: {error}"))?;
-    drop(completed_file);
     temporary
         .persist(&output_path)
         .map(|_| ())
@@ -274,6 +267,7 @@ fn validate_entry_path(value: &str) -> hd2_migrator_io::Result<()> {
 mod tests {
     use super::*;
     use hd2_migrator_io::archive::TocEntry;
+    use std::fs::File;
     use std::io::Read;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -366,11 +360,38 @@ mod tests {
     }
 
     #[test]
+    fn replacing_a_larger_output_leaves_no_trailing_bytes() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let output = directory.path().join("output.zip");
+        std::fs::write(&output, vec![0x5a; 1024 * 1024]).expect("write larger old output");
+        let mut zip = create_zip(&output).expect("create ZIP");
+        write_zip_entry_with_progress(&mut zip, "replacement.patch_0", b"new", None)
+            .expect("write entry");
+
+        finish_zip(zip).expect("replace ZIP");
+
+        let bytes = std::fs::read(&output).expect("read replacement ZIP");
+        assert_eq!(&bytes[bytes.len() - 22..bytes.len() - 18], b"PK\x05\x06");
+        let mut archive = zip::ZipArchive::new(File::open(output).expect("open replacement ZIP"))
+            .expect("read replacement ZIP");
+        assert_eq!(archive.len(), 1);
+        assert_eq!(
+            archive.by_index(0).expect("entry").name(),
+            "replacement.patch_0"
+        );
+    }
+
+    #[test]
     fn dropping_an_incomplete_zip_removes_its_temporary_file() {
         let directory = tempfile::tempdir().expect("temp directory");
         let output = directory.path().join("output.zip");
         let mut zip = create_zip(&output).expect("create ZIP");
-        let temporary_path = zip.temporary.path().to_path_buf();
+        let temporary_path = zip
+            .writer
+            .get_ref()
+            .expect("open temporary ZIP")
+            .path()
+            .to_path_buf();
         write_zip_entry_with_progress(&mut zip, "partial.patch_0", b"partial", None)
             .expect("write entry");
 
