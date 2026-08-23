@@ -141,9 +141,9 @@ function RepatchDetails({ summary, t }: { summary: UnitRepatchSummary; t: Transl
     <section className="space-y-3 border border-hd2-border bg-black/25 p-3">
       <MetricGrid metrics={[
         [t("result.updated"), summary.updatedUnits],
+        [t("result.formats"), summary.convertedFormats ?? 0],
         [t("result.current"), summary.alreadyCurrentUnits],
         [t("result.removed"), summary.removedUnits],
-        [t("result.failed"), summary.failedUnits],
         [t("result.archives"), summary.scannedArchives],
       ]} />
       <WarningList warnings={summary.warnings} t={t} />
@@ -193,5 +193,5 @@ function equipmentName(hash: string, options: EquipmentOption[]): string {
 function reportHasWarnings(report: CompletedTaskReport | null): boolean {
   if (!report) return false;
   if (report.kind === "migration") return report.summary.warningCount > 0;
-  return report.summary.failedUnits > 0 || report.summary.warnings.length > 0;
+  return report.summary.warnings.length > 0;
 }

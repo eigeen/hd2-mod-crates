@@ -35,7 +35,6 @@ pub struct InspectPatchResult {
     patch: PatchDescriptor,
     inspection: WebEquipmentInspection,
     equipment_graph: WebEquipmentPartGraph,
-    culling_summary: web::RepatchCullingSummary,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,7 +51,6 @@ pub struct MigrateRequest {
 pub struct PreviewMappingRequest {
     patch_paths: Vec<PathBuf>,
     mapping: WebMigrationMapping,
-    data_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,7 +58,6 @@ pub struct PreviewMappingRequest {
 pub struct PreviewMappingsRequest {
     patch_paths: Vec<PathBuf>,
     mappings: Vec<WebMigrationMapping>,
-    data_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -114,15 +111,7 @@ pub async fn preview_equipment_mapping(
 ) -> Result<WebEquipmentMappingPreview, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
         let patch = load_patch(&request.patch_paths)?;
-        let result = match request.data_dir {
-            Some(path) => pollster::block_on(web::preview_equipment_mapping_with_source(
-                patch.bytes(),
-                &request.mapping,
-                &NativeDataSource::new(path),
-            )),
-            None => web::preview_equipment_mapping(patch.bytes(), &request.mapping),
-        };
-        result.map_err(display_error)
+        web::preview_equipment_mapping(patch.bytes(), &request.mapping).map_err(display_error)
     })
     .await
     .map_err(|error| CommandError::from_display("task.joinFailed", error))?
@@ -135,15 +124,7 @@ pub async fn preview_equipment_mappings(
 ) -> Result<Vec<WebEquipmentMappingPreview>, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
         let patch = load_patch(&request.patch_paths)?;
-        let result = match request.data_dir {
-            Some(path) => pollster::block_on(web::preview_equipment_mappings_with_source(
-                patch.bytes(),
-                &request.mappings,
-                &NativeDataSource::new(path),
-            )),
-            None => web::preview_equipment_mappings(patch.bytes(), &request.mappings),
-        };
-        result.map_err(display_error)
+        web::preview_equipment_mappings(patch.bytes(), &request.mappings).map_err(display_error)
     })
     .await
     .map_err(|error| CommandError::from_display("task.joinFailed", error))?
@@ -202,7 +183,6 @@ fn inspect_patch_blocking(request: InspectPatchRequest) -> Result<InspectPatchRe
         patch: patch.descriptor(),
         inspection: analysis.inspection,
         equipment_graph: analysis.equipment_graph,
-        culling_summary: analysis.culling_summary,
     })
 }
 
@@ -490,7 +470,6 @@ mod real_data_tests {
                 no_padding: false,
                 unmatched_unit_policy: UnmatchedUnitPolicy::Keep,
                 unit_behavior: Default::default(),
-                culling_policy: Default::default(),
             },
         };
 
@@ -528,7 +507,6 @@ mod real_data_tests {
                 no_padding: false,
                 unmatched_unit_policy: UnmatchedUnitPolicy::Keep,
                 unit_behavior: Default::default(),
-                culling_policy: Default::default(),
             },
         };
 

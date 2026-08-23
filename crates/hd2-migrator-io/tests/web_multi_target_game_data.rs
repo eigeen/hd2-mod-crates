@@ -102,7 +102,6 @@ async fn migration_options(
         no_padding: false,
         unmatched_unit_policy: UnmatchedUnitPolicy::Keep,
         unit_behavior: Default::default(),
-        culling_policy: Default::default(),
     }
 }
 

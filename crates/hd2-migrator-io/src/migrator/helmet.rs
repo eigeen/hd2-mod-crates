@@ -5,7 +5,6 @@ use crate::archive::StreamToc;
 use crate::constants::UNIT_ID;
 use crate::migrator::report::MigrationReport;
 use crate::padding::{self, EmptyUnitTemplate, PaddingMode};
-use crate::unit::culling::{CullingPolicy, replace_patch_culling_with_target};
 use crate::unit::direct_mapping::{
     UnitPartMatch, UnmappedUnitPolicy, match_unit_parts, rewrite_mapped_units,
 };
@@ -20,7 +19,6 @@ pub struct HelmetMigrationInputs<'a> {
     pub empty_unit_template: Option<&'a EmptyUnitTemplate>,
     pub padding_mode: PaddingMode,
     pub unmatched_unit_policy: UnmatchedUnitPolicy,
-    pub culling_policy: CullingPolicy,
 }
 
 /// Rename the mapped helmet Unit, keep non-Unit resources, and hide target-only Units.
@@ -43,7 +41,6 @@ pub fn compute_migrated_target(
     let mut patch = rewritten.patch;
     let target_unit_ids = unit_file_ids(target);
     let padded_units = pad_target_only_units(&mut patch, &target_unit_ids, inputs);
-    apply_culling_policy(&mut patch, target, inputs.culling_policy)?;
     let report = build_report(
         target_hash,
         target_name,
@@ -57,27 +54,6 @@ pub fn compute_migrated_target(
         report,
         unit_mappings: vec![(matched.source_file_id, matched.target_file_id)],
     })
-}
-
-fn apply_culling_policy(
-    patch: &mut StreamToc,
-    target: &StreamToc,
-    policy: CullingPolicy,
-) -> crate::Result<()> {
-    if policy == CullingPolicy::Patch {
-        return Ok(());
-    }
-    for output in patch
-        .entries
-        .iter_mut()
-        .filter(|entry| entry.type_id == UNIT_ID)
-    {
-        let Some(target_unit) = target.find(output.file_id, UNIT_ID) else {
-            continue;
-        };
-        *output = replace_patch_culling_with_target(output, target_unit)?;
-    }
-    Ok(())
 }
 
 fn mapped_helmet_match(
@@ -244,7 +220,6 @@ mod tests {
                 PaddingMode::Sanitized
             },
             unmatched_unit_policy: UnmatchedUnitPolicy::Drop,
-            culling_policy: CullingPolicy::Patch,
         }
     }
 

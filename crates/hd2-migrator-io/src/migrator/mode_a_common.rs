@@ -10,7 +10,6 @@ use crate::migrator::report::MigrationReport;
 use crate::padding::{EmptyUnitTemplate, PaddingMode};
 use crate::refs;
 use crate::unit::authority::{ArmorMappingTable, build_authority_matches};
-use crate::unit::culling::{CullingPolicy, replace_patch_culling_with_target};
 use crate::unit::geometry::{
     UnitGeometryRemap, build_unit_geometry_remap, format_unit_geometry_issues,
 };
@@ -35,7 +34,6 @@ pub struct CommonInputs<'a> {
     pub empty_unit_template: Option<&'a EmptyUnitTemplate>,
     pub padding_mode: PaddingMode,
     pub incomplete_unit_policy: IncompleteUnitPolicy,
-    pub culling_policy: CullingPolicy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -205,12 +203,6 @@ pub fn compute_migrated_target<F: Fn(&str) -> crate::Result<()>>(
     } else {
         0
     };
-    apply_culling_policy_to_units(
-        &mut new_patch,
-        &target_units,
-        common.culling_policy,
-        target_name,
-    )?;
     merge_preserved_entries(&mut new_patch, &preserved_entries);
 
     tracing::info!(
@@ -249,48 +241,6 @@ pub fn compute_migrated_target<F: Fn(&str) -> crate::Result<()>>(
         report,
         unit_mappings,
     })
-}
-
-fn replace_unit_target_culling(
-    patch: TocEntry,
-    target: Option<&TocEntry>,
-    target_name: &str,
-) -> crate::Result<TocEntry> {
-    if patch.type_id != UNIT_ID {
-        return Ok(patch);
-    }
-    let target = target.ok_or_else(|| {
-        eyre::eyre!(
-            "target {target_name:?} is missing Unit 0x{:016x}",
-            patch.file_id
-        )
-    })?;
-    replace_patch_culling_with_target(&patch, target).wrap_err_with(|| {
-        format!(
-            "replace Unit 0x{:016x} culling with target culling",
-            patch.file_id
-        )
-    })
-}
-
-fn apply_culling_policy_to_units(
-    patch: &mut StreamToc,
-    targets: &HashMap<u64, &TocEntry>,
-    policy: CullingPolicy,
-    target_name: &str,
-) -> crate::Result<()> {
-    if policy == CullingPolicy::Patch {
-        return Ok(());
-    }
-    for entry in &mut patch.entries {
-        let replacement = replace_unit_target_culling(
-            entry.clone(),
-            targets.get(&entry.file_id).copied(),
-            target_name,
-        )?;
-        *entry = replacement;
-    }
-    Ok(())
 }
 
 fn collect_unit_mappings(

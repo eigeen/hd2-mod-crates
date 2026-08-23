@@ -12,7 +12,6 @@ pub mod repatch;
 pub mod unified_migration;
 
 pub use crate::migrator::mode_a_web::WebProgress;
-pub use crate::unit::culling::CullingPolicy;
 pub use equipment::{
     EquipmentCategory, WebDetectedSource, WebEquipmentInspection, WebEquipmentOption,
     WebMigrationMapping, inspect_equipment, inspect_equipment_with_source, list_equipment_options,
@@ -27,8 +26,7 @@ pub use equipment_graph::{
 pub use mapping_preview::{
     MAPPING_PREVIEW_SCHEMA_VERSION, WebEquipmentMappingPreview, WebMappingPreviewSummary,
     WebMappingPreviewUnit, WebUnitMappingAction, WebUnitMappingPreview, preview_equipment_mapping,
-    preview_equipment_mapping_with_source, preview_equipment_mappings,
-    preview_equipment_mappings_with_source,
+    preview_equipment_mappings,
 };
 pub use migration::{
     PatchBytes, UnmatchedUnitPolicy, WebDetectedModel, WebMigrateOptions, WebMigrationBundle,
@@ -40,10 +38,9 @@ pub use patch_merge::{
     PatchMergeResult, PatchMergeSourceSummary, PatchMergeSummary, merge_patches,
 };
 pub use repatch::{
-    CullingSetSummary, MissingUnitPolicy, RepatchCullingSummary, UnitRepatchOptions,
-    UnitRepatchPlan, UnitRepatchResult, UnitRepatchSummary, repatch_patch_plan_with_progress,
-    repatch_patch_with_progress, repatch_units, repatch_units_plan_with_progress,
-    repatch_units_with_progress, summarize_patch_culling, summarize_repatch_culling,
+    MissingUnitPolicy, UnitRepatchOptions, UnitRepatchPlan, UnitRepatchResult, UnitRepatchSummary,
+    repatch_patch_plan_with_progress, repatch_patch_with_progress, repatch_units,
+    repatch_units_plan_with_progress, repatch_units_with_progress,
 };
 #[cfg(not(target_family = "wasm"))]
 pub use unified_migration::{

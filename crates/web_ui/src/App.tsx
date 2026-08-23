@@ -39,10 +39,8 @@ import {
   useTaskReportHistory,
   useUpdateInfo,
   type DetectedSource,
-  type CullingPolicy,
   type EquipmentOption,
   type EquipmentPartGraph,
-  type RepatchCullingSummary,
   type MissingUnitPolicy,
   type MigrationMapping,
   type MigrationSummary,
@@ -92,14 +90,12 @@ function App() {
   const [patchInfo, setPatchInfo] = useState<PatchInfo | null>(null);
   const [patchRevision, setPatchRevision] = useState(0);
   const [equipmentGraph, setEquipmentGraph] = useState<EquipmentPartGraph | null>(null);
-  const [cullingSummary, setCullingSummary] = useState<RepatchCullingSummary | null>(null);
   const [sources, setSources] = useState<DetectedSource[]>([]);
   const [activeSourceId, setActiveSourceId] = useState("");
   const [targetsBySource, setTargetsBySource] = useState<Record<string, string[]>>({});
   const [multiTarget, setMultiTarget] = useState(false);
   const [singlePatch, setSinglePatch] = useState(false);
   const [noPadding, setNoPadding] = useState(false);
-  const [cullingPolicy, setCullingPolicy] = useState<CullingPolicy>("patch");
   const [unmatchedUnitPolicy, setUnmatchedUnitPolicy] = useState<UnmatchedUnitPolicy>("keep");
   const [unitBehavior, setUnitBehavior] = useState<UnitBehaviorOptions>(emptyUnitBehavior);
   const [busy, setBusy] = useState(false);
@@ -203,7 +199,6 @@ function App() {
     setPatchInfo({ name: nextPatch.name });
     setPatchRevision((revision) => revision + 1);
     setEquipmentGraph(null);
-    setCullingSummary(null);
     setTargetsBySource({});
     setMultiTarget(false);
     setSinglePatch(false);
@@ -211,7 +206,6 @@ function App() {
     const dataSource = gameDir ? new GameDataSource(gameDir.handle) : undefined;
     const analysis = await analyzeEquipmentContents(nextPatch, dataSource);
     setEquipmentGraph(analysis.equipmentGraph);
-    setCullingSummary(analysis.cullingSummary);
     setSources(analysis.inspection.sources);
     setActiveSourceId(analysis.inspection.sources[0]?.id ?? "");
     setMultiTarget(canUseMultiTarget(analysis.inspection.sources));
@@ -226,7 +220,6 @@ function App() {
         new GameDataSource(gameDir.handle),
       );
       setEquipmentGraph(analysis.equipmentGraph);
-      setCullingSummary(analysis.cullingSummary);
       setSources(analysis.inspection.sources);
       setActiveSourceId(analysis.inspection.sources[0]?.id ?? "");
       setTargetsBySource({});
@@ -239,11 +232,8 @@ function App() {
   const loadMappingPreviews = useCallback((mappings: MigrationMapping[]) => {
     const patch = patchRef.current;
     if (!patch) return Promise.reject(new Error("Patch is not loaded"));
-    const source = cullingPolicy === "target" && gameDir
-      ? new GameDataSource(gameDir.handle)
-      : undefined;
-    return previewEquipmentMappings(patch, mappings, source);
-  }, [cullingPolicy, gameDir]);
+    return previewEquipmentMappings(patch, mappings);
+  }, []);
 
   const importPatchFiles = useCallback(
     async (files: FileList | File[] | null, originalName?: string) => {
@@ -339,7 +329,6 @@ function App() {
     setProgressLabel("");
     await runCancellableTask(async (signal) => {
       const result = await migrateVariants({
-        cullingPolicy,
         dataSource,
         noPadding,
         options: equipmentOptions,
@@ -354,7 +343,6 @@ function App() {
     });
     setProgressLabel("");
   }, [
-    cullingPolicy,
     gameDir,
     configuredMappings,
     equipmentOptions,
@@ -378,7 +366,7 @@ function App() {
     await runCancellableTask(async (signal) => {
       const output = await repatchUnits(
         patch,
-        { missingUnitPolicy, cullingPolicy },
+        { missingUnitPolicy },
         new GameDataSource(gameDir.handle),
         {
           onStage: () => {
@@ -401,7 +389,7 @@ function App() {
       });
     });
     setProgressLabel("");
-  }, [cullingPolicy, gameDir, missingUnitPolicy, reportHistory.recordReport, runCancellableTask, t]);
+  }, [gameDir, missingUnitPolicy, reportHistory.recordReport, runCancellableTask, t]);
 
   const requestRunSelectedTool = useCallback(() => {
     if (toolMode === "migrate") {
@@ -534,8 +522,7 @@ function App() {
                   />
                 )}
                 <MappingPreviewAccordion
-                  cullingPolicy={cullingPolicy}
-                  contextKey={`${patchRevision}:${cullingPolicy}`}
+                  contextKey={`${patchRevision}`}
                   loadPreviews={loadMappingPreviews}
                   mappings={configuredMappings}
                   patchGraph={equipmentGraph}
@@ -551,19 +538,14 @@ function App() {
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 min-[51.25rem]:shrink-0">
               {toolMode === "migrate" ? (
                 <OptionsPanel
-                  cullingPolicy={cullingPolicy}
                   noPadding={noPadding}
-                  setCullingPolicy={setCullingPolicy}
                   setNoPadding={setNoPadding}
                   setUnmatchedUnitPolicy={setUnmatchedUnitPolicy}
                   unmatchedUnitPolicy={unmatchedUnitPolicy}
                 />
               ) : (
                 <UnitUpdaterPanel
-                  cullingPolicy={cullingPolicy}
-                  cullingSummary={cullingSummary}
                   missingUnitPolicy={missingUnitPolicy}
-                  onCullingPolicyChange={setCullingPolicy}
                   onMissingUnitPolicyChange={setMissingUnitPolicy}
                 />
               )}
@@ -671,7 +653,6 @@ function nextBlockerHint(input: BlockerHintInput, t: Translate): string {
 }
 
 interface VariantMigrationRequest {
-  cullingPolicy: CullingPolicy;
   dataSource: GameDataSource;
   noPadding: boolean;
   options: EquipmentOption[];
@@ -723,7 +704,7 @@ function migrationOutputFilename(
 
 function unifiedOptions(
   variants: MigrationVariant[],
-  settings: Pick<VariantMigrationRequest, "cullingPolicy" | "noPadding" | "unitBehavior" | "unmatchedUnitPolicy">,
+  settings: Pick<VariantMigrationRequest, "noPadding" | "unitBehavior" | "unmatchedUnitPolicy">,
 ) {
   return {
     variants,
@@ -731,7 +712,6 @@ function unifiedOptions(
     noPadding: settings.noPadding,
     unmatchedUnitPolicy: settings.unmatchedUnitPolicy,
     unitBehavior: settings.unitBehavior,
-    cullingPolicy: settings.cullingPolicy,
   };
 }
 

@@ -239,7 +239,6 @@ fn build_migrated_target(
         } else {
             IncompleteUnitPolicy::Fail
         },
-        culling_policy: crate::unit::culling::CullingPolicy::Patch,
     };
     let artifact = mode_a_common::compute_migrated_target(
         &common,

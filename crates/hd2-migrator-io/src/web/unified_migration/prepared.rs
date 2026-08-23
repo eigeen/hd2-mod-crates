@@ -3,7 +3,6 @@ use crate::io::DataSource;
 use crate::migrator::mode_a_web::{
     self, MigrationArchiveCache, PreparedMigration, PreparedMigrationOptions, PreparedTarget,
 };
-use crate::unit::culling::CullingPolicy;
 use crate::web::equipment::{EquipmentCategory, WebMigrationMapping};
 use crate::web::migration::UnmatchedUnitPolicy;
 use std::sync::Arc;
@@ -15,7 +14,6 @@ pub(super) struct MigrationExecutor<'a, S: DataSource + ?Sized> {
 
 struct MigrationExecutorCore<'a, S: DataSource + ?Sized> {
     archive_cache: MigrationArchiveCache,
-    culling_policy: CullingPolicy,
     no_padding: bool,
     original: &'a StreamToc,
     prepared: Vec<PreparedEntry>,
@@ -62,10 +60,9 @@ impl<'a, S: DataSource + ?Sized> MigrationExecutor<'a, S> {
         source: &'a S,
         progress: Option<&'a dyn mode_a_web::WebProgress>,
         no_padding: bool,
-        culling_policy: CullingPolicy,
     ) -> crate::Result<Self> {
         Ok(Self {
-            core: MigrationExecutorCore::new(original, source, no_padding, culling_policy).await?,
+            core: MigrationExecutorCore::new(original, source, no_padding).await?,
             progress,
         })
     }
@@ -86,10 +83,9 @@ impl<'a, S: DataSource + ?Sized> ParallelMigrationExecutor<'a, S> {
         original: &'a StreamToc,
         source: &'a S,
         no_padding: bool,
-        culling_policy: CullingPolicy,
     ) -> crate::Result<Self> {
         Ok(Self {
-            core: MigrationExecutorCore::new(original, source, no_padding, culling_policy).await?,
+            core: MigrationExecutorCore::new(original, source, no_padding).await?,
         })
     }
 
@@ -105,15 +101,9 @@ impl<'a, S: DataSource + ?Sized> ParallelMigrationExecutor<'a, S> {
 }
 
 impl<'a, S: DataSource + ?Sized> MigrationExecutorCore<'a, S> {
-    async fn new(
-        original: &'a StreamToc,
-        source: &'a S,
-        no_padding: bool,
-        culling_policy: CullingPolicy,
-    ) -> crate::Result<Self> {
+    async fn new(original: &'a StreamToc, source: &'a S, no_padding: bool) -> crate::Result<Self> {
         Ok(Self {
             archive_cache: MigrationArchiveCache::open(source).await?,
-            culling_policy,
             no_padding,
             original,
             prepared: Vec::new(),
@@ -152,7 +142,6 @@ impl<'a, S: DataSource + ?Sized> MigrationExecutorCore<'a, S> {
                 no_padding: self.no_padding,
                 source_hash: &mapping.source_hash,
                 unmatched_unit_policy: UnmatchedUnitPolicy::Keep,
-                culling_policy: self.culling_policy,
             },
         )
         .await?;

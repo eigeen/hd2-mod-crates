@@ -41,17 +41,15 @@ export function inspectPatch(paths: string[], dataDir: string | null): Promise<I
 export function previewEquipmentMapping(
   patchPaths: string[],
   mapping: MigrationMapping,
-  dataDir: string | null,
 ): Promise<EquipmentMappingPreview> {
-  return invoke("preview_equipment_mapping", { request: { patchPaths, mapping, dataDir } });
+  return invoke("preview_equipment_mapping", { request: { patchPaths, mapping } });
 }
 
 export function previewEquipmentMappings(
   patchPaths: string[],
   mappings: MigrationMapping[],
-  dataDir: string | null,
 ): Promise<EquipmentMappingPreview[]> {
-  return invoke("preview_equipment_mappings", { request: { patchPaths, mappings, dataDir } });
+  return invoke("preview_equipment_mappings", { request: { patchPaths, mappings } });
 }
 
 export async function choosePatchPaths(): Promise<string[] | null> {

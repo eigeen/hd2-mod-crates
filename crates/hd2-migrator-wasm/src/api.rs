@@ -149,40 +149,6 @@ pub fn preview_equipment_mappings(
 }
 
 #[wasm_bindgen]
-pub async fn preview_equipment_mapping_with_source(
-    patch_name: String,
-    toc: Vec<u8>,
-    mapping: JsValue,
-    data_source: JsValue,
-) -> WasmResult<JsValue> {
-    let patch = toc_only_patch(patch_name, toc);
-    let mapping: web::WebMigrationMapping =
-        serde_wasm_bindgen::from_value(mapping).map_err(js_error)?;
-    let source = JsDataSource::from_js(data_source)?;
-    let preview = web::preview_equipment_mapping_with_source(&patch, &mapping, &source)
-        .await
-        .map_err(js_error)?;
-    serde_wasm_bindgen::to_value(&preview).map_err(js_error)
-}
-
-#[wasm_bindgen]
-pub async fn preview_equipment_mappings_with_source(
-    patch_name: String,
-    toc: Vec<u8>,
-    mappings: JsValue,
-    data_source: JsValue,
-) -> WasmResult<JsValue> {
-    let patch = toc_only_patch(patch_name, toc);
-    let mappings: Vec<web::WebMigrationMapping> =
-        serde_wasm_bindgen::from_value(mappings).map_err(js_error)?;
-    let source = JsDataSource::from_js(data_source)?;
-    let previews = web::preview_equipment_mappings_with_source(&patch, &mappings, &source)
-        .await
-        .map_err(js_error)?;
-    serde_wasm_bindgen::to_value(&previews).map_err(js_error)
-}
-
-#[wasm_bindgen]
 pub async fn analyze_equipment_patch_with_source(
     patch_name: String,
     toc: Vec<u8>,
@@ -248,7 +214,7 @@ pub async fn migrate_equipment_variants(
 
 /// Repatch Unit resources using the latest Unit structures from game data.
 ///
-/// GPU/stream replacements are returned only when target culling is selected.
+/// Only Unit TOC metadata is updated. GPU and stream sidecars remain unchanged.
 #[wasm_bindgen]
 pub async fn repatch_units(
     patch: JsValue,

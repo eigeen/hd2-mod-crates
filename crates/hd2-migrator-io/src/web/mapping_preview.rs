@@ -1,20 +1,15 @@
 use super::equipment::{
-    EquipmentCategory, WebEquipmentOption, WebMigrationMapping, list_equipment_options, load_toc,
+    EquipmentCategory, WebEquipmentOption, WebMigrationMapping, list_equipment_options,
     patch_unit_ids,
 };
 use super::equipment_graph::{EquipmentPartRole, WebGraphEquipment};
 use super::migration::PatchBytes;
-use crate::archive::dsar;
-use crate::archive::toc_only::TocOnlyPackage;
-use crate::constants::{DSAR_MAGIC, UNIT_ID};
-use crate::io::{BundleSlicer, DataSource};
 use crate::unit::authority::ArmorMappingTable;
-use crate::unit::culling::inspect_unit_culling;
 use crate::unit::helmet_authority::HelmetMappingTable;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-pub const MAPPING_PREVIEW_SCHEMA_VERSION: u16 = 3;
+pub const MAPPING_PREVIEW_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -35,8 +30,6 @@ pub struct WebMappingPreviewUnit {
     pub present_in_patch: bool,
     pub source_roles: Vec<EquipmentPartRole>,
     pub target_roles: Vec<EquipmentPartRole>,
-    pub patch_culling_mesh_count: Option<usize>,
-    pub target_culling_mesh_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -70,8 +63,6 @@ struct PreviewUnitBuilder {
     present_in_patch: bool,
     source_roles: BTreeSet<EquipmentPartRole>,
     target_roles: BTreeSet<EquipmentPartRole>,
-    patch_culling_mesh_count: Option<usize>,
-    target_culling_mesh_count: Option<usize>,
 }
 
 struct MappingPreviewTables {
@@ -105,106 +96,23 @@ pub fn preview_equipment_mappings(
 ) -> crate::Result<Vec<WebEquipmentMappingPreview>> {
     let options = list_equipment_options()?;
     let patch_units = patch_unit_ids(&patch.toc)?;
-    let culling_counts = patch_culling_counts(&patch.toc)?;
     let tables = MappingPreviewTables::bundled()?;
     mappings
         .iter()
-        .map(|mapping| {
-            preview_mapping(
-                mapping,
-                &options,
-                &patch_units,
-                &culling_counts,
-                None,
-                &tables,
-            )
-        })
+        .map(|mapping| preview_mapping(mapping, &options, &patch_units, &tables))
         .collect()
-}
-
-pub async fn preview_equipment_mapping_with_source<S: DataSource + ?Sized>(
-    patch: &PatchBytes,
-    mapping: &WebMigrationMapping,
-    source: &S,
-) -> crate::Result<WebEquipmentMappingPreview> {
-    preview_equipment_mappings_with_source(patch, std::slice::from_ref(mapping), source)
-        .await?
-        .pop()
-        .ok_or_else(|| eyre::eyre!("mapping preview unexpectedly returned no result"))
-}
-
-pub async fn preview_equipment_mappings_with_source<S: DataSource + ?Sized>(
-    patch: &PatchBytes,
-    mappings: &[WebMigrationMapping],
-    source: &S,
-) -> crate::Result<Vec<WebEquipmentMappingPreview>> {
-    let options = list_equipment_options()?;
-    let patch_units = patch_unit_ids(&patch.toc)?;
-    let patch_culling = patch_culling_counts(&patch.toc)?;
-    let target_culling = load_target_culling_counts(mappings, source).await?;
-    let tables = MappingPreviewTables::bundled()?;
-    mappings
-        .iter()
-        .map(|mapping| {
-            preview_mapping(
-                mapping,
-                &options,
-                &patch_units,
-                &patch_culling,
-                target_culling.get(&mapping.target_hash),
-                &tables,
-            )
-        })
-        .collect()
-}
-
-async fn load_target_culling_counts<S: DataSource + ?Sized>(
-    mappings: &[WebMigrationMapping],
-    source: &S,
-) -> crate::Result<HashMap<String, HashMap<u64, usize>>> {
-    let bundle = if source.exists("bundles.nxa").await? {
-        Some(BundleSlicer::open(source).await?)
-    } else {
-        None
-    };
-    let hashes = mappings
-        .iter()
-        .map(|mapping| mapping.target_hash.clone())
-        .collect::<BTreeSet<_>>();
-    let mut counts = HashMap::new();
-    for hash in hashes {
-        let toc = load_toc(source, bundle.as_ref(), &hash).await?;
-        counts.insert(hash, patch_culling_counts(&decompress_toc(toc)?)?);
-    }
-    Ok(counts)
-}
-
-fn decompress_toc(toc: Vec<u8>) -> crate::Result<Vec<u8>> {
-    if toc.get(..4) == Some(&DSAR_MAGIC.to_le_bytes()) {
-        return dsar::decompress(&toc);
-    }
-    Ok(toc)
 }
 
 fn preview_mapping(
     mapping: &WebMigrationMapping,
     options: &[WebEquipmentOption],
     patch_units: &HashSet<u64>,
-    patch_culling: &HashMap<u64, usize>,
-    target_culling: Option<&HashMap<u64, usize>>,
     tables: &MappingPreviewTables,
 ) -> crate::Result<WebEquipmentMappingPreview> {
     let source = find_equipment(options, mapping.category, &mapping.source_hash)?;
     let target = find_equipment(options, mapping.category, &mapping.target_hash)?;
     let parts = authoritative_part_mappings(mapping.category, &source.name, &target.name, tables)?;
-    Ok(build_preview(
-        source,
-        target,
-        patch_units,
-        patch_culling,
-        target_culling.unwrap_or(&HashMap::new()),
-        parts,
-    ))
+    Ok(build_preview(source, target, patch_units, parts))
 }
 
 fn authoritative_part_mappings(
@@ -274,8 +182,6 @@ fn build_preview(
     source: &WebEquipmentOption,
     target: &WebEquipmentOption,
     patch_units: &HashSet<u64>,
-    patch_culling: &HashMap<u64, usize>,
-    target_culling: &HashMap<u64, usize>,
     part_mappings: Vec<(EquipmentPartRole, u64, u64)>,
 ) -> WebEquipmentMappingPreview {
     let active = part_mappings
@@ -290,15 +196,7 @@ fn build_preview(
     let mappings = active
         .iter()
         .map(|(role, source_id, target_id)| {
-            record_unit_roles(
-                &mut units,
-                *source_id,
-                *target_id,
-                *role,
-                patch_units,
-                patch_culling,
-                target_culling,
-            );
+            record_unit_roles(&mut units, *source_id, *target_id, *role, patch_units);
             mapping_preview(*source_id, *target_id, *role)
         })
         .collect::<Vec<_>>();
@@ -319,17 +217,13 @@ fn record_unit_roles(
     target_id: u64,
     role: EquipmentPartRole,
     patch_units: &HashSet<u64>,
-    patch_culling: &HashMap<u64, usize>,
-    target_culling: &HashMap<u64, usize>,
 ) {
     let source = units.entry(source_id).or_default();
     source.present_in_patch = true;
     source.source_roles.insert(role);
-    source.patch_culling_mesh_count = patch_culling.get(&source_id).copied();
     let target = units.entry(target_id).or_default();
     target.present_in_patch = patch_units.contains(&target_id);
     target.target_roles.insert(role);
-    target.target_culling_mesh_count = target_culling.get(&target_id).copied();
 }
 
 fn mapping_preview(
@@ -384,23 +278,7 @@ fn mapping_preview_unit((file_id, unit): (u64, PreviewUnitBuilder)) -> WebMappin
         present_in_patch: unit.present_in_patch,
         source_roles: unit.source_roles.into_iter().collect(),
         target_roles: unit.target_roles.into_iter().collect(),
-        patch_culling_mesh_count: unit.patch_culling_mesh_count,
-        target_culling_mesh_count: unit.target_culling_mesh_count,
     }
-}
-
-fn patch_culling_counts(toc: &[u8]) -> crate::Result<HashMap<u64, usize>> {
-    let package = TocOnlyPackage::parse(toc)?;
-    Ok(package
-        .entries
-        .iter()
-        .filter(|entry| entry.type_id == UNIT_ID)
-        .filter_map(|entry| {
-            inspect_unit_culling(&entry.toc_data)
-                .ok()
-                .map(|inspection| (entry.file_id, inspection.culling_meshes.len()))
-        })
-        .collect())
 }
 
 fn preview_equipment(option: &WebEquipmentOption) -> WebGraphEquipment {
@@ -439,8 +317,6 @@ mod tests {
             &source,
             &target,
             &HashSet::from([1, 2]),
-            &HashMap::new(),
-            &HashMap::new(),
             vec![
                 (EquipmentPartRole::SlimBody, 1, 2),
                 (EquipmentPartRole::StockyBody, 2, 12),
@@ -464,41 +340,12 @@ mod tests {
             &option("source", "Source"),
             &option("target", "Target"),
             &HashSet::from([7]),
-            &HashMap::new(),
-            &HashMap::new(),
             vec![(EquipmentPartRole::Helmet, 7, 7)],
         );
 
         assert_eq!(preview.units.len(), 1);
         assert_eq!(preview.mappings[0].action, WebUnitMappingAction::Reuse);
         assert_eq!(preview.summary.unchanged_unit_count, 1);
-    }
-
-    #[test]
-    fn keeps_patch_and_target_culling_counts_separate() {
-        let preview = build_preview(
-            &option("source", "Source"),
-            &option("target", "Target"),
-            &HashSet::from([7]),
-            &HashMap::from([(7, 2)]),
-            &HashMap::from([(9, 4)]),
-            vec![(EquipmentPartRole::Helmet, 7, 9)],
-        );
-
-        let source = preview
-            .units
-            .iter()
-            .find(|unit| unit.file_id.ends_with("0007"))
-            .unwrap();
-        let target = preview
-            .units
-            .iter()
-            .find(|unit| unit.file_id.ends_with("0009"))
-            .unwrap();
-        assert_eq!(source.patch_culling_mesh_count, Some(2));
-        assert_eq!(source.target_culling_mesh_count, None);
-        assert_eq!(target.patch_culling_mesh_count, None);
-        assert_eq!(target.target_culling_mesh_count, Some(4));
     }
 
     fn option(hash: &str, name: &str) -> WebEquipmentOption {

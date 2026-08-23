@@ -118,7 +118,7 @@ function isMapping(value: unknown): boolean {
 
 function isRepatchSummary(value: unknown): value is UnitRepatchSummary {
   if (!isRecord(value)) return false;
-  const numbers = ["unitCount", "updatedUnits", "alreadyCurrentUnits", "removedUnits", "failedUnits", "scannedArchives"];
+  const numbers = ["unitCount", "updatedUnits", "alreadyCurrentUnits", "removedUnits", "scannedArchives"];
   return hasNumbers(value, numbers) && isStringArray(value.warnings);
 }
 

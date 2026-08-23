@@ -33,9 +33,7 @@ import {
   useTaskReportHistory,
   useUpdateInfo,
   type CompletedTaskReport,
-  type CullingPolicy,
   type EquipmentPartGraph,
-  type RepatchCullingSummary,
   type MigrationMapping,
   type Translate,
   type UnitBehaviorOptions,
@@ -80,7 +78,6 @@ function App() {
   const [patchPaths, setPatchPaths] = useState<string[]>([]);
   const [patch, setPatch] = useState<PatchDescriptor | null>(null);
   const [equipmentGraph, setEquipmentGraph] = useState<EquipmentPartGraph | null>(null);
-  const [cullingSummary, setCullingSummary] = useState<RepatchCullingSummary | null>(null);
   const [gameDir, setGameDir] = useState<string | null>(null);
   const [sources, setSources] = useState<DetectedSource[]>([]);
   const [activeSourceId, setActiveSourceId] = useState("");
@@ -88,7 +85,6 @@ function App() {
   const [multiTarget, setMultiTarget] = useState(false);
   const [singlePatch, setSinglePatch] = useState(false);
   const [noPadding, setNoPadding] = useState(false);
-  const [cullingPolicy, setCullingPolicy] = useState<CullingPolicy>("patch");
   const [unmatchedUnitPolicy, setUnmatchedUnitPolicy] = useState<UnmatchedUnitPolicy>("keep");
   const [unitBehavior, setUnitBehavior] = useState<UnitBehaviorOptions>(emptyUnitBehavior);
   const [missingUnitPolicy, setMissingUnitPolicy] = useState<MissingUnitPolicy>("drop");
@@ -133,7 +129,6 @@ function App() {
   const applyInspection = useCallback((result: Awaited<ReturnType<typeof inspectPatch>>) => {
     setPatch(result.patch);
     setEquipmentGraph(result.equipmentGraph);
-    setCullingSummary(result.cullingSummary);
     setSources(result.inspection.sources);
     setActiveSourceId(result.inspection.sources[0]?.id ?? "");
     setTargetsBySource({});
@@ -143,14 +138,8 @@ function App() {
   }, []);
 
   const loadMappingPreviews = useCallback(
-    (mappings: MigrationMapping[]) => {
-      if (cullingPolicy === "target" && !gameDir) {
-        return Promise.reject(new Error("Game data is not loaded"));
-      }
-      const targetDataDir = cullingPolicy === "target" ? gameDir : null;
-      return previewEquipmentMappings(patchPaths, mappings, targetDataDir);
-    },
-    [cullingPolicy, gameDir, patchPaths],
+    (mappings: MigrationMapping[]) => previewEquipmentMappings(patchPaths, mappings),
+    [patchPaths],
   );
 
   useEffect(() => {
@@ -171,7 +160,6 @@ function App() {
 
   const importPatchPaths = useCallback(async (selected: string[]) => {
     setEquipmentGraph(null);
-    setCullingSummary(null);
     setPatchPaths(selected);
   }, []);
 
@@ -253,7 +241,6 @@ function App() {
           noPadding,
           unmatchedUnitPolicy,
           unitBehavior,
-          cullingPolicy,
         },
       }, onProgress);
       activeTaskRef.current = task;
@@ -261,7 +248,7 @@ function App() {
       reportHistory.recordReport({ kind: "migration", output: outputPath, summary });
     });
     setProgressLabel("");
-  }, [configuredMappings, cullingPolicy, equipmentOptions, gameDir, noPadding, outputAsSinglePatch, patch, patchPaths, reportHistory.recordReport, t, unmatchedUnitPolicy, unitBehavior]);
+  }, [configuredMappings, equipmentOptions, gameDir, noPadding, outputAsSinglePatch, patch, patchPaths, reportHistory.recordReport, t, unmatchedUnitPolicy, unitBehavior]);
 
   const runRepatch = useCallback(async () => {
     if (!gameDir || !patch) return;
@@ -273,14 +260,14 @@ function App() {
         patchPaths,
         dataDir: gameDir,
         outputPath,
-        options: { missingUnitPolicy, cullingPolicy },
+        options: { missingUnitPolicy },
       }, () => {});
       activeTaskRef.current = task;
       const summary = await task.result;
       reportHistory.recordReport({ kind: "repatch", output: outputPath, summary });
     });
     setProgressLabel("");
-  }, [cullingPolicy, gameDir, missingUnitPolicy, patch, patchPaths, reportHistory.recordReport, t]);
+  }, [gameDir, missingUnitPolicy, patch, patchPaths, reportHistory.recordReport, t]);
 
   const cancelActiveTask = useCallback(async () => {
     const task = activeTaskRef.current;
@@ -370,8 +357,7 @@ function App() {
                   targetsBySource={targetsBySource}
                 />
                 <MappingPreviewAccordion
-                  cullingPolicy={cullingPolicy}
-                  contextKey={`${patchPaths.join("|")}:${cullingPolicy}`}
+                  contextKey={patchPaths.join("|")}
                   loadPreviews={loadMappingPreviews}
                   mappings={configuredMappings}
                   patchGraph={equipmentGraph}
@@ -381,10 +367,7 @@ function App() {
                 />
               </> : (
                 <UnitUpdaterPanel
-                  cullingPolicy={cullingPolicy}
-                  cullingSummary={cullingSummary}
                   missingUnitPolicy={missingUnitPolicy}
-                  onCullingPolicyChange={setCullingPolicy}
                   onMissingUnitPolicyChange={setMissingUnitPolicy}
                 />
               )}
@@ -394,13 +377,11 @@ function App() {
               busy={busy}
               cancelling={cancelling}
               canRun={canRun}
-              cullingPolicy={cullingPolicy}
               noPadding={noPadding}
               onRun={toolMode === "migrate" ? runMigration : runRepatch}
               onCancel={cancelActiveTask}
               progressLabel={progressLabel}
               setNoPadding={setNoPadding}
-              setCullingPolicy={setCullingPolicy}
               setUnmatchedUnitPolicy={setUnmatchedUnitPolicy}
               toolMode={toolMode}
               unmatchedUnitPolicy={unmatchedUnitPolicy}
@@ -461,13 +442,11 @@ interface ActionRowProps {
   busy: boolean;
   cancelling: boolean;
   canRun: boolean;
-  cullingPolicy: CullingPolicy;
   noPadding: boolean;
   onRun: () => Promise<void>;
   onCancel: () => Promise<void>;
   progressLabel: string;
   setNoPadding: (value: boolean) => void;
-  setCullingPolicy: (value: CullingPolicy) => void;
   setUnmatchedUnitPolicy: (value: UnmatchedUnitPolicy) => void;
   toolMode: ToolMode;
   unmatchedUnitPolicy: UnmatchedUnitPolicy;
@@ -480,9 +459,7 @@ function ActionRow(props: ActionRowProps) {
       {props.toolMode === "migrate" && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 min-[51.25rem]:shrink-0">
           <OptionsPanel
-            cullingPolicy={props.cullingPolicy}
             noPadding={props.noPadding}
-            setCullingPolicy={props.setCullingPolicy}
             setNoPadding={props.setNoPadding}
             setUnmatchedUnitPolicy={props.setUnmatchedUnitPolicy}
             unmatchedUnitPolicy={props.unmatchedUnitPolicy}

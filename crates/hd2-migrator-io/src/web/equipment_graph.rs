@@ -5,24 +5,19 @@ use super::equipment::{
     inspect_equipment_with_source, list_equipment_options, patch_unit_ids,
 };
 use super::migration::PatchBytes;
-use super::repatch::{RepatchCullingSummary, summarize_patch_culling};
-use crate::archive::toc_only::TocOnlyPackage;
-use crate::constants::UNIT_ID;
 use crate::io::DataSource;
 use crate::unit::authority::ArmorMappingTable;
-use crate::unit::culling::inspect_unit_culling;
 use crate::unit::helmet_authority::HelmetMappingTable;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-pub const EQUIPMENT_GRAPH_SCHEMA_VERSION: u16 = 2;
+pub const EQUIPMENT_GRAPH_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WebEquipmentPatchAnalysis {
     pub inspection: WebEquipmentInspection,
     pub equipment_graph: WebEquipmentPartGraph,
-    pub culling_summary: RepatchCullingSummary,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -63,7 +58,6 @@ pub struct WebGraphComponent {
     pub file_id: String,
     pub kind: WebGraphComponentKind,
     pub present_in_patch: bool,
-    pub culling_mesh_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -186,7 +180,6 @@ pub fn analyze_equipment_patch(patch: &PatchBytes) -> crate::Result<WebEquipment
     Ok(WebEquipmentPatchAnalysis {
         inspection: inspect_equipment(patch)?,
         equipment_graph: build_equipment_part_graph(patch)?,
-        culling_summary: summarize_patch_culling(&patch.toc)?,
     })
 }
 
@@ -197,45 +190,24 @@ pub async fn analyze_equipment_patch_with_source<S: DataSource + ?Sized>(
     Ok(WebEquipmentPatchAnalysis {
         inspection: inspect_equipment_with_source(patch, source).await?,
         equipment_graph: build_equipment_part_graph(patch)?,
-        culling_summary: summarize_patch_culling(&patch.toc)?,
     })
 }
 
 pub fn build_equipment_part_graph(patch: &PatchBytes) -> crate::Result<WebEquipmentPartGraph> {
     let unit_ids = patch_unit_ids(&patch.toc)?;
-    let culling_counts = patch_culling_counts(&patch.toc)?;
     let catalog = EquipmentGraphCatalog::bundled()?;
-    Ok(build_graph_with_culling(
-        &patch.name,
-        &unit_ids,
-        &culling_counts,
-        &catalog,
-    ))
+    Ok(build_graph(&patch.name, &unit_ids, &catalog))
 }
 
-#[cfg(test)]
 fn build_graph(
     patch_name: &str,
     unit_ids: &HashSet<u64>,
     catalog: &EquipmentGraphCatalog,
 ) -> WebEquipmentPartGraph {
-    build_graph_with_culling(patch_name, unit_ids, &HashMap::new(), catalog)
-}
-
-fn build_graph_with_culling(
-    patch_name: &str,
-    unit_ids: &HashSet<u64>,
-    culling_counts: &HashMap<u64, usize>,
-    catalog: &EquipmentGraphCatalog,
-) -> WebEquipmentPartGraph {
     let mut builder = EquipmentGraphBuilder::new(patch_name, unit_ids.len());
     let sorted_ids = unit_ids.iter().copied().collect::<BTreeSet<_>>();
     for unit_id in sorted_ids {
-        builder.add_unit(
-            unit_id,
-            culling_counts.get(&unit_id).copied(),
-            catalog.by_unit.get(&unit_id),
-        );
+        builder.add_unit(unit_id, catalog.by_unit.get(&unit_id));
     }
     builder.finish()
 }
@@ -263,13 +235,8 @@ impl EquipmentGraphBuilder {
         }
     }
 
-    fn add_unit(
-        &mut self,
-        unit_id: u64,
-        culling_mesh_count: Option<usize>,
-        catalog_relations: Option<&Vec<CatalogRelation>>,
-    ) {
-        let component = graph_component(unit_id, culling_mesh_count);
+    fn add_unit(&mut self, unit_id: u64, catalog_relations: Option<&Vec<CatalogRelation>>) {
+        let component = graph_component(unit_id);
         self.components
             .insert(component.id.clone(), component.clone());
         let Some(catalog_relations) = catalog_relations else {
@@ -393,28 +360,13 @@ fn equipment_id(catalog: &CatalogRelation) -> String {
     }
 }
 
-fn graph_component(unit_id: u64, culling_mesh_count: Option<usize>) -> WebGraphComponent {
+fn graph_component(unit_id: u64) -> WebGraphComponent {
     WebGraphComponent {
         id: component_id(unit_id),
         file_id: file_id_hex(unit_id),
         kind: WebGraphComponentKind::Unit,
         present_in_patch: true,
-        culling_mesh_count,
     }
-}
-
-fn patch_culling_counts(toc: &[u8]) -> crate::Result<HashMap<u64, usize>> {
-    let package = TocOnlyPackage::parse(toc)?;
-    Ok(package
-        .entries
-        .iter()
-        .filter(|entry| entry.type_id == UNIT_ID)
-        .filter_map(|entry| {
-            inspect_unit_culling(&entry.toc_data)
-                .ok()
-                .map(|inspection| (entry.file_id, inspection.culling_meshes.len()))
-        })
-        .collect())
 }
 
 fn graph_relation(

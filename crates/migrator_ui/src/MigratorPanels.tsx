@@ -34,7 +34,6 @@ import type {
   EquipmentCategory,
   EquipmentOption,
   PatchInfo,
-  CullingPolicy,
   UnmatchedUnitPolicy,
 } from "./types";
 import { EquipmentCategoryIcon } from "./EquipmentCategoryIcon";
@@ -398,9 +397,7 @@ function EmptyMapping({ icon, text }: { icon: ReactNode; text: string }) {
 }
 
 interface OptionsPanelProps {
-  cullingPolicy: CullingPolicy;
   noPadding: boolean;
-  setCullingPolicy: (value: CullingPolicy) => void;
   setNoPadding: (value: boolean) => void;
   setUnmatchedUnitPolicy: (value: UnmatchedUnitPolicy) => void;
   unmatchedUnitPolicy: UnmatchedUnitPolicy;
@@ -420,12 +417,6 @@ function AdvancedOptionsContent(props: OptionsPanelProps) {
   const { t } = useI18n();
   return (
     <>
-      <AdvancedCheckboxOption
-        checked={props.cullingPolicy === "target"}
-        help={t("options.patchCullingHelp")}
-        label={t("options.patchCulling")}
-        onChange={(checked) => props.setCullingPolicy(checked ? "target" : "patch")}
-      />
       <AdvancedCheckboxOption
         checked={props.noPadding}
         help={t("options.noPaddingHelp")}
