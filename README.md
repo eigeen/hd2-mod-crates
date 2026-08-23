@@ -115,6 +115,7 @@ cargo build --release -p hd2-migrator-cli
 构建时会将下列数据打包进程序：
 
 - `assets/archivehashes.json`：装备哈希与名称索引；
+- `assets/archivehash_overrides.json`：同名装备需要固定使用的 archive ID；
 - `assets/armor_mappings.merged.json`：护甲主要 Unit 部件映射；
 - `assets/helmet_mappings.json`：头盔 Unit 映射；
 - `assets/empty_mesh/{toc,gpu,stream}.bin`：默认空网格模板；

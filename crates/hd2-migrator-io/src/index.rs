@@ -8,6 +8,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 const BUILTIN_INDEX_JSON: &str = hd2_migrator_data::ARCHIVE_INDEX_JSON;
+const BUILTIN_OVERRIDES_JSON: &str = hd2_migrator_data::ARCHIVE_INDEX_OVERRIDES_JSON;
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct ArmorEntry {
@@ -22,6 +23,7 @@ pub struct ArmorEntry {
 #[derive(Debug, Clone, Default)]
 pub struct ArchiveIndex {
     by_category: BTreeMap<String, Vec<ArmorEntry>>,
+    preferred_hashes: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 impl ArchiveIndex {
@@ -49,15 +51,22 @@ impl ArchiveIndex {
             };
             by_category.insert(cat.clone(), entries);
         }
-        Ok(Self { by_category })
+        Ok(Self {
+            by_category,
+            preferred_hashes: BTreeMap::new(),
+        })
     }
 
     pub fn builtin() -> &'static Self {
         static CACHE: OnceLock<ArchiveIndex> = OnceLock::new();
         CACHE.get_or_init(|| {
-            BUILTIN_INDEX_JSON
+            let mut index: ArchiveIndex = BUILTIN_INDEX_JSON
                 .parse()
-                .expect("builtin archivehashes.json must parse")
+                .expect("builtin archivehashes.json must parse");
+            index
+                .apply_overrides(BUILTIN_OVERRIDES_JSON)
+                .expect("builtin archive hash overrides must be valid");
+            index
         })
     }
 
@@ -67,6 +76,36 @@ impl ArchiveIndex {
 
     pub fn categories(&self) -> impl Iterator<Item = &str> {
         self.by_category.keys().map(|s| s.as_str())
+    }
+
+    pub fn preferred_hash(&self, category: &str, name: &str) -> Option<&str> {
+        self.preferred_hashes
+            .get(category)?
+            .get(name)
+            .map(String::as_str)
+    }
+
+    fn apply_overrides(&mut self, text: &str) -> crate::Result<()> {
+        let overrides: BTreeMap<String, BTreeMap<String, String>> = serde_json::from_str(text)?;
+        for (category, equipment) in &overrides {
+            for (name, hash) in equipment {
+                self.validate_override(category, name, hash)?;
+            }
+        }
+        self.preferred_hashes = overrides;
+        Ok(())
+    }
+
+    fn validate_override(&self, category: &str, name: &str, hash: &str) -> crate::Result<()> {
+        let matches_entry = self.category(category).is_some_and(|entries| {
+            entries
+                .iter()
+                .any(|entry| entry.name == name && entry.hash.eq_ignore_ascii_case(hash))
+        });
+        if !matches_entry {
+            eyre::bail!("archive override {category}/{name} references unknown hash {hash}");
+        }
+        Ok(())
     }
 }
 
@@ -106,5 +145,13 @@ mod tests {
     fn builtin_index_parses() {
         let idx = ArchiveIndex::builtin();
         assert!(idx.categories().next().is_some(), "no categories");
+    }
+
+    #[test]
+    fn builtin_override_prefers_player_fs_05_archive() {
+        assert_eq!(
+            ArchiveIndex::builtin().preferred_hash("Armor", "FS-05 Marksman"),
+            Some("8670598c1f4462dc")
+        );
     }
 }

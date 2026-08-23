@@ -1,6 +1,8 @@
 //! Embedded data assets shared by migrator crates.
 
 pub const ARCHIVE_INDEX_JSON: &str = include_str!("../../../assets/archivehashes.json");
+pub const ARCHIVE_INDEX_OVERRIDES_JSON: &str =
+    include_str!("../../../assets/archivehash_overrides.json");
 pub const ARMOR_MAPPING_JSON: &str = include_str!("../../../assets/armor_mappings.merged.json");
 pub const HELMET_MAPPING_JSON: &str = include_str!("../../../assets/helmet_mappings.json");
 pub const BONEHASH_TEXT: &str = include_str!("../../../assets/bonehash.txt");

@@ -62,6 +62,19 @@ fn detected_multi_archive_helmet_uses_its_logical_option() {
 }
 
 #[test]
+fn detected_fs_05_armor_uses_player_archive_override() {
+    let table = ArmorMappingTable::bundled().unwrap();
+    let unit_ids = table
+        .armor("FS-05 Marksman")
+        .unwrap()
+        .all_file_ids()
+        .into_iter()
+        .collect();
+    let detected = detect_armor_source(&unit_ids).unwrap();
+    assert_eq!(detected.hash, "8670598c1f4462dc");
+}
+
+#[test]
 fn detect_source_returns_none_when_patch_has_no_known_units() {
     let patch = patch_bytes("patch", &[0xDEADBEEF]);
 

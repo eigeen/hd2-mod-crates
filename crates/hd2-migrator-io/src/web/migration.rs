@@ -311,9 +311,11 @@ fn unique_model_hits(
 
 fn detect_armor_source(patch_unit_ids: &HashSet<u64>) -> Option<WebTargetOption> {
     let table = ArmorMappingTable::bundled().ok()?;
+    let index = ArchiveIndex::builtin();
     let mut candidates: Vec<SourceCandidate> = selectable_archive_entries("Armor")
         .ok()?
         .into_iter()
+        .filter(|entry| is_preferred_entry(index, "Armor", entry))
         .filter_map(|entry| {
             let parts = table.armor(&entry.name)?;
             let unit_hits = parts
@@ -333,6 +335,12 @@ fn detect_armor_source(patch_unit_ids: &HashSet<u64>) -> Option<WebTargetOption>
         .collect();
     candidates.sort_by(compare_source_candidates);
     candidates.pop().map(|candidate| candidate.option)
+}
+
+fn is_preferred_entry(index: &ArchiveIndex, category: &str, entry: &ArmorEntry) -> bool {
+    index
+        .preferred_hash(category, &entry.name)
+        .is_none_or(|hash| entry.hash.eq_ignore_ascii_case(hash))
 }
 
 fn detect_helmet_source(patch_unit_ids: &HashSet<u64>) -> Option<WebTargetOption> {

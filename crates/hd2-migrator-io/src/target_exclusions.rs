@@ -9,7 +9,6 @@ const DEFAULT_EXCLUDED_TARGET_HASHES: &[&str] = &[
     "33cecc4e485ea3c4",
     "788df19150915809",
     "31d06451a09679f1",
-    "8670598c1f4462dc",
     "ccac0a57aca3ae92",
     "c72998936b1d88a2",
     "d5f85cb5efb44cd2",
@@ -35,7 +34,6 @@ const DEFAULT_EXCLUDED_TARGET_NAMES: &[&str] = &[
     "SA-7 Headfirst",
     "AF-91 Field Chemist",
     "B-24 Enforcer",
-    "FS-05 Marksman",
     "SC-37 Legionnaire",
     "UF-84 Doubt Killer",
     "B-01 Tactical (Variation 1)",
@@ -74,7 +72,10 @@ mod tests {
     #[test]
     fn excludes_multi_archive_equipment_by_hash_or_name() {
         assert!(is_default_excluded_target("31d06451a09679f1", "Other"));
-        assert!(is_default_excluded_target("other", "FS-05 Marksman"));
+        assert!(!is_default_excluded_target(
+            "8670598c1f4462dc",
+            "FS-05 Marksman"
+        ));
         assert!(is_default_excluded_target("7ae5a2f32d6f24f1", "Other"));
         assert!(is_default_excluded_target("other", "AF-91 Field Chemist"));
     }

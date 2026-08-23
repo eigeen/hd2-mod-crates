@@ -94,10 +94,9 @@ pub async fn inspect_equipment_with_source<S: DataSource + ?Sized>(
 }
 
 fn options_for_category(category: EquipmentCategory) -> crate::Result<Vec<WebEquipmentOption>> {
-    let mut seen_names = HashSet::new();
-    Ok(selectable_archive_entries(category.as_str())?
+    let entries = preferred_equipment_entries(category)?;
+    Ok(entries
         .into_iter()
-        .filter(|entry| seen_names.insert(entry.name.clone()))
         .map(|entry| WebEquipmentOption {
             category,
             hash: entry.hash.clone(),
@@ -106,6 +105,24 @@ fn options_for_category(category: EquipmentCategory) -> crate::Result<Vec<WebEqu
                 && is_default_excluded_target(&entry.hash, &entry.name),
         })
         .collect())
+}
+
+fn preferred_equipment_entries(
+    category: EquipmentCategory,
+) -> crate::Result<Vec<&'static crate::index::ArmorEntry>> {
+    let index = crate::index::ArchiveIndex::builtin();
+    let mut selected = Vec::new();
+    let mut positions = HashMap::new();
+    for entry in selectable_archive_entries(category.as_str())? {
+        let position = *positions.entry(entry.name.clone()).or_insert_with(|| {
+            selected.push(entry);
+            selected.len() - 1
+        });
+        if index.preferred_hash(category.as_str(), &entry.name) == Some(entry.hash.as_str()) {
+            selected[position] = entry;
+        }
+    }
+    Ok(selected)
 }
 
 fn detected_sources(unit_ids: &HashSet<u64>) -> crate::Result<Vec<WebDetectedSource>> {
@@ -330,6 +347,17 @@ mod tests {
             None
         );
         assert_eq!(unique_best_hash(&[("a".to_string(), 0)]), None);
+    }
+
+    #[test]
+    fn equipment_options_use_player_fs_05_archive() {
+        let options = options_for_category(EquipmentCategory::Armor).unwrap();
+        let fs_05 = options
+            .iter()
+            .find(|option| option.name == "FS-05 Marksman")
+            .unwrap();
+        assert_eq!(fs_05.hash, "8670598c1f4462dc");
+        assert!(!fs_05.excluded);
     }
 
     fn option(category: EquipmentCategory, hash: &str, name: &str) -> WebEquipmentOption {
