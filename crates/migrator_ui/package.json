@@ -1,7 +1,7 @@
 {
   "name": "@hd2-mod-tools/migrator-ui",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
