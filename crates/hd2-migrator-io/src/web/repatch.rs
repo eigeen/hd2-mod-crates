@@ -34,6 +34,7 @@ pub struct UnitRepatchSummary {
     pub unit_count: usize,
     pub updated_units: usize,
     pub converted_formats: usize,
+    pub refreshed_lod_groups: usize,
     pub already_current_units: usize,
     pub removed_units: usize,
     pub scanned_archives: usize,
@@ -93,6 +94,7 @@ pub async fn repatch_units_plan_with_progress<S: DataSource + ?Sized>(
     progress: Option<&dyn WebProgress>,
 ) -> crate::Result<UnitRepatchPlan> {
     let mut patch = TocOnlyPackage::parse(patch_toc).wrap_err("parse patch TOC")?;
+    validate_repatch_package(&patch)?;
     let wanted = patch_unit_ids(&patch);
     if wanted.is_empty() {
         return Ok(UnitRepatchPlan {
@@ -147,6 +149,7 @@ fn no_units_summary() -> UnitRepatchSummary {
         unit_count: 0,
         updated_units: 0,
         converted_formats: 0,
+        refreshed_lod_groups: 0,
         already_current_units: 0,
         removed_units: 0,
         scanned_archives: 0,
@@ -375,6 +378,7 @@ fn apply_latest_units(
         unit_count,
         updated_units: 0,
         converted_formats: 0,
+        refreshed_lod_groups: 0,
         already_current_units: 0,
         removed_units: 0,
         scanned_archives: lookup.scanned_archives,
@@ -417,9 +421,13 @@ fn update_patch_entry(
     match repatch_unit(&mut entry.toc_data, parts)
         .wrap_err_with(|| format!("update Unit {:016x}", entry.file_id))?
     {
-        RepatchOutcome::Updated { converted_formats } => {
+        RepatchOutcome::Updated {
+            converted_formats,
+            refreshed_lod_group,
+        } => {
             summary.updated_units += 1;
             summary.converted_formats += converted_formats;
+            summary.refreshed_lod_groups += usize::from(refreshed_lod_group);
         }
         RepatchOutcome::AlreadyCurrent => summary.already_current_units += 1,
     }
@@ -467,6 +475,52 @@ fn patch_unit_ids(patch: &TocOnlyPackage) -> HashSet<u64> {
         .filter(|entry| entry.type_id == UNIT_ID)
         .map(|entry| entry.file_id)
         .collect()
+}
+
+fn validate_repatch_package(patch: &TocOnlyPackage) -> crate::Result<()> {
+    validate_resource_type_ids(patch)?;
+    validate_resource_count(patch)?;
+    validate_unique_resources(patch)
+}
+
+fn validate_resource_type_ids(patch: &TocOnlyPackage) -> crate::Result<()> {
+    if let Some(file_type) = patch
+        .types
+        .iter()
+        .find(|file_type| file_type.type_id < 1 << 32)
+    {
+        eyre::bail!("invalid resource type ID 0x{:016x}", file_type.type_id);
+    }
+    Ok(())
+}
+
+fn validate_resource_count(patch: &TocOnlyPackage) -> crate::Result<()> {
+    let declared_files = patch.types.iter().try_fold(0usize, |total, file_type| {
+        total
+            .checked_add(file_type.num_files as usize)
+            .ok_or_else(|| eyre::eyre!("resource count overflow"))
+    })?;
+    if declared_files != patch.entries.len() {
+        eyre::bail!(
+            "resource count mismatch: type table declares {declared_files}, header contains {}",
+            patch.entries.len()
+        );
+    }
+    Ok(())
+}
+
+fn validate_unique_resources(patch: &TocOnlyPackage) -> crate::Result<()> {
+    let mut resources = HashSet::new();
+    for entry in &patch.entries {
+        if !resources.insert((entry.type_id, entry.file_id)) {
+            eyre::bail!(
+                "duplicate resource {:016x}/{:016x}",
+                entry.type_id,
+                entry.file_id
+            );
+        }
+    }
+    Ok(())
 }
 
 fn location_range(locations: &[TocEntryLocation]) -> crate::Result<(u64, u64)> {
@@ -524,4 +578,108 @@ fn is_archive_name(name: &str) -> bool {
 
 fn package_magic(data: &[u8]) -> Option<u32> {
     Some(u32::from_le_bytes(data.get(..4)?.try_into().ok()?))
+}
+
+#[cfg(test)]
+mod behavior_tests {
+    use super::*;
+    use crate::archive::TocFileType;
+    use crate::archive::toc_only::TocOnlyEntry;
+
+    #[test]
+    fn drop_policy_removes_only_missing_units() {
+        let missing_unit_id = 0x11;
+        let mut patch =
+            package_with_entries(vec![entry(missing_unit_id, UNIT_ID), entry(0x22, 0x1234)]);
+        let lookup = missing_lookup(missing_unit_id);
+
+        let summary = apply_latest_units(&mut patch, lookup, MissingUnitPolicy::Drop).unwrap();
+
+        assert_eq!(summary.unit_count, 1);
+        assert_eq!(summary.removed_units, 1);
+        assert_eq!(patch.entries.len(), 1);
+        assert_eq!(patch.entries[0].type_id, 0x1234);
+    }
+
+    #[test]
+    fn keep_policy_preserves_missing_units_with_warning() {
+        let missing_unit_id = 0x11;
+        let mut patch = package_with_entries(vec![entry(missing_unit_id, UNIT_ID)]);
+        let lookup = missing_lookup(missing_unit_id);
+
+        let summary = apply_latest_units(&mut patch, lookup, MissingUnitPolicy::Keep).unwrap();
+
+        assert_eq!(summary.removed_units, 0);
+        assert_eq!(patch.entries.len(), 1);
+        assert!(summary.warnings[0].contains("kept missing Unit"));
+    }
+
+    #[test]
+    fn fail_policy_lists_missing_units_in_stable_order() {
+        let missing = HashSet::from([0x22, 0x11]);
+
+        let error = enforce_missing_policy(&missing, MissingUnitPolicy::Fail).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .ends_with("0000000000000011, 0000000000000022")
+        );
+    }
+
+    #[test]
+    fn repatch_validation_rejects_corrupt_type_counts() {
+        let mut patch = package_with_entries(vec![entry(0x11, UNIT_ID)]);
+        patch.types = vec![TocFileType::new(UNIT_ID, 2)];
+
+        let error = validate_repatch_package(&patch).unwrap_err();
+
+        assert!(error.to_string().contains("resource count mismatch"));
+    }
+
+    #[test]
+    fn repatch_validation_rejects_duplicate_resources() {
+        let mut patch = package_with_entries(vec![entry(0x11, UNIT_ID), entry(0x11, UNIT_ID)]);
+        patch.types = vec![TocFileType::new(UNIT_ID, 2)];
+
+        let error = validate_repatch_package(&patch).unwrap_err();
+
+        assert!(error.to_string().contains("duplicate resource"));
+    }
+
+    fn package_with_entries(entries: Vec<TocOnlyEntry>) -> TocOnlyPackage {
+        TocOnlyPackage {
+            types: Vec::new(),
+            entries,
+            unknown: 0,
+            unk4_data: [0; 56],
+        }
+    }
+
+    fn entry(file_id: u64, type_id: u64) -> TocOnlyEntry {
+        TocOnlyEntry {
+            file_id,
+            type_id,
+            unknown1: 0,
+            unknown2: 0,
+            unknown3: 0,
+            unknown4: 0,
+            toc_data: Vec::new(),
+            stream_offset: 0,
+            gpu_offset: 0,
+            stream_size: 0,
+            gpu_size: 0,
+        }
+    }
+
+    fn missing_lookup(file_id: u64) -> LatestUnitLookup {
+        LatestUnitLookup {
+            wanted: HashSet::from([file_id]),
+            found: HashMap::new(),
+            missing: HashSet::from([file_id]),
+            preferred_archive: None,
+            scanned_archives: 1,
+            warnings: Vec::new(),
+        }
+    }
 }

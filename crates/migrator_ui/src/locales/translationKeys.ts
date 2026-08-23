@@ -240,6 +240,7 @@ export const translationKeys = [
   "result.unmatchedDropped",
   "result.updated",
   "result.formats",
+  "result.lodGroups",
   "result.current",
   "result.removed",
   "result.archives",

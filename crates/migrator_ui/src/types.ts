@@ -217,6 +217,7 @@ export interface UnitRepatchSummary {
   unitCount: number;
   updatedUnits: number;
   convertedFormats?: number;
+  refreshedLodGroups?: number;
   alreadyCurrentUnits: number;
   removedUnits: number;
   scannedArchives: number;

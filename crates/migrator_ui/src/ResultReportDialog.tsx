@@ -142,6 +142,7 @@ function RepatchDetails({ summary, t }: { summary: UnitRepatchSummary; t: Transl
       <MetricGrid metrics={[
         [t("result.updated"), summary.updatedUnits],
         [t("result.formats"), summary.convertedFormats ?? 0],
+        [t("result.lodGroups"), summary.refreshedLodGroups ?? 0],
         [t("result.current"), summary.alreadyCurrentUnits],
         [t("result.removed"), summary.removedUnits],
         [t("result.archives"), summary.scannedArchives],

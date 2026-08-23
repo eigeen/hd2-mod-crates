@@ -4,6 +4,9 @@
 use byteorder::{ByteOrder, LittleEndian as LE};
 
 const VERSION_OFFSET: usize = 0x2c;
+const LOD_GROUP_OFFSET_FIELD: usize = 0x30;
+const OFFSET_TABLE_START: usize = 0x34;
+const OFFSET_TABLE_COUNT: usize = 16;
 const LAYOUT_LIST_OFFSET_FIELD: usize = 0x5c;
 const LEGACY_STREAM_FORMAT_VERSION: u32 = 10_800_437;
 const CURRENT_STREAM_FORMAT_VERSION: u32 = 10_800_438;
@@ -18,48 +21,124 @@ const STREAM_NUM_COMPONENTS_SIZE: usize = 8;
 #[derive(Debug, Clone)]
 pub struct LatestUnitParts {
     version: u32,
+    lod_group: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepatchOutcome {
-    Updated { converted_formats: usize },
+    Updated {
+        converted_formats: usize,
+        refreshed_lod_group: bool,
+    },
     AlreadyCurrent,
 }
 
 impl LatestUnitParts {
     pub fn parse(unit: &[u8]) -> crate::Result<Self> {
-        require_range(unit, VERSION_OFFSET, 4, "latest Unit version")?;
+        require_range(unit, VERSION_OFFSET, 12, "latest Unit header")?;
+        let (lod_start, lod_end) = lod_group_range(unit, "latest Unit")?;
         Ok(Self {
             version: LE::read_u32(&unit[VERSION_OFFSET..]),
+            lod_group: unit[lod_start..lod_end].to_vec(),
         })
     }
 }
 
-/// Apply the verified 10800437 -> 10800438 Unit stream-format migration.
+/// Apply version-dependent Unit updates from the original repatcher safely.
 ///
-/// This is used only by the explicit Unit Patch version updater. Equipment
-/// migration and Patch merging preserve Unit bytes and do not call this path.
+/// The verified 10800437 -> 10800438 transition preserves the Mod's LOD group.
+/// Other forward transitions retain the original repatcher's LOD refresh.
 pub fn repatch_unit(unit: &mut Vec<u8>, latest: &LatestUnitParts) -> crate::Result<RepatchOutcome> {
-    require_range(unit, VERSION_OFFSET, 4, "mod Unit version")?;
+    require_range(unit, VERSION_OFFSET, 12, "mod Unit header")?;
     let version = LE::read_u32(&unit[VERSION_OFFSET..]);
-    if version == latest.version {
+    validate_forward_transition(version, latest.version)?;
+    let mut updated = unit.clone();
+    let converted_formats = update_formats_for_transition(&mut updated, version, latest.version)?;
+    let refreshed_lod_group =
+        refresh_lod_for_transition(&mut updated, version, latest.version, &latest.lod_group)?;
+    if version == latest.version && !refreshed_lod_group {
         return Ok(RepatchOutcome::AlreadyCurrent);
     }
-    validate_supported_transition(version, latest.version)?;
-    let mut updated = unit.clone();
-    let converted_formats = update_legacy_stream_formats(&mut updated)?;
     LE::write_u32(&mut updated[VERSION_OFFSET..], latest.version);
     *unit = updated;
-    Ok(RepatchOutcome::Updated { converted_formats })
+    Ok(RepatchOutcome::Updated {
+        converted_formats,
+        refreshed_lod_group,
+    })
 }
 
-fn validate_supported_transition(version: u32, latest_version: u32) -> crate::Result<()> {
-    if version == LEGACY_STREAM_FORMAT_VERSION && latest_version == CURRENT_STREAM_FORMAT_VERSION {
+fn validate_forward_transition(version: u32, latest_version: u32) -> crate::Result<()> {
+    if version <= latest_version {
         return Ok(());
     }
-    eyre::bail!(
-        "unsupported Unit version transition {version} -> {latest_version}; only {LEGACY_STREAM_FORMAT_VERSION} -> {CURRENT_STREAM_FORMAT_VERSION} is supported"
-    )
+    eyre::bail!("refusing to downgrade Unit version {version} -> {latest_version}")
+}
+
+fn update_formats_for_transition(
+    unit: &mut [u8],
+    version: u32,
+    latest_version: u32,
+) -> crate::Result<usize> {
+    if version >= CURRENT_STREAM_FORMAT_VERSION || latest_version < CURRENT_STREAM_FORMAT_VERSION {
+        return Ok(0);
+    }
+    update_legacy_stream_formats(unit)
+}
+
+fn refresh_lod_for_transition(
+    unit: &mut Vec<u8>,
+    version: u32,
+    latest_version: u32,
+    latest_lod_group: &[u8],
+) -> crate::Result<bool> {
+    if version >= LEGACY_STREAM_FORMAT_VERSION && latest_version == CURRENT_STREAM_FORMAT_VERSION {
+        return Ok(false);
+    }
+    replace_lod_group(unit, latest_lod_group)
+}
+
+fn replace_lod_group(unit: &mut Vec<u8>, latest_lod_group: &[u8]) -> crate::Result<bool> {
+    require_range(
+        unit,
+        OFFSET_TABLE_START,
+        OFFSET_TABLE_COUNT * 4,
+        "mod Unit offset table",
+    )?;
+    let (lod_start, lod_end) = lod_group_range(unit, "mod Unit")?;
+    if unit[lod_start..lod_end] == *latest_lod_group {
+        return Ok(false);
+    }
+    let size_delta = latest_lod_group.len() as i64 - (lod_end - lod_start) as i64;
+    adjust_offsets_after_lod(unit, lod_start as u32, size_delta)?;
+    unit.splice(lod_start..lod_end, latest_lod_group.iter().copied());
+    Ok(true)
+}
+
+fn adjust_offsets_after_lod(unit: &mut [u8], lod_start: u32, delta: i64) -> crate::Result<()> {
+    if delta == 0 {
+        return Ok(());
+    }
+    for index in 0..OFFSET_TABLE_COUNT {
+        let start = OFFSET_TABLE_START + index * 4;
+        let offset = LE::read_u32(&unit[start..]);
+        if offset == 0 || offset <= lod_start {
+            continue;
+        }
+        let adjusted = u32::try_from(i64::from(offset) + delta)
+            .map_err(|_| eyre::eyre!("Unit offset adjustment overflow"))?;
+        LE::write_u32(&mut unit[start..], adjusted);
+    }
+    Ok(())
+}
+
+fn lod_group_range(unit: &[u8], label: &str) -> crate::Result<(usize, usize)> {
+    let start = LE::read_u32(&unit[LOD_GROUP_OFFSET_FIELD..]) as usize;
+    let end = LE::read_u32(&unit[LOD_GROUP_OFFSET_FIELD + 4..]) as usize;
+    if end < start {
+        eyre::bail!("{label} has a reversed LOD group range");
+    }
+    require_range(unit, start, end - start, &format!("{label} LOD group"))?;
+    Ok((start, end))
 }
 
 fn update_legacy_stream_formats(unit: &mut [u8]) -> crate::Result<usize> {
@@ -211,7 +290,8 @@ mod tests {
         assert_eq!(
             outcome,
             RepatchOutcome::Updated {
-                converted_formats: 6
+                converted_formats: 6,
+                refreshed_lod_group: false,
             }
         );
         assert_eq!(
@@ -258,17 +338,19 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unverified_version_transition() {
+    fn rejects_version_downgrade_without_mutating_unit() {
         let latest = LatestUnitParts::parse(&latest_unit(CURRENT_STREAM_FORMAT_VERSION)).unwrap();
-        let mut old = old_unit_with_layout(LEGACY_STREAM_FORMAT_VERSION - 1, &[24]);
+        let mut old = latest_unit(CURRENT_STREAM_FORMAT_VERSION + 1);
+        let original = old.clone();
 
-        let error = repatch_unit(&mut old, &latest).expect_err("reject unknown transition");
+        let error = repatch_unit(&mut old, &latest).expect_err("reject downgrade");
 
         assert!(
             error
                 .to_string()
-                .contains("unsupported Unit version transition")
+                .contains("refusing to downgrade Unit version")
         );
+        assert_eq!(old, original);
     }
 
     #[test]
@@ -281,13 +363,75 @@ mod tests {
         assert_eq!(
             outcome,
             RepatchOutcome::Updated {
-                converted_formats: 0
+                converted_formats: 0,
+                refreshed_lod_group: false,
             }
         );
         assert_eq!(
             LE::read_u32(&old[VERSION_OFFSET..]),
             CURRENT_STREAM_FORMAT_VERSION
         );
+    }
+
+    #[test]
+    fn verified_stream_upgrade_preserves_mod_lod_group() {
+        let latest = unit_with_lod(CURRENT_STREAM_FORMAT_VERSION, &[9; 16], 0xa0);
+        let latest = LatestUnitParts::parse(&latest).expect("latest parts");
+        let mut old = old_unit_with_layout(LEGACY_STREAM_FORMAT_VERSION, &[20]);
+        set_lod_group(&mut old, 0x220, &[1; 8]);
+
+        let outcome = repatch_unit(&mut old, &latest).expect("verified upgrade");
+
+        assert_eq!(
+            outcome,
+            RepatchOutcome::Updated {
+                converted_formats: 1,
+                refreshed_lod_group: false,
+            }
+        );
+        assert_eq!(&old[0x220..0x228], &[1; 8]);
+    }
+
+    #[test]
+    fn later_version_refreshes_lod_group_and_adjusts_offsets() {
+        let latest = unit_with_lod(CURRENT_STREAM_FORMAT_VERSION + 1, &[9; 16], 0xa0);
+        let latest = LatestUnitParts::parse(&latest).expect("latest parts");
+        let mut old = unit_with_lod(CURRENT_STREAM_FORMAT_VERSION, &[1; 8], 0xb0);
+
+        let outcome = repatch_unit(&mut old, &latest).expect("original repatcher update");
+
+        assert_eq!(
+            outcome,
+            RepatchOutcome::Updated {
+                converted_formats: 0,
+                refreshed_lod_group: true,
+            }
+        );
+        assert_eq!(
+            LE::read_u32(&old[VERSION_OFFSET..]),
+            CURRENT_STREAM_FORMAT_VERSION + 1
+        );
+        assert_eq!(LE::read_u32(&old[LOD_GROUP_OFFSET_FIELD + 4..]), 0xb0);
+        assert_eq!(LE::read_u32(&old[LOD_GROUP_OFFSET_FIELD + 8..]), 0xb8);
+        assert_eq!(&old[0xa0..0xb0], &[9; 16]);
+    }
+
+    #[test]
+    fn current_later_version_refreshes_stale_lod_group() {
+        let version = CURRENT_STREAM_FORMAT_VERSION + 1;
+        let latest = LatestUnitParts::parse(&unit_with_lod(version, &[9; 8], 0x90)).unwrap();
+        let mut old = unit_with_lod(version, &[1; 8], 0x90);
+
+        let outcome = repatch_unit(&mut old, &latest).expect("refresh stale LOD");
+
+        assert_eq!(
+            outcome,
+            RepatchOutcome::Updated {
+                converted_formats: 0,
+                refreshed_lod_group: true,
+            }
+        );
+        assert_eq!(&old[0xa0..0xa8], &[9; 8]);
     }
 
     fn old_unit_with_layout(version: u32, formats: &[u32]) -> Vec<u8> {
@@ -317,5 +461,20 @@ mod tests {
         let mut unit = vec![0u8; LAYOUT_LIST_OFFSET_FIELD + 4];
         LE::write_u32(&mut unit[VERSION_OFFSET..], version);
         unit
+    }
+
+    fn unit_with_lod(version: u32, lod: &[u8], following_offset: u32) -> Vec<u8> {
+        let mut unit = vec![0u8; 0x120];
+        LE::write_u32(&mut unit[VERSION_OFFSET..], version);
+        set_lod_group(&mut unit, 0xa0, lod);
+        LE::write_u32(&mut unit[LOD_GROUP_OFFSET_FIELD + 8..], following_offset);
+        unit
+    }
+
+    fn set_lod_group(unit: &mut [u8], start: usize, lod: &[u8]) {
+        let end = start + lod.len();
+        LE::write_u32(&mut unit[LOD_GROUP_OFFSET_FIELD..], start as u32);
+        LE::write_u32(&mut unit[LOD_GROUP_OFFSET_FIELD + 4..], end as u32);
+        unit[start..end].copy_from_slice(lod);
     }
 }
