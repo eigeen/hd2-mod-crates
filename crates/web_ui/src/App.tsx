@@ -66,6 +66,7 @@ import { FrequentlyAskedQuestions } from "./FrequentlyAskedQuestions";
 import { GameDataDirPanel, type GameDirSelection } from "./GameDataDirPanel";
 import { GameDataSource } from "./gameDataSource";
 import { ManualMergePanel } from "./ManualMergePanel";
+import { HeadArmorMergeTool } from "./HeadArmorMergeTool";
 import { useToolModeRoute, type ToolMode } from "./toolModeRoute";
 import {
   builtinEquipmentOptions,
@@ -470,11 +471,12 @@ function App() {
             <Tab label={t("mode.migrate")} value="migrate" />
             <Tab label={t("mode.repatch")} value="repatch" />
             <Tab label={t("mode.merge")} value="merge" />
+            <Tab label={t("mode.headMerge")} value="head-merge" />
           </Tabs>
 
           <ToolIntro mode={toolMode} />
 
-          {toolMode === "merge" ? <ManualMergePanel /> : <>
+          {toolMode === "merge" ? <ManualMergePanel /> : toolMode === "head-merge" ? <HeadArmorMergeTool /> : <>
           {/* Row 1: game data dir + patch */}
           <div className="flex flex-col min-[51.25rem]:flex-row">
             <div className="flex min-w-0 flex-1">

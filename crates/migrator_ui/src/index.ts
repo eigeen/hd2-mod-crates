@@ -13,6 +13,7 @@ export { backgroundUrl, titleUrl } from "./assets";
 export { I18nProvider, useI18n, type LanguageCode, type Translate } from "./i18n";
 export type { TranslationKey } from "./locales/translationKeys";
 export * from "./migrationDownloads";
+export * from "./headArmorMerge";
 export * from "./migrationMappings";
 export * from "./taskError";
 export * from "./unitBehavior";

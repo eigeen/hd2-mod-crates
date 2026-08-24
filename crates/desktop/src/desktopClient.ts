@@ -11,6 +11,8 @@ import type {
   MigrationSummary,
   MigrationMapping,
   RepatchRequest,
+  HeadArmorMergeRequest,
+  HeadArmorMergeSummary,
   UnitRepatchSummary,
 } from "./types";
 
@@ -88,6 +90,13 @@ export function startRepatch(
   onProgress: (event: MigrationProgressEvent) => void,
 ): DesktopTask<UnitRepatchSummary> {
   return startTask("repatch_mod", request, onProgress);
+}
+
+export function startHeadArmorMerge(
+  request: HeadArmorMergeRequest,
+  onProgress: (event: MigrationProgressEvent) => void,
+): DesktopTask<HeadArmorMergeSummary> {
+  return startTask("merge_head_into_armor", request, onProgress);
 }
 
 function startTask<TRequest, TResult>(

@@ -69,6 +69,15 @@ pub struct RepatchRequest {
     options: UnitRepatchOptions,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeadArmorMergeRequest {
+    armor_paths: Vec<PathBuf>,
+    head_paths: Option<Vec<PathBuf>>,
+    output_path: PathBuf,
+    options: web::HeadArmorMergeOptions,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MigrationProgressEvent {
@@ -172,6 +181,26 @@ pub async fn repatch_mod(
 }
 
 #[tauri::command]
+pub async fn merge_head_into_armor(
+    request: HeadArmorMergeRequest,
+    task_id: String,
+    on_progress: Channel<MigrationProgressEvent>,
+    tasks: State<'_, TaskRegistry>,
+) -> Result<web::HeadArmorMergeSummary, CommandError> {
+    let lease = tasks.register(task_id)?;
+    let cancellation = lease.cancellation();
+    let task_cancellation = Arc::clone(&cancellation);
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let _lease = lease;
+        let progress = DesktopProgress::new(on_progress, task_cancellation);
+        merge_head_into_armor_blocking(request, &progress)
+    })
+    .await
+    .map_err(|error| CommandError::from_display("task.joinFailed", error))?;
+    task_result(result, &cancellation, "migration.failed")
+}
+
+#[tauri::command]
 pub fn cancel_task(task_id: String, tasks: State<'_, TaskRegistry>) -> bool {
     tasks.cancel(&task_id)
 }
@@ -249,6 +278,51 @@ async fn repatch_mod_blocking(
     .map_err(display_error)?;
     write_repatched_zip(&request.output_path, &patch, &result, progress)?;
     Ok(result.summary)
+}
+
+fn merge_head_into_armor_blocking(
+    request: HeadArmorMergeRequest,
+    progress: &DesktopProgress,
+) -> Result<web::HeadArmorMergeSummary, String> {
+    progress.ensure_active().map_err(display_error)?;
+    let armor = load_patch(&request.armor_paths)?.into_bytes();
+    let head = request
+        .head_paths
+        .as_deref()
+        .map(load_patch)
+        .transpose()?
+        .map(LoadedPatch::into_bytes);
+    progress.ensure_active().map_err(display_error)?;
+    let result = web::merge_head_into_armor(armor, head, request.options).map_err(display_error)?;
+    progress.ensure_active().map_err(display_error)?;
+    write_head_merge_zip(&request.output_path, &result.patch, progress)?;
+    Ok(result.summary)
+}
+
+fn write_head_merge_zip(
+    output_path: &Path,
+    patch: &web::PatchBytes,
+    progress: &DesktopProgress,
+) -> Result<(), String> {
+    if output_path.as_os_str().is_empty() {
+        return Err("Output path is required".to_owned());
+    }
+    let mut zip = create_zip(output_path)?;
+    let sink = Some(progress as &dyn output::OutputProgress);
+    write_sidecar(&mut zip, &patch.name, &patch.toc, sink)?;
+    write_sidecar(
+        &mut zip,
+        &format!("{}.gpu_resources", patch.name),
+        &patch.gpu,
+        sink,
+    )?;
+    write_sidecar(
+        &mut zip,
+        &format!("{}.stream", patch.name),
+        &patch.stream,
+        sink,
+    )?;
+    finish_zip(zip)
 }
 
 fn write_repatched_zip(

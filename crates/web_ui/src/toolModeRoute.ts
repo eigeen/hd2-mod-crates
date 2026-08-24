@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-const TOOL_MODES = ["migrate", "repatch", "merge"] as const;
+const TOOL_MODES = ["migrate", "repatch", "merge", "head-merge"] as const;
 
 export type ToolMode = (typeof TOOL_MODES)[number];
 

@@ -68,6 +68,25 @@ pub fn merge_patches(inputs: JsValue, output_name: String) -> WasmResult<JsValue
     patch_merge_result(result)
 }
 
+/// Merge helmet geometry into armor while passing a single Patch only once.
+#[wasm_bindgen]
+pub fn merge_head_into_armor(
+    armor_patch: JsValue,
+    head_patch: JsValue,
+    options: JsValue,
+) -> WasmResult<JsValue> {
+    let armor_patch = patch_bytes_from_js(&armor_patch)?;
+    let head_patch = if head_patch.is_null() || head_patch.is_undefined() {
+        None
+    } else {
+        Some(patch_bytes_from_js(&head_patch)?)
+    };
+    let options: web::HeadArmorMergeOptions =
+        serde_wasm_bindgen::from_value(options).map_err(js_error)?;
+    let result = web::merge_head_into_armor(armor_patch, head_patch, options).map_err(js_error)?;
+    patch_and_summary_result(result.patch, &result.summary)
+}
+
 #[wasm_bindgen]
 pub fn detect_source(
     patch_name: String,
@@ -325,16 +344,20 @@ fn summary_result(summary: WebMigrationSummary) -> WasmResult<JsValue> {
 }
 
 fn patch_merge_result(result: web::PatchMergeResult) -> WasmResult<JsValue> {
+    patch_and_summary_result(result.patch, &result.summary)
+}
+
+fn patch_and_summary_result<T: Serialize>(patch: PatchBytes, summary: &T) -> WasmResult<JsValue> {
     let output = Object::new();
     Reflect::set(
         &output,
         &JsValue::from_str("patch"),
-        &patch_bytes_to_js(result.patch)?,
+        &patch_bytes_to_js(patch)?,
     )?;
     Reflect::set(
         &output,
         &JsValue::from_str("summary"),
-        &serde_wasm_bindgen::to_value(&result.summary).map_err(js_error)?,
+        &serde_wasm_bindgen::to_value(summary).map_err(js_error)?,
     )?;
     Ok(output.into())
 }

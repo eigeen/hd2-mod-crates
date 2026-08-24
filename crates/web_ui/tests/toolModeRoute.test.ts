@@ -6,6 +6,7 @@ describe("tool mode hash routing", () => {
     expect(toolModeFromHash("#/migrate")).toBe("migrate");
     expect(toolModeFromHash("#/repatch")).toBe("repatch");
     expect(toolModeFromHash("#/merge")).toBe("merge");
+    expect(toolModeFromHash("#/head-merge")).toBe("head-merge");
   });
 
   test("accepts legacy hashes and trailing slashes", () => {
@@ -22,5 +23,6 @@ describe("tool mode hash routing", () => {
     expect(hashForToolMode("migrate")).toBe("#/migrate");
     expect(hashForToolMode("repatch")).toBe("#/repatch");
     expect(hashForToolMode("merge")).toBe("#/merge");
+    expect(hashForToolMode("head-merge")).toBe("#/head-merge");
   });
 });

@@ -6,6 +6,7 @@ pub mod body_shape;
 pub mod direct_mapping;
 pub mod geometry;
 pub mod helmet_authority;
+pub mod mesh;
 pub mod names;
 pub mod repatch;
 pub mod semantics;

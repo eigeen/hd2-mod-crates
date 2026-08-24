@@ -5,6 +5,7 @@
 
 pub mod equipment;
 pub mod equipment_graph;
+pub mod head_armor_merge;
 pub mod mapping_preview;
 pub mod migration;
 pub mod patch_merge;
@@ -22,6 +23,10 @@ pub use equipment_graph::{
     WebEquipmentPartRelation, WebEquipmentPatchAnalysis, WebGraphComponent, WebGraphComponentKind,
     WebGraphEquipment, analyze_equipment_patch, analyze_equipment_patch_with_source,
     build_equipment_part_graph,
+};
+pub use head_armor_merge::{
+    HeadArmorMergeOptions, HeadArmorMergeResult, HeadArmorMergeSkippedPart, HeadArmorMergeSummary,
+    HeadArmorMergedPart, merge_head_into_armor,
 };
 pub use mapping_preview::{
     MAPPING_PREVIEW_SCHEMA_VERSION, WebEquipmentMappingPreview, WebMappingPreviewSummary,

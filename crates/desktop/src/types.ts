@@ -8,12 +8,15 @@ export type {
   UnmatchedUnitPolicy,
   UnitRepatchSummary,
   UnifiedMigrateOptions,
+  HeadArmorMergeOptions,
+  HeadArmorMergeSummary,
 } from "@hd2-mod-tools/migrator-ui";
 
 import type {
   DetectedSource,
   EquipmentMappingPreview,
   EquipmentPartGraph,
+  HeadArmorMergeOptions,
   UnifiedMigrateOptions,
   UnitRepatchOptions,
 } from "@hd2-mod-tools/migrator-ui";
@@ -50,6 +53,13 @@ export interface RepatchRequest {
   dataDir: string;
   outputPath: string;
   options: UnitRepatchOptions;
+}
+
+export interface HeadArmorMergeRequest {
+  armorPaths: string[];
+  headPaths: string[] | null;
+  outputPath: string;
+  options: HeadArmorMergeOptions;
 }
 
 export interface MigrationProgressEvent {

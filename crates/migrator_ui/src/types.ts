@@ -125,6 +125,42 @@ export interface PatchFiles {
   stream: Uint8Array;
 }
 
+export interface HeadArmorMergeOptions {
+  helmetHash: string;
+  armorHash: string;
+}
+
+export interface HeadArmorMergeSkippedPart {
+  bodyVariant: string;
+  lod: number;
+  reason: string;
+}
+
+export interface HeadArmorMergedPart {
+  bodyVariant: string;
+  lod: number;
+}
+
+export interface HeadArmorMergeSummary {
+  helmetHash: string;
+  helmetName: string;
+  armorHash: string;
+  armorName: string;
+  mergedBodyUnits: number;
+  mergedLods: number;
+  mergedParts: HeadArmorMergedPart[];
+  skippedParts: HeadArmorMergeSkippedPart[];
+  copiedResources: number;
+  remappedConflicts: number;
+  removedHelmetUnits: number;
+  warnings: string[];
+}
+
+export interface HeadArmorMergeResult {
+  patch: PatchFiles;
+  summary: HeadArmorMergeSummary;
+}
+
 // 仅供 UI 展示用的轻量元数据；patch 的字节存在 ref 里，避免 React DevTools 在 state 里枚举上百 MB 数据。
 export interface PatchInfo {
   name: string;

@@ -2,7 +2,7 @@ import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { useI18n } from "./i18n";
 
-type ToolMode = "migrate" | "repatch" | "merge";
+type ToolMode = "migrate" | "repatch" | "merge" | "head-merge";
 
 export function ToolIntro({ mode }: { mode: ToolMode }) {
   const { t } = useI18n();
@@ -34,6 +34,13 @@ export function ToolIntro({ mode }: { mode: ToolMode }) {
 }
 
 function introKeys(mode: ToolMode) {
+  if (mode === "head-merge") {
+    return {
+      title: "intro.headMergeTitle",
+      principle: "intro.headMergePrinciple",
+      warning: "intro.headMergeWarning",
+    } as const;
+  }
   if (mode === "merge") {
     return {
       title: "intro.mergeTitle",

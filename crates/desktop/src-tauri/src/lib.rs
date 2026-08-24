@@ -28,6 +28,7 @@ pub fn run() {
             migration::preview_equipment_mappings,
             migration::migrate_equipment,
             migration::repatch_mod,
+            migration::merge_head_into_armor,
             migration::cancel_task,
             svd::load_svd_package_summary,
             svd::run_svd_export,

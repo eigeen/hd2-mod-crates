@@ -7,6 +7,8 @@ import {
   EquipmentPatchAnalysis,
   EquipmentMappingPreview,
   EquipmentOption,
+  HeadArmorMergeOptions,
+  HeadArmorMergeResult,
   MigrationResult,
   MigrationMapping,
   PatchFiles,
@@ -91,6 +93,17 @@ export async function mergePatches(
   return callWasm("merge_patches", () =>
     wasm.merge_patches(inputs, outputName),
   ) as Promise<{ patch: PatchFiles; summary: PatchMergeSummary }>;
+}
+
+export async function mergeHeadIntoArmor(
+  armorPatch: PatchFiles,
+  headPatch: PatchFiles | null,
+  options: HeadArmorMergeOptions,
+): Promise<HeadArmorMergeResult> {
+  const wasm = await loadWasm();
+  return callWasm("merge_head_into_armor", () =>
+    wasm.merge_head_into_armor(armorPatch, headPatch, options),
+  ) as Promise<HeadArmorMergeResult>;
 }
 
 export async function detectSource(patch: PatchFiles, category = "Armor") {
@@ -258,6 +271,7 @@ function wasmErrorCode(label: string): TaskErrorCode {
   }
   if (label === "repatch_units") return "repatch.failed";
   if (label === "merge_patches") return "patch.inspectFailed";
+  if (label === "merge_head_into_armor") return "migration.failed";
   if (label.includes("migrate")) return "migration.failed";
   return "unknown";
 }

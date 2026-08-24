@@ -41,6 +41,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast, Toaster } from "sonner";
 import { AppUpdateButton, AppUpdateDialog } from "./AppUpdateDialog";
+import { DesktopHeadArmorMergeTool } from "./DesktopHeadArmorMergeTool";
 import { DesktopGameDataPanel, DesktopPatchPanel } from "./DesktopPanels";
 import { dropZoneFromPhysicalPosition, type DropZone } from "./dropTarget";
 import {
@@ -69,7 +70,7 @@ import { useAppUpdate, type AppUpdateController } from "./useAppUpdate";
 
 const PATCH_SUFFIX = "9ba626afa44a3aa3.patch_0";
 const GAME_DATA_STORAGE_KEY = "hd2-migrator-native-game-data";
-type ToolMode = "migrate" | "repatch";
+type ToolMode = "migrate" | "repatch" | "head-merge";
 
 function App() {
   const { t } = useI18n();
@@ -313,8 +314,10 @@ function App() {
             <Tabs centered onChange={(_, value: ToolMode) => setToolMode(value)} value={toolMode}>
               <Tab label={t("mode.migrate")} value="migrate" />
               <Tab label={t("mode.repatch")} value="repatch" />
+              <Tab label={t("mode.headMerge")} value="head-merge" />
             </Tabs>
             <ToolIntro mode={toolMode} />
+            {toolMode === "head-merge" ? <DesktopHeadArmorMergeTool /> : <>
             <div className="flex flex-col min-[51.25rem]:flex-row">
               <div className="flex min-w-0 flex-1">
                 <DesktopGameDataPanel
@@ -386,6 +389,7 @@ function App() {
               toolMode={toolMode}
               unmatchedUnitPolicy={unmatchedUnitPolicy}
             />
+            </>}
           </div>
         </main>
       </div>
