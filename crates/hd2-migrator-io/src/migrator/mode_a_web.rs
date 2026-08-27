@@ -23,7 +23,6 @@ use super::source_selection;
 use crate::archive::{self, StreamToc, TocEntry};
 use crate::constants::UNIT_ID;
 use crate::index::{ArchiveIndex, ArmorEntry};
-use crate::io::archive_async::load_archive;
 use crate::io::{BundleSlicer, DataSource};
 use crate::migrator::report::MigrationReport;
 use crate::padding::{self, EmptyUnitTemplate, PaddingMode};
@@ -83,7 +82,7 @@ impl MigrationArchiveCache {
         if let Some(archive) = self.source_archives.get(hash) {
             return Ok(Arc::clone(archive));
         }
-        let archive = Arc::new(load_archive(source, self.bundle.as_ref(), hash).await?);
+        let archive = Arc::new(load_archive_async(source, self.bundle.as_ref(), hash).await?);
         self.source_archives
             .insert(hash.to_owned(), Arc::clone(&archive));
         Ok(archive)
@@ -94,7 +93,7 @@ impl MigrationArchiveCache {
         source: &S,
         hash: &str,
     ) -> crate::Result<Arc<StreamToc>> {
-        load_archive(source, self.bundle.as_ref(), hash)
+        load_archive_async(source, self.bundle.as_ref(), hash)
             .await
             .map(Arc::new)
     }
@@ -705,6 +704,38 @@ fn compute_armor_target<F: Fn(&str) -> crate::Result<()>>(
         },
     };
     mode_a_common::compute_migrated_target(&common, target, identity.hash, identity.name, on_stage)
+}
+
+/// Load one archive's three files (`<name>`, `.gpu_resources`, `.stream`)
+/// either directly from `source` (legacy install) or via the [`BundleSlicer`]
+/// (Slim install). Falls back to direct file reads when the archive exists on
+/// disk as standalone files even if a BundleSlicer is also present.
+async fn load_archive_async<S: DataSource + ?Sized>(
+    source: &S,
+    bundle: Option<&BundleSlicer>,
+    archive_name: &str,
+) -> crate::Result<StreamToc> {
+    let exists_on_disk = source.exists(archive_name).await?;
+    let (toc, gpu, stream) = if !exists_on_disk
+        && let Some(b) = bundle
+        && b.has_package(archive_name)
+    {
+        b.load_triple(source, archive_name).await?
+    } else {
+        let toc = source.read_full(archive_name).await?;
+        let gpu = read_sidecar(source, &format!("{archive_name}.gpu_resources")).await?;
+        let stream = read_sidecar(source, &format!("{archive_name}.stream")).await?;
+        (toc, gpu, stream)
+    };
+    StreamToc::from_buffers(&toc, &gpu, &stream, archive_name.to_string())
+}
+
+async fn read_sidecar<S: DataSource + ?Sized>(source: &S, path: &str) -> crate::Result<Vec<u8>> {
+    if source.exists(path).await? {
+        source.read_full(path).await
+    } else {
+        Ok(Vec::new())
+    }
 }
 
 fn resolve_source_hash(

@@ -3,9 +3,8 @@
 use hd2_migrator_io::unit::authority::ArmorMappingTable;
 use hd2_migrator_io::web::{
     EquipmentCategory, HeadArmorMergeOptions, PatchBytes, inspect_equipment, merge_head_into_armor,
-    merge_head_into_armor_with_source,
 };
-use hd2_migrator_io::{archive::BundleIndex, archive::StreamToc, io::NativeDataSource};
+use hd2_migrator_io::{archive::BundleIndex, archive::StreamToc};
 use std::path::{Path, PathBuf};
 
 #[test]
@@ -42,7 +41,7 @@ fn real_patch_merge_is_deterministic_when_configured() {
 }
 
 #[test]
-fn missing_body_variant_is_restored_from_configured_game_data() {
+fn single_body_patch_keeps_its_original_replacement_scope() {
     let Some(data_dir) = env_path("HD2_GAME_DATA_DIR") else {
         return;
     };
@@ -59,31 +58,48 @@ fn assert_single_body_merge(data_dir: &Path, bundle: &BundleIndex, retained_body
         helmet_hash: "a856edff49cfdd95".to_owned(),
     };
 
-    let result = pollster::block_on(merge_head_into_armor_with_source(
-        armor,
-        Some(head),
-        options,
-        &NativeDataSource::new(data_dir.to_owned()),
-    ))
+    let result = merge_head_into_armor(armor, Some(head), options).unwrap();
+    let output = StreamToc::from_buffers(
+        &result.patch.toc,
+        &result.patch.gpu,
+        &result.patch.stream,
+        result.patch.name.clone(),
+    )
     .unwrap();
 
-    assert_eq!(result.summary.merged_body_units, 2);
-    assert_eq!(result.summary.restored_body_units, 1);
+    assert_eq!(result.summary.merged_body_units, 1);
+    assert_eq!(present_body_labels(&output), vec![retained_body]);
     assert!(result.summary.skipped_parts.is_empty());
 }
 
 fn single_body_patch(data_dir: &Path, bundle: &BundleIndex, retained_body: &str) -> PatchBytes {
     let mut archive = load_game_archive(data_dir, bundle, "1d6dc4216e7ce52d");
-    let mappings = ArmorMappingTable::bundled().unwrap();
-    let retained_body_id = mappings
-        .armor("A-9 Helljumper")
-        .unwrap()
-        .get(retained_body)
-        .unwrap();
+    let retained_body_id = body_id(retained_body);
     archive.entries.retain(|entry| {
         entry.type_id == hd2_migrator_io::constants::UNIT_ID && entry.file_id == retained_body_id
     });
     archive_to_patch(archive, "single-body.patch_0")
+}
+
+fn present_body_labels(archive: &StreamToc) -> Vec<&'static str> {
+    ["slim body", "stocky body"]
+        .into_iter()
+        .filter(|label| {
+            archive.entries.iter().any(|entry| {
+                entry.type_id == hd2_migrator_io::constants::UNIT_ID
+                    && entry.file_id == body_id(label)
+            })
+        })
+        .collect()
+}
+
+fn body_id(label: &str) -> u64 {
+    ArmorMappingTable::bundled()
+        .unwrap()
+        .armor("A-9 Helljumper")
+        .unwrap()
+        .get(label)
+        .unwrap()
 }
 
 fn game_patch(data_dir: &Path, bundle: &BundleIndex, hash: &str) -> PatchBytes {

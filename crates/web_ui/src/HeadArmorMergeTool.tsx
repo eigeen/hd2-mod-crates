@@ -23,14 +23,13 @@ import {
   type ManualMergeRecord,
 } from "./manualMergeInputs";
 import { inspectEquipmentContents, mergeHeadIntoArmor } from "./wasmClient";
-import type { GameDataSource } from "./gameDataSource";
 
 interface ParsedRecord {
   armors: EquipmentOption[];
   helmets: EquipmentOption[];
 }
 
-export function HeadArmorMergeTool({ dataSource }: { dataSource?: GameDataSource }) {
+export function HeadArmorMergeTool() {
   const { t } = useI18n();
   const [records, setRecords] = useState<ManualMergeRecord[]>([]);
   const [parsed, setParsed] = useState<Record<string, ParsedRecord>>({});
@@ -45,7 +44,7 @@ export function HeadArmorMergeTool({ dataSource }: { dataSource?: GameDataSource
     setParsing((current) => ({ ...current, [record.id]: true }));
     try {
       const patch = await readRecordToc(record);
-      const inspection = await inspectEquipmentContents(patch, dataSource);
+      const inspection = await inspectEquipmentContents(patch);
       setParsed((current) => ({
         ...current,
         [record.id]: {
@@ -59,7 +58,7 @@ export function HeadArmorMergeTool({ dataSource }: { dataSource?: GameDataSource
     } finally {
       setParsing((current) => dropKey(current, record.id));
     }
-  }, [dataSource]);
+  }, []);
 
   const addFiles = useCallback((files: FileList | File[]) => {
     try {
@@ -111,12 +110,7 @@ export function HeadArmorMergeTool({ dataSource }: { dataSource?: GameDataSource
     try {
       const armorPatch = await readRecordPatch(armorRecord);
       const headPatch = helmetRecord.id !== armorRecord.id ? await readRecordPatch(helmetRecord) : null;
-      const result = await mergeHeadIntoArmor(
-        armorPatch,
-        headPatch,
-        { armorHash, helmetHash },
-        dataSource,
-      );
+      const result = await mergeHeadIntoArmor(armorPatch, headPatch, { armorHash, helmetHash });
       downloadRepatchedPatch(result.patch, result.patch.toc, "hd2-head-merged-mod.zip");
       setSummary(result.summary);
       toast.success(t("headMerge.completed", { count: result.summary.mergedLods }));
@@ -125,7 +119,7 @@ export function HeadArmorMergeTool({ dataSource }: { dataSource?: GameDataSource
     } finally {
       setBusy(false);
     }
-  }, [armorHash, dataSource, helmetHash, parsed, records, t]);
+  }, [armorHash, helmetHash, parsed, records, t]);
 
   const anyParsing = records.some((record) => Boolean(parsing[record.id]));
   const blocker = !anyParsing
@@ -294,11 +288,6 @@ function MergeSummary({ summary }: { summary: HeadArmorMergeSummary }) {
       <p className="m-0 text-hd2-text">
         {t("headMerge.summary", { units: summary.mergedBodyUnits, lods: summary.mergedLods })}
       </p>
-      {summary.restoredBodyUnits > 0 && (
-        <p className="mb-0 mt-2">
-          {t("headMerge.restoredBodies", { count: summary.restoredBodyUnits })}
-        </p>
-      )}
       {summary.mergedParts.map((part) => (
         <p className="mb-0 mt-2 text-green-300" key={`${part.bodyVariant}-${part.lod}`}>
           ✓ {headMergeVariantLabel(part.bodyVariant, t)} · {t("headMerge.lodLabel")} {part.lod}

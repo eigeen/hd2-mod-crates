@@ -57,7 +57,6 @@ export interface RepatchRequest {
 
 export interface HeadArmorMergeRequest {
   armorPaths: string[];
-  dataDir: string | null;
   headPaths: string[] | null;
   outputPath: string;
   options: HeadArmorMergeOptions;

@@ -70,11 +70,10 @@ pub fn merge_patches(inputs: JsValue, output_name: String) -> WasmResult<JsValue
 
 /// Merge helmet geometry into armor while passing a single Patch only once.
 #[wasm_bindgen]
-pub async fn merge_head_into_armor(
+pub fn merge_head_into_armor(
     armor_patch: JsValue,
     head_patch: JsValue,
     options: JsValue,
-    data_source: JsValue,
 ) -> WasmResult<JsValue> {
     let armor_patch = patch_bytes_from_js(&armor_patch)?;
     let head_patch = if head_patch.is_null() || head_patch.is_undefined() {
@@ -84,14 +83,7 @@ pub async fn merge_head_into_armor(
     };
     let options: web::HeadArmorMergeOptions =
         serde_wasm_bindgen::from_value(options).map_err(js_error)?;
-    let result = if data_source.is_null() || data_source.is_undefined() {
-        web::merge_head_into_armor(armor_patch, head_patch, options).map_err(js_error)?
-    } else {
-        let source = JsDataSource::from_js(data_source)?;
-        web::merge_head_into_armor_with_source(armor_patch, head_patch, options, &source)
-            .await
-            .map_err(js_error)?
-    };
+    let result = web::merge_head_into_armor(armor_patch, head_patch, options).map_err(js_error)?;
     patch_and_summary_result(result.patch, &result.summary)
 }
 

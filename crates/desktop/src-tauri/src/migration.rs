@@ -73,7 +73,6 @@ pub struct RepatchRequest {
 #[serde(rename_all = "camelCase")]
 pub struct HeadArmorMergeRequest {
     armor_paths: Vec<PathBuf>,
-    data_dir: Option<PathBuf>,
     head_paths: Option<Vec<PathBuf>>,
     output_path: PathBuf,
     options: web::HeadArmorMergeOptions,
@@ -294,28 +293,10 @@ fn merge_head_into_armor_blocking(
         .transpose()?
         .map(LoadedPatch::into_bytes);
     progress.ensure_active().map_err(display_error)?;
-    let result = merge_head_with_optional_source(armor, head, request.options, request.data_dir)?;
+    let result = web::merge_head_into_armor(armor, head, request.options).map_err(display_error)?;
     progress.ensure_active().map_err(display_error)?;
     write_head_merge_zip(&request.output_path, &result.patch, progress)?;
     Ok(result.summary)
-}
-
-fn merge_head_with_optional_source(
-    armor: web::PatchBytes,
-    head: Option<web::PatchBytes>,
-    options: web::HeadArmorMergeOptions,
-    data_dir: Option<PathBuf>,
-) -> Result<web::HeadArmorMergeResult, String> {
-    let Some(data_dir) = data_dir else {
-        return web::merge_head_into_armor(armor, head, options).map_err(display_error);
-    };
-    pollster::block_on(web::merge_head_into_armor_with_source(
-        armor,
-        head,
-        options,
-        &NativeDataSource::new(data_dir),
-    ))
-    .map_err(display_error)
 }
 
 fn write_head_merge_zip(

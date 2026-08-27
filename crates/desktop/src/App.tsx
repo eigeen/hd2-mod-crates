@@ -330,17 +330,7 @@ function App() {
               <ToolModeNavIndicator active={toolMode} navRef={toolModeNavRef} />
             </div>
             <ToolIntro mode={toolMode} />
-            {toolMode === "head-merge" ? <>
-              <div className="flex min-w-0 border-t border-hd2-border">
-                <DesktopGameDataPanel
-                  dataDir={gameDir}
-                  dragging={hoveredDropZone === "gameData"}
-                  onChange={() => void selectGameDir()}
-                  onClear={clearGameDir}
-                />
-              </div>
-              <DesktopHeadArmorMergeTool dataDir={gameDir} />
-            </> : <>
+            {toolMode === "head-merge" ? <DesktopHeadArmorMergeTool /> : <>
             <div className="flex flex-col min-[51.25rem]:flex-row">
               <div className="flex min-w-0 flex-1">
                 <DesktopGameDataPanel

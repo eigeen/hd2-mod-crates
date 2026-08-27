@@ -30,7 +30,7 @@ interface DesktopMergeRecord {
   helmets: EquipmentOption[];
 }
 
-export function DesktopHeadArmorMergeTool({ dataDir }: { dataDir: string | null }) {
+export function DesktopHeadArmorMergeTool() {
   const { t } = useI18n();
   const task = useRef<DesktopTask<HeadArmorMergeSummary> | null>(null);
   const [records, setRecords] = useState<DesktopMergeRecord[]>([]);
@@ -43,7 +43,7 @@ export function DesktopHeadArmorMergeTool({ dataDir }: { dataDir: string | null 
     const paths = await choosePatchPaths();
     if (!paths) return;
     try {
-      const result = await inspectPatch(paths, dataDir);
+      const result = await inspectPatch(paths, null);
       const record: DesktopMergeRecord = {
         id: crypto.randomUUID(),
         name: result.patch.name,
@@ -56,7 +56,7 @@ export function DesktopHeadArmorMergeTool({ dataDir }: { dataDir: string | null 
     } catch (error) {
       showError(error, t);
     }
-  }, [dataDir, t]);
+  }, [t]);
 
   const combined = useMemo(
     () => combineEquipmentChoices(records.map((record) => ({
@@ -89,7 +89,6 @@ export function DesktopHeadArmorMergeTool({ dataDir }: { dataDir: string | null 
     setBusy(true);
     const active = startHeadArmorMerge({
       armorPaths: armorRecord.paths,
-      dataDir,
       headPaths: helmetRecord.id !== armorRecord.id ? helmetRecord.paths : null,
       outputPath,
       options: { armorHash, helmetHash },
@@ -105,7 +104,7 @@ export function DesktopHeadArmorMergeTool({ dataDir }: { dataDir: string | null 
       task.current = null;
       setBusy(false);
     }
-  }, [armorHash, dataDir, helmetHash, records, t]);
+  }, [armorHash, helmetHash, records, t]);
 
   const blocker = records.length === 0
     ? t("headMerge.needMods")
@@ -235,11 +234,6 @@ function MergeSummary({ summary }: { summary: HeadArmorMergeSummary }) {
       <p className="m-0 text-hd2-text">
         {t("headMerge.summary", { units: summary.mergedBodyUnits, lods: summary.mergedLods })}
       </p>
-      {summary.restoredBodyUnits > 0 && (
-        <p className="mb-0 mt-2">
-          {t("headMerge.restoredBodies", { count: summary.restoredBodyUnits })}
-        </p>
-      )}
       {summary.mergedParts.map((part) => (
         <p className="mb-0 mt-2 text-green-300" key={`${part.bodyVariant}-${part.lod}`}>
           ✓ {headMergeVariantLabel(part.bodyVariant, t)} · {t("headMerge.lodLabel")} {part.lod}
