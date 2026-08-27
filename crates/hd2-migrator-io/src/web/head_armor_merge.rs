@@ -56,7 +56,7 @@ pub struct HeadArmorMergeResult {
     pub summary: HeadArmorMergeSummary,
 }
 
-/// Merge one selected helmet into the Slim and Stocky chest Units of an armor Patch.
+/// Merge one selected helmet into the Slim and Stocky body Units of an armor Patch.
 pub fn merge_head_into_armor(
     armor_patch: PatchBytes,
     head_patch: Option<PatchBytes>,
@@ -78,7 +78,13 @@ pub fn merge_head_into_armor(
     let material_map = copy_head_dependencies(dependency_request, &mut armor, &mut summary)?;
     merge_body_variants(&mut armor, &helmet, &selection, &material_map, &mut summary);
     if summary.merged_lods == 0 {
-        eyre::bail!("No armor LOD could be merged; check the skipped-part report");
+        let reasons = summary
+            .skipped_parts
+            .iter()
+            .map(|part| format!("{} LOD {}: {}", part.body_variant, part.lod, part.reason))
+            .collect::<Vec<_>>()
+            .join("; ");
+        eyre::bail!("No armor LOD could be merged: {reasons}");
     }
     summary.removed_helmet_units = remove_selected_helmet(&mut armor, selection.helmet_unit_id);
     let patch = serialize_and_validate(armor, armor_patch.name)?;

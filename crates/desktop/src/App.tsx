@@ -7,6 +7,7 @@ import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
+  AdvancedToolsMenu,
   LanguageMenu,
   MappingPreviewAccordion,
   OptionsPanel,
@@ -14,6 +15,7 @@ import {
   TaskReportHistoryButton,
   TargetPanel,
   ToolIntro,
+  ToolModeNavIndicator,
   UnitUpdaterPanel,
   UpdateInfoButton,
   UpdateInfoDialog,
@@ -75,6 +77,7 @@ type ToolMode = "migrate" | "repatch" | "head-merge";
 function App() {
   const { t } = useI18n();
   const [toolMode, setToolMode] = useState<ToolMode>("migrate");
+  const toolModeNavRef = useRef<HTMLDivElement | null>(null);
   const [equipmentOptions, setEquipmentOptions] = useState<EquipmentOption[]>([]);
   const [patchPaths, setPatchPaths] = useState<string[]>([]);
   const [patch, setPatch] = useState<PatchDescriptor | null>(null);
@@ -311,11 +314,21 @@ function App() {
               reports={reportHistory.history}
               updateInfoAvailable={updateInfo.available}
             />
-            <Tabs centered onChange={(_, value: ToolMode) => setToolMode(value)} value={toolMode}>
-              <Tab label={t("mode.migrate")} value="migrate" />
-              <Tab label={t("mode.repatch")} value="repatch" />
-              <Tab label={t("mode.headMerge")} value="head-merge" />
-            </Tabs>
+            <div className="toolModeNav" ref={toolModeNavRef}>
+              <Tabs
+                value={toolMode === "migrate" || toolMode === "repatch" ? toolMode : false}
+                onChange={(_, value: ToolMode) => setToolMode(value)}
+              >
+                <Tab label={t("mode.migrate")} value="migrate" />
+                <Tab label={t("mode.repatch")} value="repatch" />
+              </Tabs>
+              <AdvancedToolsMenu
+                active={toolMode}
+                items={[{ mode: "head-merge", label: t("mode.headMerge") }]}
+                onSelect={setToolMode}
+              />
+              <ToolModeNavIndicator active={toolMode} navRef={toolModeNavRef} />
+            </div>
             <ToolIntro mode={toolMode} />
             {toolMode === "head-merge" ? <DesktopHeadArmorMergeTool /> : <>
             <div className="flex flex-col min-[51.25rem]:flex-row">

@@ -26,6 +26,10 @@ pub(super) fn uint_values(value: Value) -> [u32; 4] {
     value_as_uints(value)
 }
 
+pub(super) fn float_values(value: Value) -> [f32; 4] {
+    value_as_floats(value)
+}
+
 pub(super) fn component_size(version: u32, format: u32) -> Option<usize> {
     let normalized = normalize_format(version, format)?;
     match normalized {

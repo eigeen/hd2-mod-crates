@@ -7,6 +7,8 @@ export { ResultReportDialog } from "./ResultReportDialog";
 export { TaskReportHistoryButton } from "./TaskReportHistoryButton";
 export { UpdateInfoButton, UpdateInfoDialog } from "./UpdateInfoGuide";
 export { ToolIntro } from "./ToolIntro";
+export { AdvancedToolsMenu, type AdvancedToolsItem } from "./AdvancedToolsMenu";
+export { ToolModeNavIndicator, type ToolModeNavIndicatorProps } from "./ToolModeNavIndicator";
 export { UnitUpdaterPanel } from "./UnitUpdaterPanel";
 export { VectorPolygonIcon } from "./VectorPolygonIcon";
 export { backgroundUrl, titleUrl } from "./assets";

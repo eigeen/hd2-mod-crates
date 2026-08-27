@@ -1,6 +1,6 @@
 use super::vertex::{
     CURRENT_VERSION, Component, LEGACY_VERSION, Semantic, component_size, decode, default_value,
-    encode, relative_transform, transform_direction, transform_position, uint_values,
+    encode, float_values, relative_transform, transform_direction, transform_position, uint_values,
     validate_component,
 };
 use crate::archive::TocEntry;
@@ -146,7 +146,15 @@ pub fn merge_visible_head_into_body(
         }
     }
     if merged_lods.is_empty() {
-        eyre::bail!("no compatible visible LOD was found in the body Unit");
+        let reasons = skipped_lods
+            .iter()
+            .map(|item| format!("LOD {}: {}", item.lod, item.reason))
+            .collect::<Vec<_>>()
+            .join("; ");
+        if reasons.is_empty() {
+            eyre::bail!("body Unit has no visible LOD");
+        }
+        eyre::bail!("no compatible visible LOD was found: {reasons}");
     }
 
     let mut entry = body.clone();
@@ -329,13 +337,20 @@ impl ParsedUnit {
         let source_remap = source_bone.remaps.get(source_group).ok_or_else(|| {
             eyre::eyre!("helmet section references missing bone group {source_group}")
         })?;
-        validate_section_bone_indices(source, source_stream, source_section, source_remap.len())?;
+        let used_slots = section_used_bone_slots(source, source_stream, source_section)?;
+        if used_slots.iter().any(|slot| *slot >= source_remap.len()) {
+            eyre::bail!("helmet vertex references a bone outside section remap");
+        }
         let target_bone = self
             .bones
             .get_mut(target_lod as usize)
             .ok_or_else(|| eyre::eyre!("body LOD {target_lod} has no BoneInfo"))?;
         let mut remap = Vec::with_capacity(source_remap.len());
-        for source_real_slot in source_remap {
+        for (remap_slot, source_real_slot) in source_remap.iter().enumerate() {
+            if !used_slots.contains(&remap_slot) {
+                remap.push(0);
+                continue;
+            }
             let source_transform_index = *source_bone
                 .real_indices
                 .get(*source_real_slot as usize)
@@ -841,37 +856,81 @@ fn transcode_vertices(request: VertexTranscodeRequest<'_>) -> crate::Result<Vec<
     Ok(output)
 }
 
-fn validate_section_bone_indices(
+fn section_used_bone_slots(
     source: &ParsedUnit,
     stream: &StreamRecord,
     section: SourceSection,
-    remap_len: usize,
-) -> crate::Result<()> {
-    let component = stream
+) -> crate::Result<HashSet<usize>> {
+    let indices = stream
         .components
         .iter()
         .find(|item| item.semantic.kind == 6)
         .ok_or_else(|| eyre::eyre!("helmet stream has no bone indices"))?;
+    let weights = stream
+        .components
+        .iter()
+        .find(|item| item.semantic.kind == 7);
     let mesh_section = source.meshes[section.mesh_index].sections[section.section_index];
+    let mut used = HashSet::new();
     for local in 0..mesh_section.vertex_count {
         let vertex = mesh_section.vertex_offset + local;
-        let start = stream.vertex_offset as usize
-            + vertex as usize * stream.vertex_stride as usize
-            + component.offset;
-        let size = component_size(source.version, component.format).unwrap_or(0);
-        let value = decode(
-            source.version,
-            component.format,
-            checked_slice_usize(&source.gpu, start, size, "helmet bone indices")?,
+        let bone_indices = decode_vertex_component(
+            VertexComponentRead {
+                source,
+                stream,
+                component: indices,
+                vertex,
+            },
+            "helmet bone indices",
         )?;
-        if uint_values(value)
-            .into_iter()
-            .any(|index| index as usize >= remap_len)
-        {
-            eyre::bail!("helmet vertex references a bone outside section remap");
-        }
+        let bone_weights = weights
+            .map(|component| {
+                decode_vertex_component(
+                    VertexComponentRead {
+                        source,
+                        stream,
+                        component,
+                        vertex,
+                    },
+                    "helmet bone weights",
+                )
+            })
+            .transpose()?
+            .map(float_values);
+        used.extend(active_bone_indices(uint_values(bone_indices), bone_weights));
     }
-    Ok(())
+    Ok(used)
+}
+
+struct VertexComponentRead<'a> {
+    source: &'a ParsedUnit,
+    stream: &'a StreamRecord,
+    component: &'a Component,
+    vertex: u32,
+}
+
+fn decode_vertex_component(
+    request: VertexComponentRead<'_>,
+    label: &str,
+) -> crate::Result<super::vertex::Value> {
+    let start = request.stream.vertex_offset as usize
+        + request.vertex as usize * request.stream.vertex_stride as usize
+        + request.component.offset;
+    let size = component_size(request.source.version, request.component.format).unwrap_or(0);
+    decode(
+        request.source.version,
+        request.component.format,
+        checked_slice_usize(&request.source.gpu, start, size, label)?,
+    )
+}
+
+fn active_bone_indices(indices: [u32; 4], weights: Option<[f32; 4]>) -> Vec<usize> {
+    indices
+        .into_iter()
+        .enumerate()
+        .filter(|(channel, _)| weights.is_none_or(|values| values[*channel] > 0.000_001))
+        .map(|(_, index)| index as usize)
+        .collect()
 }
 
 fn validate_stream_range(stream: &StreamRecord, gpu: &[u8]) -> crate::Result<()> {

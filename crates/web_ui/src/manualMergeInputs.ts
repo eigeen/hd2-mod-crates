@@ -1,3 +1,5 @@
+import type { Translate } from "@hd2-mod-tools/migrator-ui";
+
 export type MergeFileRole = "toc" | "gpu" | "stream";
 
 export interface ManualMergeRecord {
@@ -18,6 +20,17 @@ export class ManualMergeInputError extends Error {
     super(code);
     this.name = "ManualMergeInputError";
   }
+}
+
+/** Localize a merge input validation error for display. */
+export function mergeInputErrorMessage(error: unknown, t: Translate): string {
+  if (!(error instanceof ManualMergeInputError)) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  if (error.code === "empty") return t("merge.errorEmpty");
+  if (error.code === "unsupported") return t("merge.errorUnsupported", { filename: error.filename });
+  if (error.code === "duplicate") return t("merge.errorDuplicate", { filename: error.filename });
+  return t("merge.errorMissingMain");
 }
 
 interface ClassifiedMergeFile {

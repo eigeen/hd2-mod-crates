@@ -1,84 +1,116 @@
+import DeleteIcon from "@mui/icons-material/Delete";
 import MergeTypeIcon from "@mui/icons-material/MergeType";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
-import { Button, CircularProgress, FormControlLabel, MenuItem, Switch, TextField } from "@mui/material";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { Button, CircularProgress, IconButton, MenuItem, TextField } from "@mui/material";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
-  useI18n,
+  combineEquipmentChoices,
   headMergeCandidates,
+  headMergeVariantLabel,
   uniqueHeadMergeHash,
+  useDropZone,
+  useI18n,
   type EquipmentOption,
+  type HeadArmorMergeSummary,
   type PatchFiles,
   type Translate,
-  type HeadArmorMergeSummary,
 } from "@hd2-mod-tools/migrator-ui";
-import { downloadRepatchedPatch, patchFilesFromList } from "./fileInputs";
-import { inspectEquipmentContents, mergeHeadIntoArmor, patchSidecarRequirements } from "./wasmClient";
+import { downloadRepatchedPatch } from "./fileInputs";
+import {
+  appendManualMergeBatch,
+  mergeInputErrorMessage,
+  type ManualMergeRecord,
+} from "./manualMergeInputs";
+import { inspectEquipmentContents, mergeHeadIntoArmor } from "./wasmClient";
+
+interface ParsedRecord {
+  armors: EquipmentOption[];
+  helmets: EquipmentOption[];
+}
 
 export function HeadArmorMergeTool() {
   const { t } = useI18n();
-  const armorRef = useRef<PatchFiles | null>(null);
-  const headRef = useRef<PatchFiles | null>(null);
-  const [dualPatch, setDualPatch] = useState(false);
-  const [armorName, setArmorName] = useState("");
-  const [headName, setHeadName] = useState("");
-  const [armorCandidates, setArmorCandidates] = useState<EquipmentOption[]>([]);
-  const [helmetCandidates, setHelmetCandidates] = useState<EquipmentOption[]>([]);
-  const [armorHelmets, setArmorHelmets] = useState<EquipmentOption[]>([]);
-  const [headHelmets, setHeadHelmets] = useState<EquipmentOption[]>([]);
+  const [records, setRecords] = useState<ManualMergeRecord[]>([]);
+  const [parsed, setParsed] = useState<Record<string, ParsedRecord>>({});
+  const [parsing, setParsing] = useState<Record<string, boolean>>({});
+  const [failed, setFailed] = useState<Record<string, string>>({});
   const [armorHash, setArmorHash] = useState("");
   const [helmetHash, setHelmetHash] = useState("");
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<HeadArmorMergeSummary | null>(null);
-  const messages = useMemo(() => patchMessages(t), [t]);
 
-  const importArmor = useCallback(async (files: FileList) => {
+  const parseRecord = useCallback(async (record: ManualMergeRecord) => {
+    setParsing((current) => ({ ...current, [record.id]: true }));
     try {
-      const patch = await patchFilesFromList(files, messages, patchSidecarRequirements);
-      armorRef.current = patch;
-      setArmorName(patch.name);
+      const patch = await readRecordToc(record);
       const inspection = await inspectEquipmentContents(patch);
-      const armors = headMergeCandidates(inspection.sources, "Armor");
-      const helmets = headMergeCandidates(inspection.sources, "Helmet");
-      setArmorCandidates(armors);
-      setArmorHelmets(helmets);
-      setArmorHash(uniqueHeadMergeHash(armors));
-      if (!dualPatch) {
-        setHelmetCandidates(helmets);
-        setHelmetHash(uniqueHeadMergeHash(helmets));
-      }
-      setSummary(null);
+      setParsed((current) => ({
+        ...current,
+        [record.id]: {
+          armors: headMergeCandidates(inspection.sources, "Armor"),
+          helmets: headMergeCandidates(inspection.sources, "Helmet"),
+        },
+      }));
+      setFailed((current) => dropKey(current, record.id));
     } catch (error) {
-      showError(error, t);
+      setFailed((current) => ({ ...current, [record.id]: errorMessage(error) }));
+    } finally {
+      setParsing((current) => dropKey(current, record.id));
     }
-  }, [dualPatch, messages, t]);
+  }, []);
 
-  const importHead = useCallback(async (files: FileList) => {
+  const addFiles = useCallback((files: FileList | File[]) => {
     try {
-      const patch = await patchFilesFromList(files, messages, patchSidecarRequirements);
-      headRef.current = patch;
-      setHeadName(patch.name);
-      const inspection = await inspectEquipmentContents(patch);
-      const helmets = headMergeCandidates(inspection.sources, "Helmet");
-      setHeadHelmets(helmets);
-      setHelmetCandidates(helmets);
-      setHelmetHash(uniqueHeadMergeHash(helmets));
+      const next = appendManualMergeBatch(records, files);
+      const added = next.filter((record) => !records.some((old) => old.id === record.id));
+      setRecords(next);
       setSummary(null);
+      for (const record of added) void parseRecord(record);
     } catch (error) {
-      showError(error, t);
+      toast.error(mergeInputErrorMessage(error, t));
     }
-  }, [messages, t]);
+  }, [parseRecord, records, t]);
+
+  const receiveDrop = useCallback((transfer: DataTransfer) => addFiles(transfer.files), [addFiles]);
+  const dropZone = useDropZone(receiveDrop);
+
+  const combined = useMemo(
+    () => combineEquipmentChoices(records.map((record) => {
+      const info = parsed[record.id];
+      return {
+        sourceName: record.name,
+        armors: info?.armors ?? [],
+        helmets: info?.helmets ?? [],
+      };
+    })),
+    [parsed, records],
+  );
+
+  // Auto-select when only one option exists; drop selections that are no longer available.
+  useEffect(() => {
+    setArmorHash((current) => keepOrAuto(current, combined.armors));
+    setHelmetHash((current) => keepOrAuto(current, combined.helmets));
+  }, [combined.armors, combined.helmets]);
+
+  const removeRecord = useCallback((id: string) => {
+    setRecords((current) => current.filter((record) => record.id !== id));
+    setParsed((current) => dropKey(current, id));
+    setFailed((current) => dropKey(current, id));
+    setSummary(null);
+  }, []);
 
   const run = useCallback(async () => {
-    const armor = armorRef.current;
-    if (!armor) return;
+    const armorRecord = records.find((record) =>
+      parsed[record.id]?.armors.some((option) => option.hash === armorHash));
+    const helmetRecord = records.find((record) =>
+      parsed[record.id]?.helmets.some((option) => option.hash === helmetHash));
+    if (!armorRecord || !helmetRecord) return;
     setBusy(true);
     try {
-      const result = await mergeHeadIntoArmor(
-        armor,
-        dualPatch ? headRef.current : null,
-        { armorHash, helmetHash },
-      );
+      const armorPatch = await readRecordPatch(armorRecord);
+      const headPatch = helmetRecord.id !== armorRecord.id ? await readRecordPatch(helmetRecord) : null;
+      const result = await mergeHeadIntoArmor(armorPatch, headPatch, { armorHash, helmetHash });
       downloadRepatchedPatch(result.patch, result.patch.toc, "hd2-head-merged-mod.zip");
       setSummary(result.summary);
       toast.success(t("headMerge.completed", { count: result.summary.mergedLods }));
@@ -87,75 +119,230 @@ export function HeadArmorMergeTool() {
     } finally {
       setBusy(false);
     }
-  }, [armorHash, dualPatch, helmetHash, t]);
+  }, [armorHash, helmetHash, parsed, records, t]);
 
-  const canRun = Boolean(armorName && armorHash && helmetHash && (!dualPatch || headName));
+  const anyParsing = records.some((record) => Boolean(parsing[record.id]));
+  const blocker = !anyParsing
+    ? records.length === 0
+      ? t("headMerge.needMods")
+      : combined.armors.length === 0
+        ? t("headMerge.noArmor")
+        : combined.helmets.length === 0
+          ? t("headMerge.noHelmet")
+          : !armorHash || !helmetHash
+            ? t("headMerge.needSelection")
+            : null
+    : null;
+  const canRun = !busy && !anyParsing && blocker === null;
+
   return (
     <section className="border-t border-hd2-border bg-black/20 p-5 min-[51.25rem]:p-6">
-      <FormControlLabel
-        control={<Switch checked={dualPatch} onChange={(_, checked) => {
-          setDualPatch(checked);
-          setSummary(null);
-          const helmets = checked ? headHelmets : armorHelmets;
-          setHelmetCandidates(helmets);
-          setHelmetHash(uniqueHeadMergeHash(helmets));
-        }} />}
-        label={t("headMerge.dualPatch")}
-      />
-      <div className="mt-3 grid gap-4 min-[51.25rem]:grid-cols-2">
-        <PatchPicker label={t("headMerge.armorMod")} name={armorName} onFiles={importArmor} />
-        {dualPatch && <PatchPicker label={t("headMerge.headMod")} name={headName} onFiles={importHead} />}
+      <div
+        className={`border border-dashed px-4 py-4 ${dropZone.dragging ? "border-hd2-yellow bg-hd2-yellow-bg" : "border-hd2-line"}`}
+        {...dropZone.handlers}
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          <Button component="label" startIcon={<UploadFileIcon />} variant="contained">
+            {t("headMerge.pick")}
+            <input
+              hidden
+              multiple
+              type="file"
+              onChange={(event) => {
+                if (event.target.files) addFiles(event.target.files);
+                event.target.value = "";
+              }}
+            />
+          </Button>
+          <span className="text-xs text-hd2-muted">
+            {dropZone.dragging ? t("headMerge.dropActive") : t("headMerge.dropHint")}
+          </span>
+        </div>
       </div>
-      <div className="mt-4 grid gap-4 min-[51.25rem]:grid-cols-2">
-        <CandidateSelect label={t("headMerge.armorChoice")} options={armorCandidates} value={armorHash} onChange={setArmorHash} />
-        <CandidateSelect label={t("headMerge.helmetChoice")} options={helmetCandidates} value={helmetHash} onChange={setHelmetHash} />
+
+      <div className="mt-4 space-y-2">
+        {records.length === 0 && (
+          <p className="m-0 border border-hd2-line px-4 py-6 text-center text-sm text-hd2-muted">
+            {t("headMerge.empty")}
+          </p>
+        )}
+        {records.map((record, index) => (
+          <HeadMergeRecordRow
+            key={record.id}
+            index={index}
+            record={record}
+            info={parsed[record.id]}
+            parsing={Boolean(parsing[record.id])}
+            failed={failed[record.id]}
+            onRemove={() => removeRecord(record.id)}
+          />
+        ))}
       </div>
-      <Button className="!mt-5" disabled={!canRun || busy} onClick={() => void run()} startIcon={busy ? <CircularProgress size={16} /> : <MergeTypeIcon />} variant="contained">
-        {busy ? t("headMerge.running") : t("headMerge.run")}
-      </Button>
+
+      <div className="mt-5 grid gap-4 min-[51.25rem]:grid-cols-2">
+        <TextField
+          disabled={busy}
+          fullWidth
+          label={t("headMerge.armorChoice")}
+          onChange={(event) => setArmorHash(event.target.value)}
+          select
+          value={armorHash}
+        >
+          {combined.armors.map((option) => (
+            <MenuItem key={option.hash} value={option.hash}>
+              {option.name}{records.length > 1 && ` · ${t("headMerge.fromMod", { name: option.sourceName })}`}
+            </MenuItem>
+          ))}
+        </TextField>
+        <TextField
+          disabled={busy}
+          fullWidth
+          label={t("headMerge.helmetChoice")}
+          onChange={(event) => setHelmetHash(event.target.value)}
+          select
+          value={helmetHash}
+        >
+          {combined.helmets.map((option) => (
+            <MenuItem key={option.hash} value={option.hash}>
+              {option.name}{records.length > 1 && ` · ${t("headMerge.fromMod", { name: option.sourceName })}`}
+            </MenuItem>
+          ))}
+        </TextField>
+      </div>
+
+      <div className="mt-5 flex flex-col items-start gap-3">
+        <Button
+          disabled={!canRun}
+          onClick={() => void run()}
+          startIcon={busy ? <CircularProgress size="1rem" /> : <MergeTypeIcon />}
+          variant="contained"
+        >
+          {busy ? t("headMerge.running") : t("headMerge.run")}
+        </Button>
+        {blocker && <p className="mb-0 text-xs text-hd2-muted">{blocker}</p>}
+      </div>
       {summary && <MergeSummary summary={summary} />}
     </section>
   );
 }
 
-function PatchPicker(props: { label: string; name: string; onFiles: (files: FileList) => void }) {
-  return <div className="border border-dashed border-hd2-line p-4">
-    <Button component="label" startIcon={<UploadFileIcon />} variant="outlined">
-      {props.label}<input hidden multiple type="file" onChange={(event) => {
-        if (event.target.files) props.onFiles(event.target.files);
-        event.target.value = "";
-      }} />
-    </Button>
-    <p className="mb-0 mt-2 truncate text-xs text-hd2-muted">{props.name || "—"}</p>
-  </div>;
+interface HeadMergeRecordRowProps {
+  index: number;
+  record: ManualMergeRecord;
+  info?: ParsedRecord;
+  parsing: boolean;
+  failed?: string;
+  onRemove: () => void;
 }
 
-function CandidateSelect(props: { label: string; options: EquipmentOption[]; value: string; onChange: (value: string) => void }) {
-  return <TextField fullWidth label={props.label} select value={props.value} onChange={(event) => props.onChange(event.target.value)}>
-    {props.options.map((option) => <MenuItem key={option.hash} value={option.hash}>{option.name}</MenuItem>)}
-  </TextField>;
+function HeadMergeRecordRow(props: HeadMergeRecordRowProps) {
+  const { t } = useI18n();
+  const { index, record, info, parsing, failed, onRemove } = props;
+  return (
+    <div className="flex items-center gap-2 border border-hd2-line bg-hd2-surface/90 px-2 py-2">
+      <span className="w-6 shrink-0 text-center font-mono text-xs text-hd2-faint">{index + 1}</span>
+      <div className="min-w-0 flex-1">
+        <p className="m-0 truncate font-mono text-xs text-hd2-text" title={record.name}>
+          {record.name}
+        </p>
+        <p className="m-0 mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[0.6875rem] text-hd2-muted">
+          <FileState label="TOC" present={Boolean(record.toc)} />
+          <FileState label="GPU" present={Boolean(record.gpu)} />
+          <FileState label="Stream" present={Boolean(record.stream)} />
+          {parsing && (
+            <span className="inline-flex items-center gap-1 text-hd2-yellow">
+              <CircularProgress size="0.625rem" />
+              {t("headMerge.parsing")}
+            </span>
+          )}
+          {!parsing && failed && <span className="text-red-300">{failed}</span>}
+          {!parsing && !failed && info && (
+            info.armors.length + info.helmets.length > 0
+              ? t("headMerge.recordDetected", { armors: info.armors.length, helmets: info.helmets.length })
+              : t("headMerge.recordNone")
+          )}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center">
+        <IconButton aria-label={t("merge.remove")} onClick={onRemove} size="small">
+          <DeleteIcon fontSize="small" />
+        </IconButton>
+      </div>
+    </div>
+  );
+}
+
+function FileState({ label, present }: { label: string; present: boolean }) {
+  const { t } = useI18n();
+  return (
+    <span className={present ? "text-green-300" : "text-hd2-faint"}>
+      {label}: {t(present ? "merge.fileSet" : "merge.fileUnset")}
+    </span>
+  );
 }
 
 function MergeSummary({ summary }: { summary: HeadArmorMergeSummary }) {
   const { t } = useI18n();
-  return <div className="mt-5 border border-hd2-line p-4 text-sm text-hd2-muted">
-    <p className="m-0 text-hd2-text">{t("headMerge.summary", { units: summary.mergedBodyUnits, lods: summary.mergedLods })}</p>
-    {summary.mergedParts.map((part) => <p className="mb-0 mt-2 text-green-300" key={`${part.bodyVariant}-${part.lod}`}>✓ {part.bodyVariant} · LOD {part.lod}</p>)}
-    {summary.skippedParts.map((part, index) => <p className="mb-0 mt-2" key={`${part.bodyVariant}-${part.lod}-${index}`}>{part.bodyVariant} · LOD {part.lod}: {part.reason}</p>)}
-    {summary.warnings.map((warning, index) => <p className="mb-0 mt-2" key={index}>{warning}</p>)}
-    <p className="mb-0 mt-3 text-hd2-yellow">{t("headMerge.removeHelmetHint")}</p>
-  </div>;
+  return (
+    <div className="mt-5 border border-hd2-line p-4 text-sm text-hd2-muted">
+      <p className="m-0 text-hd2-text">
+        {t("headMerge.summary", { units: summary.mergedBodyUnits, lods: summary.mergedLods })}
+      </p>
+      {summary.mergedParts.map((part) => (
+        <p className="mb-0 mt-2 text-green-300" key={`${part.bodyVariant}-${part.lod}`}>
+          ✓ {headMergeVariantLabel(part.bodyVariant, t)} · {t("headMerge.lodLabel")} {part.lod}
+        </p>
+      ))}
+      {summary.skippedParts.map((part, index) => (
+        <p className="mb-0 mt-2" key={`${part.bodyVariant}-${part.lod}-${index}`}>
+          {headMergeVariantLabel(part.bodyVariant, t)} · {t("headMerge.lodLabel")} {part.lod}: {part.reason}
+        </p>
+      ))}
+      {summary.warnings.map((warning, index) => (
+        <p className="mb-0 mt-2" key={index}>{warning}</p>
+      ))}
+    </div>
+  );
+}
+
+function keepOrAuto(current: string, options: EquipmentOption[]): string {
+  if (current && options.some((option) => option.hash === current)) return current;
+  return uniqueHeadMergeHash(options);
+}
+
+function dropKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  const next = { ...record };
+  delete next[key];
+  return next;
 }
 
 function showError(error: unknown, t: Translate) {
   toast.error(t("headMerge.failed"), { description: error instanceof Error ? error.message : String(error) });
 }
 
-function patchMessages(t: Translate) {
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function readRecordToc(record: ManualMergeRecord): Promise<PatchFiles> {
+  const toc = record.toc;
+  if (!toc) throw new Error(`Missing patch main file: ${record.name}`);
+  // 识别装备只需要 TOC；gpu/stream 可能有数百 MB，留到合并时再读。
   return {
-    noToc: t("patch.noToc"), multipleToc: t("patch.multipleToc"), missingIntro: t("patch.missingIntro"),
-    missingAction: (toc: string, gpu: string, stream: string) => t("patch.missingAction", { toc, gpu, stream }),
-    missingSidecar: (filename: string, expected: string) => t("patch.missingSidecar", { filename, expected }),
-    shortSidecar: (filename: string, expected: string, actual: number) => t("patch.shortSidecar", { filename, expected, actual }),
+    name: record.name,
+    toc: new Uint8Array(await toc.arrayBuffer()),
+    gpu: new Uint8Array(),
+    stream: new Uint8Array(),
+  };
+}
+
+async function readRecordPatch(record: ManualMergeRecord): Promise<PatchFiles> {
+  const toc = record.toc;
+  if (!toc) throw new Error(`Missing patch main file: ${record.name}`);
+  return {
+    name: record.name,
+    toc: new Uint8Array(await toc.arrayBuffer()),
+    gpu: record.gpu ? new Uint8Array(await record.gpu.arrayBuffer()) : new Uint8Array(),
+    stream: record.stream ? new Uint8Array(await record.stream.arrayBuffer()) : new Uint8Array(),
   };
 }

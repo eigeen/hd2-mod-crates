@@ -17,6 +17,12 @@ fn index_encoding_promotes_without_changing_values() {
 }
 
 #[test]
+fn zero_weight_bone_channels_are_not_required() {
+    let active = active_bone_indices([1, 8, 9, 10], Some([1.0, 0.0, 0.0, 0.0]));
+    assert_eq!(active, vec![1]);
+}
+
+#[test]
 fn static_head_section_is_appended_and_transformed() {
     let body = fixture_unit(7, 77, 0.0);
     let helmet = fixture_unit(8, 88, 2.0);

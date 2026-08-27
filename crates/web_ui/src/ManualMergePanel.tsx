@@ -27,7 +27,7 @@ import { useDropZone, useI18n, type PatchFiles, type Translate } from "@hd2-mod-
 import { downloadRepatchedPatch } from "./fileInputs";
 import {
   appendManualMergeBatch,
-  ManualMergeInputError,
+  mergeInputErrorMessage,
   moveManualMergeRecord,
   type ManualMergeRecord,
 } from "./manualMergeInputs";
@@ -266,12 +266,4 @@ async function fileBytes(file: File) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function mergeInputErrorMessage(error: unknown, t: Translate) {
-  if (!(error instanceof ManualMergeInputError)) return errorMessage(error);
-  if (error.code === "empty") return t("merge.errorEmpty");
-  if (error.code === "unsupported") return t("merge.errorUnsupported", { filename: error.filename });
-  if (error.code === "duplicate") return t("merge.errorDuplicate", { filename: error.filename });
-  return t("merge.errorMissingMain");
 }

@@ -21,10 +21,12 @@ export function ToolIntro({ mode }: { mode: ToolMode }) {
               {t(intro.principle)}
             </p>
           )}
-          <p className="mb-0 mt-2 flex items-start gap-1.5 text-xs leading-5 text-hd2-yellow/90">
-            <WarningAmberIcon className="mt-0.5 shrink-0" sx={{ fontSize: "0.875rem" }} />
-            <span>{t(intro.warning)}</span>
-          </p>
+          {intro.warning && (
+            <p className="mb-0 mt-2 flex items-start gap-1.5 text-xs leading-5 text-hd2-yellow/90">
+              <WarningAmberIcon className="mt-0.5 shrink-0" sx={{ fontSize: "0.875rem" }} />
+              <span>{t(intro.warning)}</span>
+            </p>
+          )}
           {mode === "repatch" && <RepatchCredit />}
           {mode === "migrate" && <MigrationCredit />}
         </div>
@@ -45,7 +47,7 @@ function introKeys(mode: ToolMode) {
     return {
       title: "intro.mergeTitle",
       principle: null,
-      warning: "intro.mergeWarning",
+      warning: null,
     } as const;
   }
   if (mode === "repatch") {

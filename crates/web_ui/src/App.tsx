@@ -6,6 +6,7 @@ import { Button, CircularProgress, IconButton, Tab, Tabs, Tooltip } from "@mui/m
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast, Toaster } from "sonner";
 import {
+  AdvancedToolsMenu,
   LanguageMenu,
   MappingPreviewAccordion,
   MAX_WEB_SINGLE_PATCH_MAPPINGS,
@@ -15,6 +16,7 @@ import {
   TaskReportHistoryButton,
   TargetPanel,
   ToolIntro,
+  ToolModeNavIndicator,
   UnitUpdaterPanel,
   UpdateInfoButton,
   UpdateInfoDialog,
@@ -84,6 +86,7 @@ const PATCH_SUFFIX = "9ba626afa44a3aa3.patch_0";
 function App() {
   const { t } = useI18n();
   const [toolMode, navigateToToolMode] = useToolModeRoute();
+  const toolModeNavRef = useRef<HTMLDivElement | null>(null);
   const [equipmentOptions, setEquipmentOptions] = useState<EquipmentOption[]>([]);
   // patch 的 Uint8Array 可能上百 MB，放在 React state 里会被 React DevTools 扩展枚举/序列化导致 CPU 拉满 + 堆 OOM。
   // 因此把字节存到 ref，state 只留小元数据用于驱动 UI。
@@ -463,16 +466,24 @@ function App() {
 
           <DesktopDownloadEntry />
 
-          <Tabs
-            centered
-            onChange={(_, value: ToolMode) => navigateToToolMode(value)}
-            value={toolMode}
-          >
-            <Tab label={t("mode.migrate")} value="migrate" />
-            <Tab label={t("mode.repatch")} value="repatch" />
-            <Tab label={t("mode.merge")} value="merge" />
-            <Tab label={t("mode.headMerge")} value="head-merge" />
-          </Tabs>
+          <div className="toolModeNav" ref={toolModeNavRef}>
+            <Tabs
+              value={toolMode === "migrate" || toolMode === "repatch" ? toolMode : false}
+              onChange={(_, value: ToolMode) => navigateToToolMode(value)}
+            >
+              <Tab label={t("mode.migrate")} value="migrate" />
+              <Tab label={t("mode.repatch")} value="repatch" />
+            </Tabs>
+            <AdvancedToolsMenu
+              active={toolMode}
+              items={[
+                { mode: "merge", label: t("mode.merge") },
+                { mode: "head-merge", label: t("mode.headMerge") },
+              ]}
+              onSelect={navigateToToolMode}
+            />
+            <ToolModeNavIndicator active={toolMode} navRef={toolModeNavRef} />
+          </div>
 
           <ToolIntro mode={toolMode} />
 
