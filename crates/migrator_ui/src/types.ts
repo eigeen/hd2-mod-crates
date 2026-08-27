@@ -147,6 +147,7 @@ export interface HeadArmorMergeSummary {
   armorHash: string;
   armorName: string;
   mergedBodyUnits: number;
+  restoredBodyUnits: number;
   mergedLods: number;
   mergedParts: HeadArmorMergedPart[];
   skippedParts: HeadArmorMergeSkippedPart[];

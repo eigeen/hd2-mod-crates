@@ -63,6 +63,7 @@ export const translationKeys = [
   "headMerge.failed",
   "headMerge.completed",
   "headMerge.summary",
+  "headMerge.restoredBodies",
   "headMerge.lodLabel",
   "graph.role.slimWaist",
   "graph.role.stockyRightArm",

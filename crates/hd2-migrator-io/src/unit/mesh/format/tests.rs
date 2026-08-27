@@ -40,7 +40,62 @@ fn static_head_section_is_appended_and_transformed() {
     assert_eq!(x, 2.0);
 }
 
+#[test]
+fn nearest_head_lod_is_used_when_body_lod_number_differs() {
+    let body = fixture_unit_at_lod(7, 77, 0.0, 1);
+    let helmet = fixture_unit_at_lod(8, 88, 2.0, 0);
+
+    let output = merge_visible_head_into_body(&body, &helmet, &HashMap::new())
+        .expect("merge nearest helmet LOD");
+
+    assert_eq!(output.merged_lods, vec![1]);
+    assert!(output.skipped_lods.is_empty());
+}
+
+#[test]
+fn optional_head_semantics_may_be_dropped_by_body_layout() {
+    let target = layout(&[(0, 0)]);
+    let source = layout(&[(0, 0), (5, 0)]);
+
+    validate_layout_compatibility(&target, &source, CURRENT_VERSION, CURRENT_VERSION).unwrap();
+}
+
+#[test]
+fn required_head_bone_semantics_must_exist_in_body_layout() {
+    let target = layout(&[(0, 0)]);
+    let source = layout(&[(0, 0), (6, 0)]);
+
+    let error = validate_layout_compatibility(&target, &source, CURRENT_VERSION, CURRENT_VERSION)
+        .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("required helmet vertex semantic 6/0")
+    );
+}
+
+fn layout(semantics: &[(u32, u32)]) -> StreamRecord {
+    let mut record = StreamRecord::parse(stream_record(), CURRENT_VERSION).unwrap();
+    record.components = semantics
+        .iter()
+        .map(|(kind, index)| Component {
+            semantic: Semantic {
+                kind: *kind,
+                index: *index,
+            },
+            format: 2,
+            offset: 0,
+        })
+        .collect();
+    record
+}
+
 fn fixture_unit(slot: u32, material: u64, translation_x: f32) -> TocEntry {
+    fixture_unit_at_lod(slot, material, translation_x, 0)
+}
+
+fn fixture_unit_at_lod(slot: u32, material: u64, translation_x: f32, lod: i32) -> TocEntry {
     let transform_offset = 0x80;
     let transforms = transform_table(translation_x);
     let bone_offset = transform_offset + transforms.len();
@@ -48,7 +103,7 @@ fn fixture_unit(slot: u32, material: u64, translation_x: f32) -> TocEntry {
     let stream_offset = bone_offset + bones.len();
     let streams = build_record_table(&[stream_record()], Some(0), stream_offset).unwrap();
     let mesh_offset = stream_offset + streams.len();
-    let meshes = build_record_table(&[mesh_record(slot)], None, mesh_offset).unwrap();
+    let meshes = build_record_table(&[mesh_record(slot, lod)], None, mesh_offset).unwrap();
     let material_offset = mesh_offset + meshes.len();
     let materials = build_material_table(&[(slot, material)]).unwrap();
     let ending_offset = material_offset + materials.len();
@@ -105,7 +160,7 @@ fn stream_record() -> RawRecord {
     RawRecord { marker: 0, bytes }
 }
 
-fn mesh_record(slot: u32) -> RawRecord {
+fn mesh_record(slot: u32, lod: i32) -> RawRecord {
     let mut mesh = MeshRecord {
         raw: RawRecord {
             marker: 0,
@@ -113,7 +168,7 @@ fn mesh_record(slot: u32) -> RawRecord {
         },
         dirty: true,
         transform_index: 0,
-        lod: 0,
+        lod,
         stream_index: 0,
         material_slots: vec![slot],
         sections: vec![MeshSection {
@@ -125,7 +180,7 @@ fn mesh_record(slot: u32) -> RawRecord {
             group_index: 0,
         }],
     };
-    LE::write_i32(&mut mesh.raw.bytes[56..], 0);
+    LE::write_i32(&mut mesh.raw.bytes[56..], lod);
     mesh.build_raw().unwrap()
 }
 

@@ -110,6 +110,10 @@ function App() {
   const [mappingLimitWarning, setMappingLimitWarning] = useState<{ count: number; max: number } | null>(null);
   const [repatchGuideOpen, setRepatchGuideOpen] = useState(false);
   const [gameDir, setGameDir] = useState<GameDirSelection | null>(null);
+  const headMergeDataSource = useMemo(
+    () => gameDir ? new GameDataSource(gameDir.handle) : undefined,
+    [gameDir],
+  );
   const [missingUnitPolicy, setMissingUnitPolicy] = useState<MissingUnitPolicy>("drop");
   const [faqOpen, setFaqOpen] = useState(false);
   const [faqAttention, setFaqAttention] = useState<TranslationKey | null>(null);
@@ -487,7 +491,21 @@ function App() {
 
           <ToolIntro mode={toolMode} />
 
-          {toolMode === "merge" ? <ManualMergePanel /> : toolMode === "head-merge" ? <HeadArmorMergeTool /> : <>
+          {toolMode === "merge" ? <ManualMergePanel /> : toolMode === "head-merge" ? (
+            <>
+              <div className="flex min-w-0 border-t border-hd2-border">
+                <GameDataDirPanel
+                  onChange={setGameDir}
+                  onDirectoryAccessAborted={() => {
+                    setFaqAttention("faq.workaroundQuestion");
+                    setFaqOpen(true);
+                  }}
+                  selection={gameDir}
+                />
+              </div>
+              <HeadArmorMergeTool dataSource={headMergeDataSource} />
+            </>
+          ) : <>
           {/* Row 1: game data dir + patch */}
           <div className="flex flex-col min-[51.25rem]:flex-row">
             <div className="flex min-w-0 flex-1">

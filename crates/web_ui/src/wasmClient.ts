@@ -99,10 +99,11 @@ export async function mergeHeadIntoArmor(
   armorPatch: PatchFiles,
   headPatch: PatchFiles | null,
   options: HeadArmorMergeOptions,
+  dataSource?: GameDataSource,
 ): Promise<HeadArmorMergeResult> {
   const wasm = await loadWasm();
   return callWasm("merge_head_into_armor", () =>
-    wasm.merge_head_into_armor(armorPatch, headPatch, options),
+    wasm.merge_head_into_armor(armorPatch, headPatch, options, dataSource ?? null),
   ) as Promise<HeadArmorMergeResult>;
 }
 

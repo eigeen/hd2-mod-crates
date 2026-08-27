@@ -9,6 +9,7 @@
 //! (`js_sys::Function` is `!Send`); the native driver does not share these
 //! futures across threads.
 
+pub(crate) mod archive_async;
 pub mod bundle_async;
 pub mod native;
 

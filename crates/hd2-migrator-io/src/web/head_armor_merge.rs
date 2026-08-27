@@ -4,6 +4,8 @@ use super::{EquipmentCategory, PatchBytes, list_equipment_options};
 use crate::archive::{StreamToc, TocEntry};
 use crate::constants::{MATERIAL_ID, TEX_ID, UNIT_ID};
 use crate::hashing::murmur64;
+use crate::io::DataSource;
+use crate::io::archive_async::{load_archive, open_bundle};
 use crate::refs::{list_material_refs, rewrite_material};
 use crate::unit::authority::ArmorMappingTable;
 use crate::unit::helmet_authority::HelmetMappingTable;
@@ -42,6 +44,7 @@ pub struct HeadArmorMergeSummary {
     pub armor_hash: String,
     pub armor_name: String,
     pub merged_body_units: usize,
+    pub restored_body_units: usize,
     pub merged_lods: usize,
     pub merged_parts: Vec<HeadArmorMergedPart>,
     pub skipped_parts: Vec<HeadArmorMergeSkippedPart>,
@@ -63,6 +66,30 @@ pub fn merge_head_into_armor(
     head_patch: Option<PatchBytes>,
     options: HeadArmorMergeOptions,
 ) -> crate::Result<HeadArmorMergeResult> {
+    merge_head_into_armor_with_base(armor_patch, head_patch, options, None)
+}
+
+/// Fill missing body Units from game data before merging the selected helmet.
+pub async fn merge_head_into_armor_with_source<S: DataSource + ?Sized>(
+    armor_patch: PatchBytes,
+    head_patch: Option<PatchBytes>,
+    options: HeadArmorMergeOptions,
+    source: &S,
+) -> crate::Result<HeadArmorMergeResult> {
+    if !needs_base_archive(&armor_patch, &options)? {
+        return merge_head_into_armor(armor_patch, head_patch, options);
+    }
+    let bundle = open_bundle(source).await?;
+    let base = load_archive(source, bundle.as_ref(), &options.armor_hash).await?;
+    merge_head_into_armor_with_base(armor_patch, head_patch, options, Some(base))
+}
+
+fn merge_head_into_armor_with_base(
+    armor_patch: PatchBytes,
+    head_patch: Option<PatchBytes>,
+    options: HeadArmorMergeOptions,
+    base_armor: Option<StreamToc>,
+) -> crate::Result<HeadArmorMergeResult> {
     let selection = Selection::resolve(&options)?;
     let mut armor = parse_patch(&armor_patch)?;
     let head = match &head_patch {
@@ -77,8 +104,14 @@ pub fn merge_head_into_armor(
         separate_patch: head_patch.is_some(),
     };
     let material_map = copy_head_dependencies(dependency_request, &mut armor, &mut summary)?;
-    merge_body_variants(&mut armor, &helmet, &selection, &material_map, &mut summary);
-    ensure_both_body_variants_merged(&summary, selection.body_units.len())?;
+    let sources = BodyMergeSources {
+        patch: &armor,
+        base: base_armor.as_ref(),
+        helmet: &helmet,
+    };
+    let updates = merge_body_variants(sources, &selection, &material_map, &mut summary);
+    ensure_all_body_variants_merged(&summary, selection.body_units.len())?;
+    apply_body_updates(&mut armor, updates, &mut summary);
     summary.removed_helmet_units = remove_selected_helmet(&mut armor, selection.helmet_unit_id);
     let patch = serialize_and_validate(armor, armor_patch.name)?;
     Ok(HeadArmorMergeResult { patch, summary })
@@ -125,6 +158,7 @@ impl Selection {
             armor_hash: options.armor_hash.clone(),
             armor_name: self.armor_name.clone(),
             merged_body_units: 0,
+            restored_body_units: 0,
             merged_lods: 0,
             merged_parts: Vec::new(),
             skipped_parts: Vec::new(),
@@ -158,6 +192,25 @@ fn parse_patch(patch: &PatchBytes) -> crate::Result<StreamToc> {
     StreamToc::from_buffers(&patch.toc, &patch.gpu, &patch.stream, patch.name.clone())
 }
 
+fn needs_base_archive(
+    armor_patch: &PatchBytes,
+    options: &HeadArmorMergeOptions,
+) -> crate::Result<bool> {
+    let selection = Selection::resolve(options)?;
+    let armor = parse_patch(armor_patch)?;
+    Ok(selection
+        .body_units
+        .iter()
+        .any(|(_, unit_id)| !has_unit(&armor, *unit_id)))
+}
+
+fn has_unit(archive: &StreamToc, unit_id: u64) -> bool {
+    archive
+        .entries
+        .iter()
+        .any(|entry| entry.file_id == unit_id && entry.type_id == UNIT_ID)
+}
+
 fn find_entry<'a>(
     archive: &'a StreamToc,
     file_id: u64,
@@ -172,36 +225,30 @@ fn find_entry<'a>(
 }
 
 fn merge_body_variants(
-    armor: &mut StreamToc,
-    helmet: &TocEntry,
+    sources: BodyMergeSources<'_>,
     selection: &Selection,
     materials: &HashMap<u64, u64>,
     summary: &mut HeadArmorMergeSummary,
-) {
-    let requests = prepare_body_merge_requests(armor, helmet, selection, summary);
+) -> Vec<BodyMergeUpdate> {
+    let requests = prepare_body_merge_requests(sources, selection, summary);
     let mut updates = Vec::with_capacity(requests.len());
     for request in requests {
         if let Some(update) = merge_body_variant(&request, materials, summary) {
             updates.push(update);
         }
     }
-    if updates.len() != selection.body_units.len() {
-        return;
-    }
-    for update in updates {
-        armor.entries[update.body_index] = update.entry;
-    }
+    updates
 }
 
 struct BodyMergeRequest {
-    body_index: usize,
+    body_index: Option<usize>,
     body: TocEntry,
     helmet: TocEntry,
     variant: String,
 }
 
 struct BodyMergeUpdate {
-    body_index: usize,
+    body_index: Option<usize>,
     entry: TocEntry,
 }
 
@@ -210,9 +257,15 @@ struct BodyTarget<'a> {
     unit_id: u64,
 }
 
+#[derive(Clone, Copy)]
+struct BodyMergeSources<'a> {
+    patch: &'a StreamToc,
+    base: Option<&'a StreamToc>,
+    helmet: &'a TocEntry,
+}
+
 fn prepare_body_merge_requests(
-    armor: &StreamToc,
-    helmet: &TocEntry,
+    sources: BodyMergeSources<'_>,
     selection: &Selection,
     summary: &mut HeadArmorMergeSummary,
 ) -> Vec<BodyMergeRequest> {
@@ -224,35 +277,53 @@ fn prepare_body_merge_requests(
                 variant,
                 unit_id: *unit_id,
             };
-            prepare_body_merge_request(armor, helmet, target, summary)
+            prepare_body_merge_request(sources, target, summary)
         })
         .collect()
 }
 
 fn prepare_body_merge_request(
-    armor: &StreamToc,
-    helmet: &TocEntry,
+    sources: BodyMergeSources<'_>,
     target: BodyTarget<'_>,
     summary: &mut HeadArmorMergeSummary,
 ) -> Option<BodyMergeRequest> {
-    let body_index = armor
+    let body_index = sources
+        .patch
         .entries
         .iter()
         .position(|entry| entry.file_id == target.unit_id && entry.type_id == UNIT_ID);
-    let Some(body_index) = body_index else {
+    let body = body_index
+        .map(|index| sources.patch.entries[index].clone())
+        .or_else(|| find_base_body(sources.base, target.unit_id));
+    let Some(body) = body else {
         summary.skipped_parts.push(skipped(
             target.variant,
             -1,
-            "Armor Patch does not contain this body variant",
+            missing_body_reason(sources.base.is_some()),
         ));
         return None;
     };
     Some(BodyMergeRequest {
         body_index,
-        body: armor.entries[body_index].clone(),
-        helmet: copy_unit_data(helmet),
+        body,
+        helmet: copy_unit_data(sources.helmet),
         variant: target.variant.to_owned(),
     })
+}
+
+fn find_base_body(base: Option<&StreamToc>, unit_id: u64) -> Option<TocEntry> {
+    base?
+        .entries
+        .iter()
+        .find(|entry| entry.file_id == unit_id && entry.type_id == UNIT_ID)
+        .cloned()
+}
+
+fn missing_body_reason(base_was_loaded: bool) -> &'static str {
+    if base_was_loaded {
+        return "Selected game archive does not contain this body variant";
+    }
+    "Armor Mod does not contain this body variant; select the game data directory to fill it"
 }
 
 fn merge_body_variant(
@@ -269,6 +340,15 @@ fn merge_body_variant(
             return None;
         }
     };
+    if !result.skipped_lods.is_empty() {
+        summary.skipped_parts.extend(
+            result
+                .skipped_lods
+                .into_iter()
+                .map(|item| skipped(&request.variant, item.lod, item.reason)),
+        );
+        return None;
+    }
     let merged_count = result.merged_lods.len();
     if merged_count > 0 {
         summary.merged_body_units += 1;
@@ -283,12 +363,6 @@ fn merge_body_variant(
                 lod,
             }),
     );
-    summary.skipped_parts.extend(
-        result
-            .skipped_lods
-            .into_iter()
-            .map(|item| skipped(&request.variant, item.lod, item.reason)),
-    );
     Some(BodyMergeUpdate {
         body_index: request.body_index,
         entry: result.entry,
@@ -302,11 +376,11 @@ fn copy_unit_data(entry: &TocEntry) -> TocEntry {
     copy
 }
 
-fn ensure_both_body_variants_merged(
+fn ensure_all_body_variants_merged(
     summary: &HeadArmorMergeSummary,
     expected: usize,
 ) -> crate::Result<()> {
-    if summary.merged_body_units == expected {
+    if summary.merged_body_units == expected && summary.skipped_parts.is_empty() {
         return Ok(());
     }
     let reasons = summary
@@ -315,7 +389,23 @@ fn ensure_both_body_variants_merged(
         .map(|part| format!("{} LOD {}: {}", part.body_variant, part.lod, part.reason))
         .collect::<Vec<_>>()
         .join("; ");
-    eyre::bail!("Head was not merged into both body variants: {reasons}")
+    eyre::bail!("Head was not merged into every body variant and visible LOD: {reasons}")
+}
+
+fn apply_body_updates(
+    armor: &mut StreamToc,
+    updates: Vec<BodyMergeUpdate>,
+    summary: &mut HeadArmorMergeSummary,
+) {
+    for update in updates {
+        match update.body_index {
+            Some(index) => armor.entries[index] = update.entry,
+            None => {
+                armor.entries.push(update.entry);
+                summary.restored_body_units += 1;
+            }
+        }
+    }
 }
 
 fn skipped(variant: &str, lod: i32, reason: impl Into<String>) -> HeadArmorMergeSkippedPart {
@@ -530,8 +620,13 @@ mod tests {
         ]);
         let selection = fixture_selection();
         let mut summary = fixture_summary();
+        let sources = BodyMergeSources {
+            patch: &output,
+            base: None,
+            helmet: &helmet,
+        };
 
-        let requests = prepare_body_merge_requests(&output, &helmet, &selection, &mut summary);
+        let requests = prepare_body_merge_requests(sources, &selection, &mut summary);
 
         assert_eq!(requests.len(), 2);
         assert!(!Arc::ptr_eq(&requests[0].helmet.gpu_data, &helmet.gpu_data));
@@ -539,6 +634,28 @@ mod tests {
             &requests[0].helmet.gpu_data,
             &requests[1].helmet.gpu_data,
         ));
+        assert!(summary.skipped_parts.is_empty());
+    }
+
+    #[test]
+    fn missing_patch_body_is_loaded_from_base_archive() {
+        let helmet = fixture_entry(7, UNIT_ID, b"helmet");
+        let output = archive(vec![fixture_entry(8, UNIT_ID, b"slim")]);
+        let base = archive(vec![fixture_entry(9, UNIT_ID, b"stocky base")]);
+        let selection = fixture_selection();
+        let mut summary = fixture_summary();
+        let sources = BodyMergeSources {
+            patch: &output,
+            base: Some(&base),
+            helmet: &helmet,
+        };
+
+        let requests = prepare_body_merge_requests(sources, &selection, &mut summary);
+
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].body_index, Some(0));
+        assert_eq!(requests[1].body_index, None);
+        assert_eq!(requests[1].body.toc_data, b"stocky base");
         assert!(summary.skipped_parts.is_empty());
     }
 
@@ -552,9 +669,39 @@ mod tests {
             "Armor Patch does not contain this body variant",
         ));
 
-        let error = ensure_both_body_variants_merged(&summary, 2).unwrap_err();
+        let error = ensure_all_body_variants_merged(&summary, 2).unwrap_err();
 
         assert!(error.to_string().contains("stocky body"));
+    }
+
+    #[test]
+    fn skipped_visible_lod_is_rejected_after_both_bodies_merge() {
+        let mut summary = fixture_summary();
+        summary.merged_body_units = 2;
+        summary.skipped_parts.push(skipped(
+            "slim body",
+            2,
+            "helmet has no compatible visible mesh",
+        ));
+
+        let error = ensure_all_body_variants_merged(&summary, 2).unwrap_err();
+
+        assert!(error.to_string().contains("slim body LOD 2"));
+    }
+
+    #[test]
+    fn inserted_base_body_is_reported() {
+        let mut output = archive(vec![fixture_entry(8, UNIT_ID, b"slim")]);
+        let mut summary = fixture_summary();
+        let update = BodyMergeUpdate {
+            body_index: None,
+            entry: fixture_entry(9, UNIT_ID, b"stocky"),
+        };
+
+        apply_body_updates(&mut output, vec![update], &mut summary);
+
+        assert_eq!(output.entries.len(), 2);
+        assert_eq!(summary.restored_body_units, 1);
     }
 
     fn copy_conflict(source: &StreamToc, entry: TocEntry) -> u64 {
@@ -586,6 +733,7 @@ mod tests {
             armor_hash: String::new(),
             armor_name: String::new(),
             merged_body_units: 0,
+            restored_body_units: 0,
             merged_lods: 0,
             merged_parts: Vec::new(),
             skipped_parts: Vec::new(),

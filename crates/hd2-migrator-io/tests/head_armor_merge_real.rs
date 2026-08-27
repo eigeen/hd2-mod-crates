@@ -1,8 +1,11 @@
 //! Optional real-Patch regression for deterministic native/WASM-shared output.
 
+use hd2_migrator_io::unit::authority::ArmorMappingTable;
 use hd2_migrator_io::web::{
     EquipmentCategory, HeadArmorMergeOptions, PatchBytes, inspect_equipment, merge_head_into_armor,
+    merge_head_into_armor_with_source,
 };
+use hd2_migrator_io::{archive::BundleIndex, archive::StreamToc, io::NativeDataSource};
 use std::path::{Path, PathBuf};
 
 #[test]
@@ -35,6 +38,69 @@ fn real_patch_merge_is_deterministic_when_configured() {
     assert!(first.summary.merged_lods > 0);
     if let Some(output_dir) = env_path("HD2_HEAD_MERGE_OUTPUT_DIR") {
         write_patch(&output_dir, &first.patch);
+    }
+}
+
+#[test]
+fn missing_body_variant_is_restored_from_configured_game_data() {
+    let Some(data_dir) = env_path("HD2_GAME_DATA_DIR") else {
+        return;
+    };
+    let bundle = BundleIndex::from_data_dir(&data_dir).unwrap();
+    assert_single_body_merge(&data_dir, &bundle, "slim body");
+    assert_single_body_merge(&data_dir, &bundle, "stocky body");
+}
+
+fn assert_single_body_merge(data_dir: &Path, bundle: &BundleIndex, retained_body: &str) {
+    let armor = single_body_patch(data_dir, bundle, retained_body);
+    let head = game_patch(data_dir, bundle, "a856edff49cfdd95");
+    let options = HeadArmorMergeOptions {
+        armor_hash: "1d6dc4216e7ce52d".to_owned(),
+        helmet_hash: "a856edff49cfdd95".to_owned(),
+    };
+
+    let result = pollster::block_on(merge_head_into_armor_with_source(
+        armor,
+        Some(head),
+        options,
+        &NativeDataSource::new(data_dir.to_owned()),
+    ))
+    .unwrap();
+
+    assert_eq!(result.summary.merged_body_units, 2);
+    assert_eq!(result.summary.restored_body_units, 1);
+    assert!(result.summary.skipped_parts.is_empty());
+}
+
+fn single_body_patch(data_dir: &Path, bundle: &BundleIndex, retained_body: &str) -> PatchBytes {
+    let mut archive = load_game_archive(data_dir, bundle, "1d6dc4216e7ce52d");
+    let mappings = ArmorMappingTable::bundled().unwrap();
+    let retained_body_id = mappings
+        .armor("A-9 Helljumper")
+        .unwrap()
+        .get(retained_body)
+        .unwrap();
+    archive.entries.retain(|entry| {
+        entry.type_id == hd2_migrator_io::constants::UNIT_ID && entry.file_id == retained_body_id
+    });
+    archive_to_patch(archive, "single-body.patch_0")
+}
+
+fn game_patch(data_dir: &Path, bundle: &BundleIndex, hash: &str) -> PatchBytes {
+    archive_to_patch(load_game_archive(data_dir, bundle, hash), hash)
+}
+
+fn load_game_archive(data_dir: &Path, bundle: &BundleIndex, hash: &str) -> StreamToc {
+    StreamToc::from_files_with_bundle(&data_dir.join(hash), Some(bundle)).unwrap()
+}
+
+fn archive_to_patch(mut archive: StreamToc, name: &str) -> PatchBytes {
+    let (toc, gpu, stream) = archive.serialize();
+    PatchBytes {
+        name: name.to_owned(),
+        toc,
+        gpu,
+        stream,
     }
 }
 

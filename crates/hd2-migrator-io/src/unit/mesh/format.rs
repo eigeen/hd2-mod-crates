@@ -239,15 +239,42 @@ impl ParsedUnit {
     fn merge_lod(
         &mut self,
         source: &ParsedUnit,
-        lod: i32,
+        target_lod: i32,
+        material_file_ids: &HashMap<u64, u64>,
+    ) -> crate::Result<()> {
+        let mut failures = Vec::new();
+        for source_lod in source_lods_by_distance(source, target_lod) {
+            let mut candidate = self.clone();
+            let lods = LodPair {
+                target: target_lod,
+                source: source_lod,
+            };
+            match candidate.merge_lod_pair(source, lods, material_file_ids) {
+                Ok(()) => {
+                    *self = candidate;
+                    return Ok(());
+                }
+                Err(error) => failures.push(format!("helmet LOD {source_lod}: {error}")),
+            }
+        }
+        if failures.is_empty() {
+            eyre::bail!("helmet has no visible LOD");
+        }
+        eyre::bail!(failures.join("; "))
+    }
+
+    fn merge_lod_pair(
+        &mut self,
+        source: &ParsedUnit,
+        lods: LodPair,
         material_file_ids: &HashMap<u64, u64>,
     ) -> crate::Result<()> {
         let target_slots = self.normal_slots();
         let source_slots = source.normal_slots();
-        let host_index = select_host_mesh(&self.meshes, lod, &target_slots)?;
-        let source_sections = visible_source_sections(source, lod, &source_slots);
+        let host_index = select_host_mesh(&self.meshes, lods.target, &target_slots)?;
+        let source_sections = visible_source_sections(source, lods.source, &source_slots);
         if source_sections.is_empty() {
-            eyre::bail!("helmet has no visible mesh for LOD {lod}");
+            eyre::bail!("helmet has no visible mesh");
         }
         for source_section in source_sections {
             self.append_source_section(source, host_index, source_section, material_file_ids)?;
@@ -476,6 +503,18 @@ impl ParsedUnit {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LodPair {
+    target: i32,
+    source: i32,
+}
+
+fn source_lods_by_distance(source: &ParsedUnit, target_lod: i32) -> Vec<i32> {
+    let mut lods = source.visible_lods();
+    lods.sort_by_key(|source_lod| (source_lod.abs_diff(target_lod), *source_lod));
+    lods
 }
 
 fn rebuild_changed_bones(output: &mut Vec<u8>, bones: &[BoneRecord]) -> crate::Result<()> {
@@ -712,19 +751,24 @@ fn validate_layout_compatibility(
     }
     for component in &source.components {
         validate_component(source_version, *component)?;
-        if !target
-            .components
-            .iter()
-            .any(|target| target.semantic == component.semantic)
+        if semantic_is_required_in_target(component.semantic)
+            && !target
+                .components
+                .iter()
+                .any(|target| target.semantic == component.semantic)
         {
             eyre::bail!(
-                "body stream is missing helmet vertex semantic {}/{}",
+                "body stream is missing required helmet vertex semantic {}/{}",
                 component.semantic.kind,
                 component.semantic.index
             );
         }
     }
     Ok(())
+}
+
+fn semantic_is_required_in_target(semantic: Semantic) -> bool {
+    matches!(semantic.kind, 0 | 6 | 7)
 }
 
 fn append_stream_data(
