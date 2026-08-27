@@ -10,6 +10,7 @@ use crate::unit::helmet_authority::HelmetMappingTable;
 use crate::unit::mesh::{merge_visible_head_into_body, visible_material_file_ids};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -77,15 +78,7 @@ pub fn merge_head_into_armor(
     };
     let material_map = copy_head_dependencies(dependency_request, &mut armor, &mut summary)?;
     merge_body_variants(&mut armor, &helmet, &selection, &material_map, &mut summary);
-    if summary.merged_lods == 0 {
-        let reasons = summary
-            .skipped_parts
-            .iter()
-            .map(|part| format!("{} LOD {}: {}", part.body_variant, part.lod, part.reason))
-            .collect::<Vec<_>>()
-            .join("; ");
-        eyre::bail!("No armor LOD could be merged: {reasons}");
-    }
+    ensure_both_body_variants_merged(&summary, selection.body_units.len())?;
     summary.removed_helmet_units = remove_selected_helmet(&mut armor, selection.helmet_unit_id);
     let patch = serialize_and_validate(armor, armor_patch.name)?;
     Ok(HeadArmorMergeResult { patch, summary })
@@ -185,69 +178,108 @@ fn merge_body_variants(
     materials: &HashMap<u64, u64>,
     summary: &mut HeadArmorMergeSummary,
 ) {
-    for (variant, unit_id) in &selection.body_units {
-        merge_body_variant(
-            armor,
-            BodyMergeRequest {
-                helmet,
-                variant,
-                unit_id: *unit_id,
-                materials,
-            },
-            summary,
-        );
+    let requests = prepare_body_merge_requests(armor, helmet, selection, summary);
+    let mut updates = Vec::with_capacity(requests.len());
+    for request in requests {
+        if let Some(update) = merge_body_variant(&request, materials, summary) {
+            updates.push(update);
+        }
+    }
+    if updates.len() != selection.body_units.len() {
+        return;
+    }
+    for update in updates {
+        armor.entries[update.body_index] = update.entry;
     }
 }
 
-struct BodyMergeRequest<'a> {
-    helmet: &'a TocEntry,
-    variant: &'a str,
-    unit_id: u64,
-    materials: &'a HashMap<u64, u64>,
+struct BodyMergeRequest {
+    body_index: usize,
+    body: TocEntry,
+    helmet: TocEntry,
+    variant: String,
 }
 
-fn merge_body_variant(
-    armor: &mut StreamToc,
-    request: BodyMergeRequest<'_>,
+struct BodyMergeUpdate {
+    body_index: usize,
+    entry: TocEntry,
+}
+
+struct BodyTarget<'a> {
+    variant: &'a str,
+    unit_id: u64,
+}
+
+fn prepare_body_merge_requests(
+    armor: &StreamToc,
+    helmet: &TocEntry,
+    selection: &Selection,
     summary: &mut HeadArmorMergeSummary,
-) {
-    let Some(index) = armor
+) -> Vec<BodyMergeRequest> {
+    selection
+        .body_units
+        .iter()
+        .filter_map(|(variant, unit_id)| {
+            let target = BodyTarget {
+                variant,
+                unit_id: *unit_id,
+            };
+            prepare_body_merge_request(armor, helmet, target, summary)
+        })
+        .collect()
+}
+
+fn prepare_body_merge_request(
+    armor: &StreamToc,
+    helmet: &TocEntry,
+    target: BodyTarget<'_>,
+    summary: &mut HeadArmorMergeSummary,
+) -> Option<BodyMergeRequest> {
+    let body_index = armor
         .entries
         .iter()
-        .position(|entry| entry.file_id == request.unit_id && entry.type_id == UNIT_ID)
-    else {
+        .position(|entry| entry.file_id == target.unit_id && entry.type_id == UNIT_ID);
+    let Some(body_index) = body_index else {
         summary.skipped_parts.push(skipped(
-            request.variant,
+            target.variant,
             -1,
             "Armor Patch does not contain this body variant",
         ));
-        return;
+        return None;
     };
-    let result = match merge_visible_head_into_body(
-        &armor.entries[index],
-        request.helmet,
-        request.materials,
-    ) {
+    Some(BodyMergeRequest {
+        body_index,
+        body: armor.entries[body_index].clone(),
+        helmet: copy_unit_data(helmet),
+        variant: target.variant.to_owned(),
+    })
+}
+
+fn merge_body_variant(
+    request: &BodyMergeRequest,
+    materials: &HashMap<u64, u64>,
+    summary: &mut HeadArmorMergeSummary,
+) -> Option<BodyMergeUpdate> {
+    let result = match merge_visible_head_into_body(&request.body, &request.helmet, materials) {
         Ok(result) => result,
         Err(error) => {
             summary
                 .skipped_parts
-                .push(skipped(request.variant, -1, error.to_string()));
-            return;
+                .push(skipped(&request.variant, -1, error.to_string()));
+            return None;
         }
     };
     let merged_count = result.merged_lods.len();
     if merged_count > 0 {
         summary.merged_body_units += 1;
         summary.merged_lods += merged_count;
-        armor.entries[index] = result.entry;
     }
     summary.merged_parts.extend(
         result
             .merged_lods
             .into_iter()
             .map(|lod| HeadArmorMergedPart {
-                body_variant: request.variant.to_owned(),
+                body_variant: request.variant.clone(),
                 lod,
             }),
     );
@@ -255,8 +287,35 @@ fn merge_body_variant(
         result
             .skipped_lods
             .into_iter()
-            .map(|item| skipped(request.variant, item.lod, item.reason)),
+            .map(|item| skipped(&request.variant, item.lod, item.reason)),
     );
+    Some(BodyMergeUpdate {
+        body_index: request.body_index,
+        entry: result.entry,
+    })
+}
+
+fn copy_unit_data(entry: &TocEntry) -> TocEntry {
+    let mut copy = entry.clone();
+    copy.gpu_data = Arc::from(entry.gpu_data.as_ref());
+    copy.stream_data = Arc::from(entry.stream_data.as_ref());
+    copy
+}
+
+fn ensure_both_body_variants_merged(
+    summary: &HeadArmorMergeSummary,
+    expected: usize,
+) -> crate::Result<()> {
+    if summary.merged_body_units == expected {
+        return Ok(());
+    }
+    let reasons = summary
+        .skipped_parts
+        .iter()
+        .map(|part| format!("{} LOD {}: {}", part.body_variant, part.lod, part.reason))
+        .collect::<Vec<_>>()
+        .join("; ");
+    eyre::bail!("Head was not merged into both body variants: {reasons}")
 }
 
 fn skipped(variant: &str, lod: i32, reason: impl Into<String>) -> HeadArmorMergeSkippedPart {
@@ -461,6 +520,43 @@ mod tests {
         assert_eq!(output.entries.len(), 2);
     }
 
+    #[test]
+    fn body_variants_receive_independent_head_copies() {
+        let mut helmet = fixture_entry(7, UNIT_ID, b"helmet");
+        helmet.gpu_data = Arc::from([1, 2, 3]);
+        let output = archive(vec![
+            fixture_entry(8, UNIT_ID, b"slim"),
+            fixture_entry(9, UNIT_ID, b"stocky"),
+        ]);
+        let selection = fixture_selection();
+        let mut summary = fixture_summary();
+
+        let requests = prepare_body_merge_requests(&output, &helmet, &selection, &mut summary);
+
+        assert_eq!(requests.len(), 2);
+        assert!(!Arc::ptr_eq(&requests[0].helmet.gpu_data, &helmet.gpu_data));
+        assert!(!Arc::ptr_eq(
+            &requests[0].helmet.gpu_data,
+            &requests[1].helmet.gpu_data,
+        ));
+        assert!(summary.skipped_parts.is_empty());
+    }
+
+    #[test]
+    fn partial_body_merge_is_rejected() {
+        let mut summary = fixture_summary();
+        summary.merged_body_units = 1;
+        summary.skipped_parts.push(skipped(
+            "stocky body",
+            -1,
+            "Armor Patch does not contain this body variant",
+        ));
+
+        let error = ensure_both_body_variants_merged(&summary, 2).unwrap_err();
+
+        assert!(error.to_string().contains("stocky body"));
+    }
+
     fn copy_conflict(source: &StreamToc, entry: TocEntry) -> u64 {
         let mut output = archive(vec![fixture_entry(7, TEX_ID, b"armor")]);
         let mut summary = fixture_summary();
@@ -497,6 +593,15 @@ mod tests {
             remapped_conflicts: 0,
             removed_helmet_units: 0,
             warnings: Vec::new(),
+        }
+    }
+
+    fn fixture_selection() -> Selection {
+        Selection {
+            helmet_name: String::new(),
+            armor_name: String::new(),
+            helmet_unit_id: 7,
+            body_units: [("slim body".to_owned(), 8), ("stocky body".to_owned(), 9)],
         }
     }
 }
