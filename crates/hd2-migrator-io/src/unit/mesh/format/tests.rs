@@ -35,9 +35,60 @@ fn static_head_section_is_appended_and_transformed() {
     assert_eq!(parsed.streams[0].vertex_count, 6);
     assert_eq!(parsed.streams[0].index_count, 6);
     assert!(parsed.materials.contains(&(8, 99)));
+    parsed.validate_material_table().unwrap();
     let appended = parsed.streams[0].vertex_offset as usize + 3 * 12;
     let x = f32::from_bits(LE::read_u32(&parsed.gpu[appended..]));
     assert_eq!(x, 2.0);
+}
+
+#[test]
+fn repeated_slots_resolve_by_mesh_order() {
+    let mut unit = ParsedUnit::parse(&fixture_unit(7, 77, 0.0)).unwrap();
+    unit.meshes.push(unit.meshes[0].clone());
+    unit.materials.push((7, 88));
+
+    assert_eq!(unit.section_material(0, 0).unwrap(), (7, 77));
+    assert_eq!(unit.section_material(1, 0).unwrap(), (7, 88));
+}
+
+#[test]
+fn new_materials_are_inserted_beside_their_mesh_slots() {
+    let mut unit = ParsedUnit::parse(&fixture_unit(7, 77, 0.0)).unwrap();
+    unit.meshes.push(unit.meshes[0].clone());
+    unit.materials.push((7, 77));
+
+    assert_eq!(unit.add_mesh_material(0, 8, 88).unwrap(), 1);
+    assert_eq!(unit.add_mesh_material(1, 8, 88).unwrap(), 1);
+    assert_eq!(unit.materials, vec![(7, 77), (8, 88), (7, 77), (8, 88)]);
+    unit.validate_material_table().unwrap();
+}
+
+#[test]
+fn shared_material_tables_remain_deduplicated() {
+    let mut unit = ParsedUnit::parse(&fixture_unit(7, 77, 0.0)).unwrap();
+    unit.material_layout = MaterialTableLayout::Global;
+    unit.meshes.push(unit.meshes[0].clone());
+
+    assert_eq!(unit.add_mesh_material(0, 8, 88).unwrap(), 1);
+    assert_eq!(unit.add_mesh_material(1, 8, 88).unwrap(), 1);
+    assert_eq!(unit.materials, vec![(7, 77), (8, 88)]);
+    assert_eq!(unit.mesh_material(0, 1).unwrap(), (8, 88));
+    assert_eq!(unit.mesh_material(1, 1).unwrap(), (8, 88));
+}
+
+#[test]
+fn material_layout_detection_distinguishes_both_supported_forms() {
+    let unit = ParsedUnit::parse(&fixture_unit(7, 77, 0.0)).unwrap();
+    let meshes = [unit.meshes[0].clone(), unit.meshes[0].clone()];
+
+    assert_eq!(
+        detect_material_table_layout(&meshes, &[(7, 77), (7, 77)]),
+        MaterialTableLayout::PerMesh
+    );
+    assert_eq!(
+        detect_material_table_layout(&meshes, &[(7, 77)]),
+        MaterialTableLayout::Global
+    );
 }
 
 #[test]

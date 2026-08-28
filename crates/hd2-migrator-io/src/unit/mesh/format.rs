@@ -36,12 +36,12 @@ pub(super) fn visible_material_file_ids(entry: &TocEntry) -> crate::Result<Vec<u
     let unit = ParsedUnit::parse(entry)?;
     let slots = unit.normal_slots();
     let mut ids = Vec::new();
-    for mesh in &unit.meshes {
+    for (mesh_index, mesh) in unit.meshes.iter().enumerate() {
         if mesh.lod < 0 || mesh.visible_vertex_count(&slots) == 0 {
             continue;
         }
         for section_index in 0..mesh.sections.len() {
-            if let Ok((slot, material_id)) = unit.section_material(mesh, section_index)
+            if let Ok((slot, material_id)) = unit.section_material(mesh_index, section_index)
                 && slots.contains(&slot)
             {
                 ids.push(material_id);
@@ -119,6 +119,15 @@ struct ParsedUnit {
     transforms: Vec<TransformRecord>,
     bones: Vec<BoneRecord>,
     materials: Vec<(u32, u64)>,
+    material_layout: MaterialTableLayout,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MaterialTableLayout {
+    /// One slot-to-material mapping is shared by every mesh.
+    Global,
+    /// Exporters repeat mappings in the same order as each mesh's slots.
+    PerMesh,
 }
 
 pub fn merge_visible_head_into_body(
@@ -204,10 +213,13 @@ impl ParsedUnit {
                 eyre::bail!("MeshInfo references missing stream {}", mesh.stream_index);
             }
         }
+        let materials = parse_materials(&toc, material_offset)?;
+        let material_layout = detect_material_table_layout(&meshes, &materials);
         let parsed = Self {
             transforms: parse_transforms(&toc)?,
             bones: parse_bones(&toc, bone_offset, stream_offset)?,
-            materials: parse_materials(&toc, material_offset)?,
+            materials,
+            material_layout,
             toc,
             gpu: entry.gpu_data.to_vec(),
             version,
@@ -303,13 +315,12 @@ impl ParsedUnit {
         )?;
 
         let (slot_id, material_id) =
-            source.section_material(source_mesh, source_section.section_index)?;
+            source.section_material(source_section.mesh_index, source_section.section_index)?;
         let mapped_material = material_file_ids
             .get(&material_id)
             .copied()
             .unwrap_or(material_id);
-        let output_slot = self.add_material(slot_id, mapped_material);
-        let local_material_index = self.meshes[host_index].add_material_slot(output_slot);
+        let local_material_index = self.add_mesh_material(host_index, slot_id, mapped_material)?;
         let group_index = self.append_bone_remap(source, host_index, source_section)?;
         let source_section_value = source_mesh.sections[source_section.section_index];
         let request = StreamAppendRequest {
@@ -418,39 +429,105 @@ impl ParsedUnit {
 
     fn section_material(
         &self,
-        mesh: &MeshRecord,
+        mesh_index: usize,
         section_index: usize,
     ) -> crate::Result<(u32, u64)> {
+        let mesh = self
+            .meshes
+            .get(mesh_index)
+            .ok_or_else(|| eyre::eyre!("missing mesh {mesh_index}"))?;
         let section = mesh.sections[section_index];
+        let local_index = section.material_index as usize;
         let slot = *mesh
             .material_slots
-            .get(section.material_index as usize)
+            .get(local_index)
             .ok_or_else(|| eyre::eyre!("section material index is out of bounds"))?;
-        self.materials
-            .iter()
-            .find(|(candidate, _)| *candidate == slot)
-            .copied()
-            .ok_or_else(|| eyre::eyre!("section slot 0x{slot:08x} has no material"))
+        let material = self.mesh_material(mesh_index, local_index)?;
+        if material.0 != slot {
+            eyre::bail!("mesh slot 0x{slot:08x} does not match its material table entry");
+        }
+        Ok(material)
     }
 
-    fn add_material(&mut self, requested_slot: u32, material_id: u64) -> u32 {
-        if self.materials.contains(&(requested_slot, material_id)) {
-            return requested_slot;
+    fn add_mesh_material(
+        &mut self,
+        mesh_index: usize,
+        requested_slot: u32,
+        material_id: u64,
+    ) -> crate::Result<u32> {
+        if let Some(local_index) = self.meshes[mesh_index]
+            .material_slots
+            .iter()
+            .position(|slot| *slot == requested_slot)
+            && self.section_material_id(mesh_index, local_index)? == material_id
+        {
+            return Ok(u32::try_from(local_index)?);
         }
-        let slot = if self
+        let output_slot = if self
             .materials
             .iter()
-            .any(|(slot, _)| *slot == requested_slot)
+            .any(|(slot, id)| *slot == requested_slot && *id != material_id)
         {
             unique_slot(&self.materials, requested_slot, material_id)
         } else {
             requested_slot
         };
-        self.materials.push((slot, material_id));
-        slot
+        let material_index = self.mesh_material_end(mesh_index)?;
+        let local_index = self.meshes[mesh_index].append_material_slot(output_slot)?;
+        match self.material_layout {
+            MaterialTableLayout::PerMesh => {
+                self.materials
+                    .insert(material_index, (output_slot, material_id));
+            }
+            MaterialTableLayout::Global => {
+                if !self.materials.contains(&(output_slot, material_id)) {
+                    self.materials.push((output_slot, material_id));
+                }
+            }
+        }
+        Ok(local_index)
+    }
+
+    fn section_material_id(&self, mesh_index: usize, local_index: usize) -> crate::Result<u64> {
+        self.mesh_material(mesh_index, local_index)
+            .map(|(_, material_id)| material_id)
+    }
+
+    fn mesh_material(&self, mesh_index: usize, local_index: usize) -> crate::Result<(u32, u64)> {
+        let slot = self.meshes[mesh_index].material_slots[local_index];
+        match self.material_layout {
+            MaterialTableLayout::PerMesh => {
+                let index = self.mesh_material_start(mesh_index)? + local_index;
+                self.materials
+                    .get(index)
+                    .copied()
+                    .ok_or_else(|| eyre::eyre!("mesh material table is truncated"))
+            }
+            MaterialTableLayout::Global => self
+                .materials
+                .iter()
+                .find(|(candidate, _)| *candidate == slot)
+                .copied()
+                .ok_or_else(|| eyre::eyre!("section slot 0x{slot:08x} has no material")),
+        }
+    }
+
+    fn mesh_material_start(&self, mesh_index: usize) -> crate::Result<usize> {
+        if mesh_index >= self.meshes.len() {
+            eyre::bail!("missing mesh {mesh_index}");
+        }
+        Ok(self.meshes[..mesh_index]
+            .iter()
+            .map(|mesh| mesh.material_slots.len())
+            .sum())
+    }
+
+    fn mesh_material_end(&self, mesh_index: usize) -> crate::Result<usize> {
+        Ok(self.mesh_material_start(mesh_index)? + self.meshes[mesh_index].material_slots.len())
     }
 
     fn rebuild_toc(&self) -> crate::Result<Vec<u8>> {
+        self.validate_material_table()?;
         let mut output = self.toc.clone();
         if self.bones.iter().any(|record| record.dirty) {
             rebuild_changed_bones(&mut output, &self.bones)?;
@@ -501,7 +578,63 @@ impl ParsedUnit {
         for bone in &self.bones {
             validate_bone_record(bone, self.transforms.len())?;
         }
+        self.validate_material_table()?;
         Ok(())
+    }
+
+    fn validate_material_table(&self) -> crate::Result<()> {
+        if self.material_layout == MaterialTableLayout::Global {
+            return Ok(());
+        }
+        let expected = self
+            .meshes
+            .iter()
+            .map(|mesh| mesh.material_slots.len())
+            .sum::<usize>();
+        if self.materials.len() != expected {
+            eyre::bail!(
+                "Unit material table has {} entries for {expected} mesh slots",
+                self.materials.len()
+            );
+        }
+        for (mesh_index, mesh) in self.meshes.iter().enumerate() {
+            self.validate_mesh_material_slots(mesh_index, mesh)?;
+        }
+        Ok(())
+    }
+
+    fn validate_mesh_material_slots(
+        &self,
+        mesh_index: usize,
+        mesh: &MeshRecord,
+    ) -> crate::Result<()> {
+        let start = self.mesh_material_start(mesh_index)?;
+        for (local_index, slot) in mesh.material_slots.iter().enumerate() {
+            if self.materials[start + local_index].0 != *slot {
+                eyre::bail!("mesh material slots do not match the Unit material table");
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Detect whether material mappings are shared or repeated beside every mesh.
+fn detect_material_table_layout(
+    meshes: &[MeshRecord],
+    materials: &[(u32, u64)],
+) -> MaterialTableLayout {
+    let slots = meshes
+        .iter()
+        .flat_map(|mesh| mesh.material_slots.iter().copied())
+        .collect::<Vec<_>>();
+    let aligned = slots
+        .iter()
+        .zip(materials)
+        .all(|(slot, (material_slot, _))| slot == material_slot);
+    if slots.len() == materials.len() && aligned {
+        MaterialTableLayout::PerMesh
+    } else {
+        MaterialTableLayout::Global
     }
 }
 
@@ -651,18 +784,11 @@ impl MeshRecord {
             .is_some_and(|slot| normal_slots.contains(slot))
     }
 
-    fn add_material_slot(&mut self, slot: u32) -> u32 {
-        if let Some(index) = self
-            .material_slots
-            .iter()
-            .position(|candidate| *candidate == slot)
-        {
-            return index as u32;
-        }
+    fn append_material_slot(&mut self, slot: u32) -> crate::Result<u32> {
         let index = self.material_slots.len();
         self.material_slots.push(slot);
         self.dirty = true;
-        index as u32
+        Ok(u32::try_from(index)?)
     }
 
     fn build_raw(&self) -> crate::Result<RawRecord> {
