@@ -44,7 +44,7 @@ export const zhCN = {
   "intro.mergeTitle": "把多个 Mod 合成一个",
   "intro.mergePrinciple": "本功能用于把多个 Mod 合并成一个 Patch，方便一起安装。",
   "intro.headMergeTitle": "把头盔直接合进盔甲",
-  "intro.headMergePrinciple": "此功能会将头盔模型合进盔甲 Mod 已替换的身体模型中。原 Mod 有几种体型，就处理几种体型。",
+  "intro.headMergePrinciple": "此功能会将头盔模型合进盔甲 Mod 已替换的身体模型中。",
   "intro.headMergeWarning": "合并完成后，还需要另外安装「移除头盔」Mod，用来隐藏游戏自带的头盔。",
   "headMerge.pick": "添加 Mod",
   "headMerge.dropHint": "请选择每个 Mod 的 Patch 主文件，并同时选择它附带的 .gpu_resources 和 .stream 文件（如果有）。",

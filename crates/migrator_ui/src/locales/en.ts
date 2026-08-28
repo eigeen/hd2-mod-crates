@@ -44,7 +44,7 @@ export const en = {
   "intro.mergeTitle": "Combine several Mods into one",
   "intro.mergePrinciple": "Use this feature to combine several Mods into one Patch for easier installation.",
   "intro.headMergeTitle": "Merge a helmet directly into armor",
-  "intro.headMergePrinciple": "This merges a helmet into the body models already replaced by the armor Mod. It processes exactly the body variants present in the original Mod.",
+  "intro.headMergePrinciple": "This merges a helmet into the body models already replaced by the armor Mod.",
   "intro.headMergeWarning": "After merging, you still need a separate Remove Helmet Mod to hide the game's original helmet.",
   "headMerge.pick": "Add Mod",
   "headMerge.dropHint": "Choose each Mod's main Patch file along with its .gpu_resources and .stream files, if it has them.",
