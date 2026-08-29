@@ -42,6 +42,24 @@ fn static_head_section_is_appended_and_transformed() {
 }
 
 #[test]
+fn vertex_tail_padding_is_removed_before_head_data_is_appended() {
+    let mut body = fixture_unit(7, 77, 0.0);
+    set_fixture_vertex_tail_padding(&mut body, 8);
+    let helmet = fixture_unit(8, 88, 2.0);
+
+    let output = merge_visible_head_into_body(&body, &helmet, &HashMap::new()).unwrap();
+    let parsed = ParsedUnit::parse(&output.entry).unwrap();
+    let stream = &parsed.streams[0];
+    let appended_at = stream.vertex_offset as usize + 3 * stream.vertex_stride as usize;
+
+    assert_eq!(stream.vertex_size, 6 * stream.vertex_stride);
+    assert_eq!(
+        f32::from_bits(LE::read_u32(&parsed.gpu[appended_at..])),
+        2.0
+    );
+}
+
+#[test]
 fn repeated_slots_resolve_by_mesh_order() {
     let mut unit = ParsedUnit::parse(&fixture_unit(7, 77, 0.0)).unwrap();
     unit.meshes.push(unit.meshes[0].clone());
@@ -243,6 +261,22 @@ fn fixture_gpu() -> Vec<u8> {
     gpu.resize(48, 0);
     gpu.extend([0u16, 1, 2].into_iter().flat_map(u16::to_le_bytes));
     gpu
+}
+
+fn set_fixture_vertex_tail_padding(entry: &mut TocEntry, padding: u32) {
+    let stream_table = required_offset(&entry.toc_data, STREAM_OFFSET_FIELD, "StreamInfo").unwrap();
+    let first_stream =
+        stream_table + read_u32(&entry.toc_data, stream_table + 4, "stream").unwrap() as usize;
+    let vertex_size = read_u32(&entry.toc_data, first_stream + 420, "vertex size").unwrap();
+    LE::write_u32(
+        &mut entry.toc_data[first_stream + 420..],
+        vertex_size + padding,
+    );
+    entry.gpu_data = {
+        let mut gpu = entry.gpu_data.to_vec();
+        gpu[vertex_size as usize..(vertex_size + padding) as usize].fill(0xcc);
+        gpu.into()
+    };
 }
 
 fn write_top_offset(toc: &mut [u8], field: usize, value: usize) {

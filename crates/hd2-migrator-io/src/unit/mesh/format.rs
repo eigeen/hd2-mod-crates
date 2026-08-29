@@ -903,13 +903,7 @@ fn append_stream_data(
     target_version: u32,
     request: StreamAppendRequest<'_>,
 ) -> crate::Result<AppendedSection> {
-    let old_vertices = checked_slice(
-        gpu,
-        target.vertex_offset,
-        target.vertex_size,
-        "body vertex buffer",
-    )?
-    .to_vec();
+    let old_vertices = meaningful_vertex_data(gpu, target)?.to_vec();
     let old_indices = decode_indices(
         gpu,
         target.index_offset,
@@ -967,6 +961,18 @@ fn append_stream_data(
         index_offset,
         index_count: request.section.index_count,
     })
+}
+
+/// Return only declared vertices, excluding alignment padding at the buffer tail.
+fn meaningful_vertex_data<'a>(gpu: &'a [u8], stream: &StreamRecord) -> crate::Result<&'a [u8]> {
+    let size = stream
+        .vertex_count
+        .checked_mul(stream.vertex_stride)
+        .ok_or_else(|| eyre::eyre!("body vertex buffer size overflow"))?;
+    if size > stream.vertex_size {
+        eyre::bail!("body vertex count exceeds its buffer size");
+    }
+    checked_slice(gpu, stream.vertex_offset, size, "body vertex buffer")
 }
 
 struct VertexTranscodeRequest<'a> {
