@@ -44,6 +44,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast, Toaster } from "sonner";
 import { AppUpdateButton, AppUpdateDialog } from "./AppUpdateDialog";
 import { DesktopHeadArmorMergeTool } from "./DesktopHeadArmorMergeTool";
+import { DesktopManualMergePanel } from "./DesktopManualMergePanel";
 import { DesktopGameDataPanel, DesktopPatchPanel } from "./DesktopPanels";
 import { dropZoneFromPhysicalPosition, type DropZone } from "./dropTarget";
 import {
@@ -72,7 +73,7 @@ import { useAppUpdate, type AppUpdateController } from "./useAppUpdate";
 
 const PATCH_SUFFIX = "9ba626afa44a3aa3.patch_0";
 const GAME_DATA_STORAGE_KEY = "hd2-migrator-native-game-data";
-type ToolMode = "migrate" | "repatch" | "head-merge";
+type ToolMode = "migrate" | "repatch" | "merge" | "head-merge";
 
 function App() {
   const { t } = useI18n();
@@ -324,13 +325,16 @@ function App() {
               </Tabs>
               <AdvancedToolsMenu
                 active={toolMode}
-                items={[{ mode: "head-merge", label: t("mode.headMerge") }]}
+                items={[
+                  { mode: "merge", label: t("mode.merge") },
+                  { mode: "head-merge", label: t("mode.headMerge") },
+                ]}
                 onSelect={setToolMode}
               />
               <ToolModeNavIndicator active={toolMode} navRef={toolModeNavRef} />
             </div>
             <ToolIntro mode={toolMode} />
-            {toolMode === "head-merge" ? <DesktopHeadArmorMergeTool /> : <>
+            {toolMode === "merge" ? <DesktopManualMergePanel /> : toolMode === "head-merge" ? <DesktopHeadArmorMergeTool /> : <>
             <div className="flex flex-col min-[51.25rem]:flex-row">
               <div className="flex min-w-0 flex-1">
                 <DesktopGameDataPanel

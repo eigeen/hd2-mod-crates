@@ -13,6 +13,9 @@ import type {
   RepatchRequest,
   HeadArmorMergeRequest,
   HeadArmorMergeSummary,
+  PatchDescriptor,
+  PatchMergeRequest,
+  PatchMergeSummary,
   UnitRepatchSummary,
 } from "./types";
 
@@ -38,6 +41,10 @@ export function validateGameDataDir(path: string): Promise<void> {
 
 export function inspectPatch(paths: string[], dataDir: string | null): Promise<InspectPatchResult> {
   return invoke("inspect_patch", { request: { paths, dataDir } });
+}
+
+export function describePatch(paths: string[]): Promise<PatchDescriptor> {
+  return invoke("describe_patch", { paths });
 }
 
 export function previewEquipmentMapping(
@@ -97,6 +104,13 @@ export function startHeadArmorMerge(
   onProgress: (event: MigrationProgressEvent) => void,
 ): DesktopTask<HeadArmorMergeSummary> {
   return startTask("merge_head_into_armor", request, onProgress);
+}
+
+export function startPatchMerge(
+  request: PatchMergeRequest,
+  onProgress: (event: MigrationProgressEvent) => void,
+): DesktopTask<PatchMergeSummary> {
+  return startTask("merge_patches", request, onProgress);
 }
 
 function startTask<TRequest, TResult>(

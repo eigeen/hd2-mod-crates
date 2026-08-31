@@ -125,6 +125,22 @@ export interface PatchFiles {
   stream: Uint8Array;
 }
 
+export interface PatchMergeSourceSummary {
+  name: string;
+  resourceCount: number;
+  repairedMetadataCount: number;
+  replacedResourceCount: number;
+}
+
+export interface PatchMergeSummary {
+  inputCount: number;
+  resourceCount: number;
+  conflictCount: number;
+  duplicateCount: number;
+  repairedMetadataCount: number;
+  sources: PatchMergeSourceSummary[];
+}
+
 export interface HeadArmorMergeOptions {
   helmetHash: string;
   armorHash: string;

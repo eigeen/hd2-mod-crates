@@ -10,6 +10,7 @@ export type {
   UnifiedMigrateOptions,
   HeadArmorMergeOptions,
   HeadArmorMergeSummary,
+  PatchMergeSummary,
 } from "@hd2-mod-tools/migrator-ui";
 
 import type {
@@ -60,6 +61,12 @@ export interface HeadArmorMergeRequest {
   headPaths: string[] | null;
   outputPath: string;
   options: HeadArmorMergeOptions;
+}
+
+export interface PatchMergeRequest {
+  inputPaths: string[][];
+  outputName: string;
+  outputPath: string;
 }
 
 export interface MigrationProgressEvent {

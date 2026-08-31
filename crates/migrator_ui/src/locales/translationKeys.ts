@@ -184,6 +184,7 @@ export const translationKeys = [
   "merge.empty",
   "merge.outputName",
   "merge.run",
+  "merge.save",
   "merge.running",
   "merge.failed",
   "merge.completed",

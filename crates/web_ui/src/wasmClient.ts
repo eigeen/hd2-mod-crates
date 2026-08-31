@@ -11,6 +11,7 @@ import {
   HeadArmorMergeResult,
   MigrationResult,
   MigrationMapping,
+  PatchMergeSummary,
   PatchFiles,
   PatchInspection,
   TargetOption,
@@ -69,20 +70,6 @@ export async function patchSidecarRequirements(toc: Uint8Array) {
   return callWasm("patch_sidecar_requirements", () =>
     wasm.patch_sidecar_requirements(toc),
   ) as Promise<{ gpu: string; stream: string }>;
-}
-
-export interface PatchMergeSummary {
-  inputCount: number;
-  resourceCount: number;
-  conflictCount: number;
-  duplicateCount: number;
-  repairedMetadataCount: number;
-  sources: Array<{
-    name: string;
-    resourceCount: number;
-    repairedMetadataCount: number;
-    replacedResourceCount: number;
-  }>;
 }
 
 export async function mergePatches(

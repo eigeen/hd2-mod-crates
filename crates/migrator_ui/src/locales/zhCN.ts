@@ -186,6 +186,7 @@ export const zhCN = {
   "merge.empty": "尚未添加 Mod",
   "merge.outputName": "输出文件名",
   "merge.run": "合并并下载",
+  "merge.save": "合并并保存",
   "merge.running": "正在合并",
   "merge.failed": "Mod 合并失败",
   "merge.completed": "已合并 {{count}} 个资源",

@@ -186,6 +186,7 @@ export const en = {
   "merge.empty": "No Mods added",
   "merge.outputName": "Output filename",
   "merge.run": "Merge and Download",
+  "merge.save": "Merge and Save",
   "merge.running": "Merging",
   "merge.failed": "Could not merge Mods",
   "merge.completed": "Merged {{count}} resources",

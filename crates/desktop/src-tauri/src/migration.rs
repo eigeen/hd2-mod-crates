@@ -78,6 +78,14 @@ pub struct HeadArmorMergeRequest {
     options: web::HeadArmorMergeOptions,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchMergeRequest {
+    input_paths: Vec<Vec<PathBuf>>,
+    output_name: String,
+    output_path: PathBuf,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MigrationProgressEvent {
@@ -109,6 +117,14 @@ pub async fn inspect_patch(
     request: InspectPatchRequest,
 ) -> Result<InspectPatchResult, CommandError> {
     tauri::async_runtime::spawn_blocking(move || inspect_patch_blocking(request))
+        .await
+        .map_err(|error| CommandError::from_display("task.joinFailed", error))?
+        .map_err(|error| CommandError::new("patch.inspectFailed", error))
+}
+
+#[tauri::command]
+pub async fn describe_patch(paths: Vec<PathBuf>) -> Result<PatchDescriptor, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || load_patch(&paths).map(|patch| patch.descriptor()))
         .await
         .map_err(|error| CommandError::from_display("task.joinFailed", error))?
         .map_err(|error| CommandError::new("patch.inspectFailed", error))
@@ -198,6 +214,26 @@ pub async fn merge_head_into_armor(
     .await
     .map_err(|error| CommandError::from_display("task.joinFailed", error))?;
     task_result(result, &cancellation, "migration.failed")
+}
+
+#[tauri::command]
+pub async fn merge_patches(
+    request: PatchMergeRequest,
+    task_id: String,
+    on_progress: Channel<MigrationProgressEvent>,
+    tasks: State<'_, TaskRegistry>,
+) -> Result<web::PatchMergeSummary, CommandError> {
+    let lease = tasks.register(task_id)?;
+    let cancellation = lease.cancellation();
+    let task_cancellation = Arc::clone(&cancellation);
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let _lease = lease;
+        let progress = DesktopProgress::new(on_progress, task_cancellation);
+        merge_patches_blocking(request, Some(&progress))
+    })
+    .await
+    .map_err(|error| CommandError::from_display("task.joinFailed", error))?;
+    task_result(result, &cancellation, "merge.failed")
 }
 
 #[tauri::command]
@@ -295,20 +331,52 @@ fn merge_head_into_armor_blocking(
     progress.ensure_active().map_err(display_error)?;
     let result = web::merge_head_into_armor(armor, head, request.options).map_err(display_error)?;
     progress.ensure_active().map_err(display_error)?;
-    write_head_merge_zip(&request.output_path, &result.patch, progress)?;
+    write_patch_zip(&request.output_path, &result.patch, Some(progress))?;
     Ok(result.summary)
 }
 
-fn write_head_merge_zip(
+fn merge_patches_blocking(
+    request: PatchMergeRequest,
+    progress: Option<&DesktopProgress>,
+) -> Result<web::PatchMergeSummary, String> {
+    ensure_task_active(progress)?;
+    let patches = load_merge_patches(&request.input_paths, progress)?;
+    let result = web::merge_patches(patches, request.output_name).map_err(display_error)?;
+    ensure_task_active(progress)?;
+    write_patch_zip(&request.output_path, &result.patch, progress)?;
+    Ok(result.summary)
+}
+
+fn load_merge_patches(
+    input_paths: &[Vec<PathBuf>],
+    progress: Option<&DesktopProgress>,
+) -> Result<Vec<web::PatchBytes>, String> {
+    let mut patches = Vec::with_capacity(input_paths.len());
+    for paths in input_paths {
+        ensure_task_active(progress)?;
+        patches.push(load_patch(paths)?.into_bytes());
+    }
+    Ok(patches)
+}
+
+fn ensure_task_active(progress: Option<&DesktopProgress>) -> Result<(), String> {
+    progress
+        .map(DesktopProgress::ensure_active)
+        .transpose()
+        .map(|_| ())
+        .map_err(display_error)
+}
+
+fn write_patch_zip(
     output_path: &Path,
     patch: &web::PatchBytes,
-    progress: &DesktopProgress,
+    progress: Option<&DesktopProgress>,
 ) -> Result<(), String> {
     if output_path.as_os_str().is_empty() {
         return Err("Output path is required".to_owned());
     }
     let mut zip = create_zip(output_path)?;
-    let sink = Some(progress as &dyn output::OutputProgress);
+    let sink = progress.map(|value| value as &dyn output::OutputProgress);
     write_sidecar(&mut zip, &patch.name, &patch.toc, sink)?;
     write_sidecar(
         &mut zip,
@@ -494,6 +562,65 @@ mod task_result_tests {
         let result = task_result(Ok("committed"), &cancellation, "migration.failed");
 
         assert_eq!(result.expect("completed task"), "committed");
+    }
+}
+
+#[cfg(test)]
+mod patch_merge_tests {
+    use super::*;
+    use hd2_migrator_io::archive::{StreamToc, TocEntry};
+    use std::io::Read;
+
+    #[test]
+    fn merges_desktop_patch_files_in_display_order_and_writes_zip() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let first = write_patch_fixture(directory.path(), "first.patch_0", b"first");
+        let second = write_patch_fixture(directory.path(), "second.patch_0", b"second");
+        let output = directory.path().join("merged.zip");
+        let summary = merge_patches_blocking(
+            PatchMergeRequest {
+                input_paths: vec![vec![first], vec![second]],
+                output_name: "merged.patch_0".to_owned(),
+                output_path: output.clone(),
+            },
+            None,
+        )
+        .expect("merge desktop patches");
+
+        assert_eq!(summary.input_count, 2);
+        assert_eq!(summary.conflict_count, 1);
+        assert_eq!(merged_toc_data(&output), b"second");
+    }
+
+    fn write_patch_fixture(directory: &Path, name: &str, data: &[u8]) -> PathBuf {
+        let mut archive = StreamToc::default();
+        let mut entry = TocEntry::new(7, 1);
+        entry.toc_data = data.to_vec();
+        archive.entries.push(entry);
+        let (toc, gpu, stream) = archive.serialize();
+        let path = directory.join(name);
+        std::fs::write(&path, toc).expect("write patch TOC");
+        std::fs::write(format!("{}.gpu_resources", path.display()), gpu).expect("write patch GPU");
+        std::fs::write(format!("{}.stream", path.display()), stream).expect("write patch stream");
+        path
+    }
+
+    fn merged_toc_data(output: &Path) -> Vec<u8> {
+        let file = std::fs::File::open(output).expect("open output ZIP");
+        let mut zip = zip::ZipArchive::new(file).expect("parse output ZIP");
+        let toc = read_zip_entry(&mut zip, "merged.patch_0");
+        let gpu = read_zip_entry(&mut zip, "merged.patch_0.gpu_resources");
+        let stream = read_zip_entry(&mut zip, "merged.patch_0.stream");
+        let archive =
+            StreamToc::from_buffers(&toc, &gpu, &stream, "merged.patch_0".to_owned()).unwrap();
+        archive.entries[0].toc_data.clone()
+    }
+
+    fn read_zip_entry(zip: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Vec<u8> {
+        let mut entry = zip.by_name(name).expect("ZIP entry");
+        let mut bytes = Vec::new();
+        entry.read_to_end(&mut bytes).expect("read ZIP entry");
+        bytes
     }
 }
 
