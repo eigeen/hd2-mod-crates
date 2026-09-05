@@ -4,6 +4,7 @@ pub mod constants;
 pub mod error;
 pub mod hashing;
 pub mod refs;
+pub mod stream_metadata;
 pub mod toc;
 
 pub use error::{MigratorError, Result};

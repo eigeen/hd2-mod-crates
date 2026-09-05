@@ -1,6 +1,5 @@
 use super::PatchBytes;
 use super::archive_output::PreparedArchiveOutput;
-use crate::archive::stream_metadata::normalize_patch_stream_metadata;
 use crate::archive::{StreamToc, TocEntry};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -127,12 +126,14 @@ impl Default for MergeState {
 }
 
 impl MergeState {
-    fn push(&mut self, mut input: PatchBytes) -> Result<(), String> {
-        let repairs = normalize_patch_stream_metadata(&mut input.toc, input.stream.len())
-            .map_err(|error| format!("{}: {error}", input.name))?;
-        let archive =
-            StreamToc::from_buffers(&input.toc, &input.gpu, &input.stream, input.name.clone())
-                .map_err(|error| format!("{}: {error}", input.name))?;
+    fn push(&mut self, input: PatchBytes) -> Result<(), String> {
+        let (archive, repairs) = StreamToc::from_buffers_with_repairs(
+            &input.toc,
+            &input.gpu,
+            &input.stream,
+            input.name.clone(),
+        )
+        .map_err(|error| format!("{}: {error}", input.name))?;
         self.unknown = archive.unknown;
         self.unk4_data = archive.unk4_data;
         let replaced_resource_count = self.insert_entries(archive.entries);

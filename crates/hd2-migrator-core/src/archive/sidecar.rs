@@ -8,14 +8,30 @@ pub struct SidecarRequirements {
     pub stream: u64,
 }
 
-/// Calculate the bytes actually referenced by non-empty sidecar intervals.
+/// Read uncorrected sidecar declarations for diagnostics and byte-level checks.
+/// Application imports use `repairable_patch_sidecar_requirements` instead.
 pub fn patch_sidecar_requirements(toc: &[u8]) -> Result<SidecarRequirements, String> {
     let package = TocOnlyPackage::parse(toc)
         .map_err(|error| format!("parse patch TOC for sidecar validation: {error}"))?;
+    package_requirements(&package)
+}
+
+fn package_requirements(package: &TocOnlyPackage) -> Result<SidecarRequirements, String> {
     Ok(SidecarRequirements {
         gpu: required_length(&package.entries, SidecarKind::Gpu)?,
         stream: required_length(&package.entries, SidecarKind::Stream)?,
     })
+}
+
+/// Check import requirements using the same repairs as patch merging, without
+/// changing the source TOC or consuming the merge's repair report.
+pub fn repairable_patch_sidecar_requirements(
+    toc: &[u8],
+    stream_len: usize,
+) -> Result<SidecarRequirements, String> {
+    let (package, _) = TocOnlyPackage::parse_with_stream_metadata(toc, Some(stream_len))
+        .map_err(|error| format!("parse patch TOC for sidecar validation: {error}"))?;
+    package_requirements(&package)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -105,6 +121,63 @@ mod tests {
         let error = patch_sidecar_requirements(&toc).unwrap_err();
 
         assert!(error.contains("stream metadata overflow"));
+    }
+
+    #[test]
+    fn import_requirements_ignore_repairable_unit_and_bone_stream_sizes() {
+        for type_id in [crate::constants::UNIT_ID, crate::constants::BONE_ID] {
+            let toc = fixture(TocOnlyEntry {
+                type_id,
+                stream_size: 0xDFA6_4C92,
+                gpu_size: 4,
+                ..entry()
+            });
+            assert_eq!(
+                repairable_patch_sidecar_requirements(&toc, 0).unwrap(),
+                SidecarRequirements { gpu: 4, stream: 0 },
+            );
+            assert_eq!(
+                patch_sidecar_requirements(&toc).unwrap().stream,
+                3_752_217_746
+            );
+        }
+    }
+
+    #[test]
+    fn import_requirements_recalculate_texture_size_and_reject_truncated_payload() {
+        let mut toc_data = vec![0; 20];
+        toc_data[16..20].copy_from_slice(&32u32.to_le_bytes());
+        let toc = fixture(TocOnlyEntry {
+            type_id: crate::constants::TEX_ID,
+            toc_data,
+            stream_offset: 8,
+            stream_size: 0xDFA6_4C92,
+            ..entry()
+        });
+        assert_eq!(
+            repairable_patch_sidecar_requirements(&toc, 40)
+                .unwrap()
+                .stream,
+            40,
+        );
+        assert!(
+            repairable_patch_sidecar_requirements(&toc, 39)
+                .unwrap_err()
+                .contains("still out of bounds")
+        );
+    }
+
+    #[test]
+    fn import_rejects_unknown_non_empty_stream_mismatch() {
+        let toc = fixture(TocOnlyEntry {
+            stream_size: 0xDFA6_4C92,
+            ..entry()
+        });
+        assert!(
+            repairable_patch_sidecar_requirements(&toc, 16)
+                .unwrap_err()
+                .contains("no exact stream-size calculator")
+        );
     }
 
     fn fixture(entry: TocOnlyEntry) -> Vec<u8> {

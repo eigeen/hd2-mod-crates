@@ -19,6 +19,7 @@ export interface PatchSidecarRequirements {
 
 export type ReadPatchSidecarRequirements = (
   toc: Uint8Array,
+  streamLength: number,
 ) => Promise<PatchSidecarRequirements>;
 
 export async function patchFilesFromList(
@@ -30,8 +31,8 @@ export async function patchFilesFromList(
   const values = Array.from(files);
   const toc = selectTocFile(values, messages);
   const tocBytes = await fileBytes(toc);
-  const required = await readRequirements(tocBytes);
   const loaded = await loadPatchSelection(values, toc, tocBytes, originalName);
+  const required = await readRequirements(tocBytes, loaded.patch.stream.length);
   validatePatchFiles(loaded.patch, loaded.presence, required, messages);
   return loaded.patch;
 }

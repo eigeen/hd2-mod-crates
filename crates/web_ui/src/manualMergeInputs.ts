@@ -74,7 +74,10 @@ async function validateManualMergeRecord(
   readRequirements: ReadPatchSidecarRequirements,
 ): Promise<void> {
   if (!record.toc) throw new MergeInputError("missingMain", record.name);
-  const required = await readRequirements(new Uint8Array(await record.toc.arrayBuffer()));
+  const required = await readRequirements(
+    new Uint8Array(await record.toc.arrayBuffer()),
+    record.stream?.size ?? 0,
+  );
   validatePatchSidecarSizes({
     gpuSize: record.gpu?.size ?? 0,
     hasGpuFile: Boolean(record.gpu),

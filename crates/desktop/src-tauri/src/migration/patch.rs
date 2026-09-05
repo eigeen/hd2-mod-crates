@@ -1,4 +1,4 @@
-use hd2_migrator_core::archive::sidecar::patch_sidecar_requirements;
+use hd2_migrator_core::archive::sidecar::repairable_patch_sidecar_requirements;
 use hd2_migrator_core::operations::PatchBytes;
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -282,8 +282,8 @@ fn validate_sidecars(
     stream_len: usize,
     name: &str,
 ) -> Result<(), String> {
-    let required =
-        patch_sidecar_requirements(toc).map_err(|error| format!("Parse {name}: {error}"))?;
+    let required = repairable_patch_sidecar_requirements(toc, stream_len)
+        .map_err(|error| format!("Parse {name}: {error}"))?;
     validate_sidecar_len(name, GPU_SUFFIX, required.gpu, gpu_len)?;
     validate_sidecar_len(name, STREAM_SUFFIX, required.stream, stream_len)
 }
@@ -382,16 +382,50 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_empty_sidecar_interval_beyond_file() {
+    fn rejects_non_empty_gpu_interval_beyond_file() {
         let directory = tempfile::tempdir().expect("temp directory");
         let toc_path = directory.path().join("example.patch_0");
-        std::fs::write(&toc_path, sidecar_toc(0, 0, 16, 1)).expect("write TOC");
+        std::fs::write(&toc_path, sidecar_toc(16, 1, 0, 0)).expect("write TOC");
 
-        let error = load_patch(&[toc_path])
-            .err()
-            .expect("short stream must fail");
+        let error = load_patch(&[toc_path]).err().expect("short GPU must fail");
 
         assert!(error.contains("requires 17 bytes, found 0"));
+    }
+
+    #[test]
+    fn imports_and_merges_poisoned_stream_size_without_a_stream_file() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let toc_path = directory.path().join("9ba626afa44a3aa3.patch_0");
+        let original = sidecar_toc(0, 0, 0, 0xDFA6_4C92);
+        std::fs::write(&toc_path, &original).expect("write TOC");
+        let paths = std::slice::from_ref(&toc_path);
+
+        describe_patch_metadata(paths).expect("add patch to merge list");
+        let inspection = inspect_patch_metadata(paths).expect("inspect patch");
+        assert_eq!(inspection.bytes().toc, original);
+        let loaded = load_patch(paths).expect("load patch for merge");
+        let result = hd2_migrator_core::operations::merge_patches(
+            vec![loaded.into_bytes()],
+            "merged.patch_0".to_owned(),
+        )
+        .expect("merge imported patch");
+
+        assert_eq!(result.summary.repaired_metadata_count, 1);
+        let output_toc =
+            TocOnlyPackage::parse(&result.patch.toc).expect("read stored output metadata");
+        assert_eq!(output_toc.entries[0].stream_size, 0);
+        let parsed = hd2_migrator_core::archive::StreamToc::from_buffers(
+            &result.patch.toc,
+            &result.patch.gpu,
+            &result.patch.stream,
+            result.patch.name,
+        )
+        .expect("read merged output");
+        assert!(parsed.entries[0].stream_data.is_empty());
+        assert_eq!(
+            std::fs::read(toc_path).expect("read original TOC"),
+            original
+        );
     }
 
     #[test]

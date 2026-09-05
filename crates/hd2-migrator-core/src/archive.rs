@@ -31,6 +31,9 @@ use crate::constants::{GPU_ALIGN, LEGACY_MAGIC, STREAM_ALIGN, align_up};
 use crate::error::MigratorError;
 use byteorder::{ByteOrder, LittleEndian as LE};
 use eyre::WrapErr;
+use hd2_archive_format::stream_metadata::{
+    StreamDeclaration, StreamMetadataRepair, resolve_stream_size,
+};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -427,6 +430,17 @@ impl StreamToc {
         stream_data: &[u8],
         name: String,
     ) -> crate::Result<Self> {
+        Self::from_buffers_with_repairs(toc_data, gpu_data, stream_data, name)
+            .map(|(archive, _)| archive)
+    }
+
+    /// Uses the normal archive reader and returns its metadata repair report.
+    pub fn from_buffers_with_repairs(
+        toc_data: &[u8],
+        gpu_data: &[u8],
+        stream_data: &[u8],
+        name: String,
+    ) -> crate::Result<(Self, Vec<StreamMetadataRepair>)> {
         Self::from_resource_buffers(
             toc_data,
             ResourceBytes::from(gpu_data.to_vec()),
@@ -448,6 +462,7 @@ impl StreamToc {
             ResourceBytes::from(stream_data),
             name,
         )
+        .map(|(archive, _)| archive)
     }
 
     fn from_resource_buffers(
@@ -455,7 +470,7 @@ impl StreamToc {
         gpu_data: ResourceBytes,
         stream_data: ResourceBytes,
         name: String,
-    ) -> crate::Result<Self> {
+    ) -> crate::Result<(Self, Vec<StreamMetadataRepair>)> {
         if toc_data.len() < HEADER_BASE {
             eyre::bail!("toc too small: {} bytes", toc_data.len());
         }
@@ -493,18 +508,19 @@ impl StreamToc {
         }
 
         let mut entries = Vec::with_capacity(num_files);
+        let mut repairs = Vec::new();
         for i in 0..num_files {
             let off = entries_start + i * TOC_ENTRY_SIZE;
             let hdr = &toc_data[off..off + TOC_ENTRY_SIZE];
             let file_id = LE::read_u64(&hdr[0..8]);
             let type_id = LE::read_u64(&hdr[8..16]);
             let toc_off = LE::read_u64(&hdr[16..24]) as usize;
-            let stream_off = LE::read_u64(&hdr[24..32]) as usize;
+            let stream_off = LE::read_u64(&hdr[24..32]);
             let gpu_off = LE::read_u64(&hdr[32..40]) as usize;
             let unknown1 = LE::read_u64(&hdr[40..48]);
             let unknown2 = LE::read_u64(&hdr[48..56]);
             let toc_sz = LE::read_u32(&hdr[56..60]) as usize;
-            let stream_sz = LE::read_u32(&hdr[60..64]) as usize;
+            let stream_sz = LE::read_u32(&hdr[60..64]);
             let gpu_sz = LE::read_u32(&hdr[64..68]) as usize;
             let unknown3 = LE::read_u32(&hdr[68..72]);
             let unknown4 = LE::read_u32(&hdr[72..76]);
@@ -519,9 +535,20 @@ impl StreamToc {
             } else {
                 ResourceBytes::default()
             };
-            let stream_body = if stream_sz != 0 {
+            let resolved = resolve_stream_size(
+                StreamDeclaration {
+                    file_id,
+                    type_id,
+                    offset: stream_off,
+                    size: stream_sz,
+                    toc_data: toc_body,
+                },
+                Some(stream_data.len()),
+            )?;
+            repairs.extend(resolved.repair);
+            let stream_body = if resolved.size != 0 {
                 stream_data
-                    .slice(stream_off, stream_sz)
+                    .slice(usize::try_from(stream_off)?, resolved.size as usize)
                     .ok_or_else(|| eyre::eyre!("stream body OOB for entry {i}"))?
             } else {
                 ResourceBytes::default()
@@ -541,13 +568,16 @@ impl StreamToc {
             });
         }
 
-        Ok(Self {
-            types,
-            entries,
-            unknown,
-            unk4_data,
-            name,
-        })
+        Ok((
+            Self {
+                types,
+                entries,
+                unknown,
+                unk4_data,
+                name,
+            },
+            repairs,
+        ))
     }
 
     pub fn write_files(&mut self, toc_path: &Path) -> crate::Result<()> {
@@ -788,7 +818,7 @@ fn slice_safe(buf: &[u8], off: usize, sz: usize) -> Option<&[u8]> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::{MATERIAL_ID, UNIT_ID};
+    use crate::constants::{MATERIAL_ID, TEX_ID, UNIT_ID};
 
     fn make_entry(file_id: u64, type_id: u64, toc: &[u8], gpu: &[u8], stream: &[u8]) -> TocEntry {
         let mut e = TocEntry::new(file_id, type_id);
@@ -802,7 +832,7 @@ mod tests {
     fn round_trip_two_entries() {
         let mut t = StreamToc {
             entries: vec![
-                make_entry(0xAA, UNIT_ID, &[1u8; 100], &[2u8; 50], &[3u8; 20]),
+                make_entry(0xAA, TEX_ID, &[1u8; 100], &[2u8; 50], &[3u8; 20]),
                 make_entry(0xBB, MATERIAL_ID, &[4u8; 60], &[], &[]),
             ],
             ..Default::default()
@@ -811,7 +841,7 @@ mod tests {
         let parsed = StreamToc::from_buffers(&toc, &gpu, &stream, "test".into()).expect("parse");
         assert_eq!(parsed.entries.len(), 2);
         assert_eq!(parsed.entries[0].file_id, 0xAA);
-        assert_eq!(parsed.entries[0].type_id, UNIT_ID);
+        assert_eq!(parsed.entries[0].type_id, TEX_ID);
         assert_eq!(parsed.entries[0].toc_data.len(), 100);
         assert_eq!(parsed.entries[0].gpu_data.as_ref(), &[2u8; 50]);
         assert_eq!(parsed.entries[0].stream_data.as_ref(), &[3u8; 20]);

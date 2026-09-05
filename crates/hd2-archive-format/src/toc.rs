@@ -1,5 +1,6 @@
-use crate::constants::{align_up, GPU_ALIGN, LEGACY_MAGIC, STREAM_ALIGN};
-use crate::error::{message, MigratorError, Result};
+use crate::constants::{GPU_ALIGN, LEGACY_MAGIC, STREAM_ALIGN, align_up};
+use crate::error::{MigratorError, Result, message};
+use crate::stream_metadata::{StreamDeclaration, resolve_stream_size};
 use byteorder::{ByteOrder, LittleEndian as LE};
 use std::collections::BTreeMap;
 
@@ -187,7 +188,9 @@ fn read_types(toc_data: &[u8], num_types: usize) -> Result<Vec<TocFileType>> {
     let mut types = Vec::with_capacity(num_types);
     for index in 0..num_types {
         let off = HEADER_BASE + index * TOC_FILE_TYPE_SIZE;
-        types.push(TocFileType::unpack(&toc_data[off..off + TOC_FILE_TYPE_SIZE]));
+        types.push(TocFileType::unpack(
+            &toc_data[off..off + TOC_FILE_TYPE_SIZE],
+        ));
     }
     Ok(types)
 }
@@ -206,7 +209,13 @@ fn read_entries(
     }
     let mut entries = Vec::with_capacity(num_files);
     for index in 0..num_files {
-        entries.push(read_entry(toc_data, gpu_data, stream_data, entries_start, index)?);
+        entries.push(read_entry(
+            toc_data,
+            gpu_data,
+            stream_data,
+            entries_start,
+            index,
+        )?);
     }
     Ok(entries)
 }
@@ -221,11 +230,29 @@ fn read_entry(
     let off = entries_start + index * TOC_ENTRY_SIZE;
     let hdr = &toc_data[off..off + TOC_ENTRY_SIZE];
     let toc_off = LE::read_u64(&hdr[16..24]) as usize;
-    let stream_off = LE::read_u64(&hdr[24..32]) as usize;
+    let stream_off = LE::read_u64(&hdr[24..32]);
     let gpu_off = LE::read_u64(&hdr[32..40]) as usize;
     let toc_size = LE::read_u32(&hdr[56..60]) as usize;
-    let stream_size = LE::read_u32(&hdr[60..64]) as usize;
+    let stream_size = LE::read_u32(&hdr[60..64]);
     let gpu_size = LE::read_u32(&hdr[64..68]) as usize;
+
+    let toc_body = slice_vec(toc_data, toc_off, toc_size, "toc body")?;
+    let resolved = resolve_stream_size(
+        StreamDeclaration {
+            file_id: LE::read_u64(&hdr[0..8]),
+            type_id: LE::read_u64(&hdr[8..16]),
+            offset: stream_off,
+            size: stream_size,
+            toc_data: &toc_body,
+        },
+        Some(stream_data.len()),
+    )?;
+    let stream_body = if resolved.size == 0 {
+        Vec::new()
+    } else {
+        let offset = usize::try_from(stream_off).map_err(|_| message("stream offset overflow"))?;
+        slice_vec(stream_data, offset, resolved.size as usize, "stream body")?
+    };
 
     Ok(TocEntry {
         file_id: LE::read_u64(&hdr[0..8]),
@@ -235,9 +262,9 @@ fn read_entry(
         unknown3: LE::read_u32(&hdr[68..72]),
         unknown4: LE::read_u32(&hdr[72..76]),
         entry_index: LE::read_u32(&hdr[76..80]),
-        toc_data: slice_vec(toc_data, toc_off, toc_size, "toc body")?,
+        toc_data: toc_body,
         gpu_data: slice_vec(gpu_data, gpu_off, gpu_size, "gpu body")?,
-        stream_data: slice_vec(stream_data, stream_off, stream_size, "stream body")?,
+        stream_data: stream_body,
     })
 }
 
@@ -256,7 +283,10 @@ fn slice_vec(data: &[u8], offset: usize, size: usize, label: &str) -> Result<Vec
 fn entry_groups(entries: &[TocEntry]) -> Vec<(u64, Vec<usize>)> {
     let mut groups: Vec<(u64, Vec<usize>)> = Vec::new();
     for (index, entry) in entries.iter().enumerate() {
-        match groups.iter_mut().find(|(type_id, _)| *type_id == entry.type_id) {
+        match groups
+            .iter_mut()
+            .find(|(type_id, _)| *type_id == entry.type_id)
+        {
             Some((_, indexes)) => indexes.push(index),
             None => groups.push((entry.type_id, vec![index])),
         }
@@ -297,7 +327,11 @@ struct EntryLayout {
     entry_index: u32,
 }
 
-fn layout_entries(entries: &[TocEntry], ordered_indexes: &[usize], header_size: usize) -> Vec<EntryLayout> {
+fn layout_entries(
+    entries: &[TocEntry],
+    ordered_indexes: &[usize],
+    header_size: usize,
+) -> Vec<EntryLayout> {
     let mut layouts = vec![EntryLayout::default(); entries.len()];
     let mut toc_cursor = header_size as u64;
     let mut gpu_cursor = 0u64;

@@ -22,9 +22,11 @@ struct JsSidecarRequirements {
 }
 
 #[wasm_bindgen]
-pub fn patch_sidecar_requirements(toc: Vec<u8>) -> WasmResult<JsValue> {
-    let required =
-        hd2_migrator_core::archive::sidecar::patch_sidecar_requirements(&toc).map_err(js_error)?;
+pub fn patch_sidecar_requirements(toc: Vec<u8>, stream_len: usize) -> WasmResult<JsValue> {
+    let required = hd2_migrator_core::archive::sidecar::repairable_patch_sidecar_requirements(
+        &toc, stream_len,
+    )
+    .map_err(js_error)?;
     serde_wasm_bindgen::to_value(&JsSidecarRequirements {
         gpu: required.gpu.to_string(),
         stream: required.stream.to_string(),

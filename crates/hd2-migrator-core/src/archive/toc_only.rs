@@ -3,6 +3,9 @@
 use super::{HEADER_BASE, TOC_ENTRY_SIZE, TOC_FILE_TYPE_SIZE, TocFileType};
 use crate::constants::LEGACY_MAGIC;
 use byteorder::{ByteOrder, LittleEndian as LE};
+use hd2_archive_format::stream_metadata::{
+    StreamDeclaration, StreamMetadataRepair, resolve_stream_size,
+};
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
@@ -42,6 +45,7 @@ pub struct TocEntryLocation {
 }
 
 impl TocOnlyPackage {
+    /// Read stored declarations unchanged, for inspection of the original bytes.
     pub fn parse(data: &[u8]) -> crate::Result<Self> {
         let header = TocHeader::parse(data)?;
         let types = parse_types(data, &header)?;
@@ -57,6 +61,31 @@ impl TocOnlyPackage {
             unknown: header.unknown,
             unk4_data: header.unk4_data,
         })
+    }
+
+    /// Parse for use by the tool, resolving stream sizes through the format policy.
+    /// An unknown stream length permits only repairs derivable from the TOC itself.
+    pub fn parse_with_stream_metadata(
+        data: &[u8],
+        stream_len: Option<usize>,
+    ) -> crate::Result<(Self, Vec<StreamMetadataRepair>)> {
+        let mut package = Self::parse(data)?;
+        let mut repairs = Vec::new();
+        for entry in &mut package.entries {
+            let resolved = resolve_stream_size(
+                StreamDeclaration {
+                    file_id: entry.file_id,
+                    type_id: entry.type_id,
+                    offset: entry.stream_offset,
+                    size: entry.stream_size,
+                    toc_data: &entry.toc_data,
+                },
+                stream_len,
+            )?;
+            entry.stream_size = resolved.size;
+            repairs.extend(resolved.repair);
+        }
+        Ok((package, repairs))
     }
 
     /// Rebuild only the TOC. GPU/stream offsets and sizes stay unchanged.
@@ -314,11 +343,11 @@ fn write_zeroes<W: Write>(writer: &mut W, mut count: usize) -> crate::Result<()>
 mod tests {
     use super::*;
     use crate::archive::{StreamToc, TocEntry};
-    use crate::constants::UNIT_ID;
+    use crate::constants::{TEX_ID, UNIT_ID};
 
     #[test]
     fn round_trip_preserves_sidecar_layout() {
-        let mut entry = TocEntry::new(7, UNIT_ID);
+        let mut entry = TocEntry::new(7, TEX_ID);
         entry.toc_data = vec![1; 128];
         entry.gpu_data = vec![2; 11].into();
         entry.stream_data = vec![3; 13].into();

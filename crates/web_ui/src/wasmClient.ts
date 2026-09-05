@@ -69,10 +69,10 @@ export async function builtinEquipmentOptions() {
   ) as Promise<EquipmentOption[]>;
 }
 
-export async function patchSidecarRequirements(toc: Uint8Array) {
+export async function patchSidecarRequirements(toc: Uint8Array, streamLength: number) {
   const wasm = await loadWasm();
   return callWasm("patch_sidecar_requirements", () =>
-    wasm.patch_sidecar_requirements(toc),
+    wasm.patch_sidecar_requirements(toc, streamLength),
   ) as Promise<{ gpu: string; stream: string }>;
 }
 

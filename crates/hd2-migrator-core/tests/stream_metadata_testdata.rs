@@ -1,3 +1,6 @@
+use hd2_migrator_core::archive::sidecar::{
+    patch_sidecar_requirements, repairable_patch_sidecar_requirements,
+};
 use hd2_migrator_core::archive::stream_metadata::normalize_patch_stream_metadata;
 use hd2_migrator_core::archive::toc_only::TocOnlyPackage;
 use std::collections::BTreeMap;
@@ -33,6 +36,11 @@ fn assert_mocked_sizes_restore(patch_path: &Path) -> usize {
         entry.stream_size = MOCK_BAD_STREAM_SIZE;
     }
     let mut mocked_toc = mocked.serialize().expect("serialize mocked real mod TOC");
+    assert_eq!(
+        repairable_patch_sidecar_requirements(&mocked_toc, stream_len)
+            .expect("inspect mocked stream sizes before merging"),
+        patch_sidecar_requirements(&original_toc).expect("original sidecar requirements"),
+    );
     let repairs = normalize_patch_stream_metadata(&mut mocked_toc, stream_len)
         .expect("repair mocked real mod stream sizes");
     assert_eq!(repairs.len(), original.entries.len());

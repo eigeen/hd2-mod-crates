@@ -87,6 +87,23 @@ describe("manual MOD merge inputs", () => {
       expect((error as TaskError).message).toContain("mod.patch_0.gpu_resources needs 4, found 1");
     }
   });
+
+  test("passes actual stream length to shared repair validation without reading the stream", async () => {
+    for (const stream of [undefined, file("mod.patch_0.stream", "stream")]) {
+      const records = appendManualMergeBatch([], [
+        file("mod.patch_0", "toc"),
+        ...(stream ? [stream] : []),
+      ], ids());
+      if (stream) stream.arrayBuffer = async () => { throw new Error("must not read stream"); };
+      let inspectedLength: number | undefined;
+      await validateManualMergeRecords(records, translate, async (toc, streamLength) => {
+        expect(new TextDecoder("utf-8").decode(toc)).toBe("toc");
+        inspectedLength = streamLength;
+        return { gpu: "0", stream: "0" };
+      });
+      expect(inspectedLength).toBe(stream?.size ?? 0);
+    }
+  });
 });
 
 function file(name: string, contents = "") {

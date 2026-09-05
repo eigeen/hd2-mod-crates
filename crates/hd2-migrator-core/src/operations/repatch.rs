@@ -74,16 +74,7 @@ pub async fn repatch_units_with_progress<S: DataSource + ?Sized>(
 ) -> crate::Result<UnitRepatchResult> {
     let plan =
         repatch_units_plan_with_progress(patch_name, patch_toc, options, source, progress).await?;
-    let toc = match plan.patch {
-        Some(patch) => patch.serialize().wrap_err("serialize updated patch TOC")?,
-        None => patch_toc.to_vec(),
-    };
-    Ok(UnitRepatchResult {
-        toc,
-        gpu: None,
-        stream: None,
-        summary: plan.summary,
-    })
+    finish_repatch_plan(plan)
 }
 
 pub async fn repatch_units_plan_with_progress<S: DataSource + ?Sized>(
@@ -93,24 +84,51 @@ pub async fn repatch_units_plan_with_progress<S: DataSource + ?Sized>(
     source: &S,
     progress: Option<&dyn WebProgress>,
 ) -> crate::Result<UnitRepatchPlan> {
-    let mut patch = TocOnlyPackage::parse(patch_toc).wrap_err("parse patch TOC")?;
+    prepare_unit_repatch(
+        RepatchTocInput {
+            name: patch_name,
+            toc: patch_toc,
+            stream_len: None,
+        },
+        options,
+        source,
+        progress,
+    )
+    .await
+}
+
+struct RepatchTocInput<'a> {
+    name: &'a str,
+    toc: &'a [u8],
+    stream_len: Option<usize>,
+}
+
+async fn prepare_unit_repatch<S: DataSource + ?Sized>(
+    input: RepatchTocInput<'_>,
+    options: UnitRepatchOptions,
+    source: &S,
+    progress: Option<&dyn WebProgress>,
+) -> crate::Result<UnitRepatchPlan> {
+    let (mut patch, repairs) =
+        TocOnlyPackage::parse_with_stream_metadata(input.toc, input.stream_len)
+            .wrap_err("parse patch TOC")?;
     validate_repatch_package(&patch)?;
     let wanted = patch_unit_ids(&patch);
     if wanted.is_empty() {
         return Ok(UnitRepatchPlan {
-            patch: None,
-            original_toc: patch_toc.to_vec(),
+            patch: (!repairs.is_empty()).then_some(patch),
+            original_toc: input.toc.to_vec(),
             summary: no_units_summary(),
         });
     }
-    let mut lookup = LatestUnitLookup::new(wanted, patch_name);
+    let mut lookup = LatestUnitLookup::new(wanted, input.name);
     lookup.load(source, progress).await?;
     enforce_missing_policy(&lookup.missing, options.missing_unit_policy)?;
     let summary = apply_latest_units(&mut patch, lookup, options.missing_unit_policy)?;
-    let changed = summary.updated_units > 0 || summary.removed_units > 0;
+    let changed = !repairs.is_empty() || summary.updated_units > 0 || summary.removed_units > 0;
     Ok(UnitRepatchPlan {
         patch: changed.then_some(patch),
-        original_toc: patch_toc.to_vec(),
+        original_toc: input.toc.to_vec(),
         summary,
     })
 }
@@ -123,6 +141,10 @@ pub async fn repatch_patch_with_progress<S: DataSource + ?Sized>(
     progress: Option<&dyn WebProgress>,
 ) -> crate::Result<UnitRepatchResult> {
     let plan = repatch_patch_plan_with_progress(patch, options, source, progress).await?;
+    finish_repatch_plan(plan)
+}
+
+fn finish_repatch_plan(plan: UnitRepatchPlan) -> crate::Result<UnitRepatchResult> {
     let toc = match plan.patch {
         Some(patch) => patch.serialize().wrap_err("serialize updated patch TOC")?,
         None => plan.original_toc,
@@ -141,7 +163,17 @@ pub async fn repatch_patch_plan_with_progress<S: DataSource + ?Sized>(
     source: &S,
     progress: Option<&dyn WebProgress>,
 ) -> crate::Result<UnitRepatchPlan> {
-    repatch_units_plan_with_progress(&patch.name, &patch.toc, options, source, progress).await
+    prepare_unit_repatch(
+        RepatchTocInput {
+            name: &patch.name,
+            toc: &patch.toc,
+            stream_len: Some(patch.stream.len()),
+        },
+        options,
+        source,
+        progress,
+    )
+    .await
 }
 
 fn no_units_summary() -> UnitRepatchSummary {
