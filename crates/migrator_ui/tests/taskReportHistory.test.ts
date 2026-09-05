@@ -37,6 +37,62 @@ test("ignores malformed and unknown-version history", () => {
   expect(loadTaskReportHistory(memoryStorage('{"version":2,"reports":[]}'), 5)).toEqual([]);
 });
 
+test("loads persisted patch and head merge reports", () => {
+  const merge = createCompletedTaskReport({
+    kind: "merge",
+    output: "merged.zip",
+    summary: {
+      conflictCount: 1,
+      duplicateCount: 2,
+      inputCount: 2,
+      repairedMetadataCount: 0,
+      resourceCount: 3,
+      sources: [],
+    },
+  }, "merge", 3);
+  const headMerge = createCompletedTaskReport({
+    kind: "headMerge",
+    output: "head.zip",
+    summary: {
+      armorHash: "armor",
+      armorName: "Armor",
+      copiedResources: 2,
+      helmetHash: "helmet",
+      helmetName: "Helmet",
+      mergedBodyUnits: 1,
+      mergedLods: 2,
+      mergedParts: [],
+      remappedConflicts: 0,
+      removedHelmetUnits: 1,
+      skippedParts: [],
+      warnings: [],
+    },
+  }, "head", 4);
+  const storage = memoryStorage(JSON.stringify({ version: 1, reports: [headMerge, merge] }));
+  expect(loadTaskReportHistory(storage, 5)).toEqual([headMerge, merge]);
+});
+
+test("rejects a persisted merge report with malformed source details", () => {
+  const storage = memoryStorage(JSON.stringify({
+    version: 1,
+    reports: [{
+      completedAt: 1,
+      id: "bad-merge",
+      kind: "merge",
+      output: "bad.zip",
+      summary: {
+        conflictCount: 0,
+        duplicateCount: 0,
+        inputCount: 1,
+        repairedMetadataCount: 0,
+        resourceCount: 1,
+        sources: [{}],
+      },
+    }],
+  }));
+  expect(loadTaskReportHistory(storage, 5)).toEqual([]);
+});
+
 function memoryStorage(value: string | null): TaskReportStorage {
   return {
     getItem: () => value,

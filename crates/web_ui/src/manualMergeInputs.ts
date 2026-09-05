@@ -1,6 +1,18 @@
-import type { Translate } from "@hd2-mod-tools/migrator-ui";
+import {
+  MergeInputError,
+  groupMergeInputFiles,
+  type GroupedMergeInput,
+  type MergeInputFile,
+} from "@hd2-mod-tools/migrator-app";
+import { TaskError, type Translate } from "@hd2-mod-tools/migrator-ui";
+import {
+  validatePatchSidecarSizes,
+  type PatchFileMessages,
+  type ReadPatchSidecarRequirements,
+} from "./fileInputs";
 
-export type MergeFileRole = "toc" | "gpu" | "stream";
+export type ManualMergeInputErrorCode = "empty" | "unsupported" | "missingMain" | "duplicate";
+export { MergeInputError as ManualMergeInputError };
 
 export interface ManualMergeRecord {
   id: string;
@@ -10,21 +22,9 @@ export interface ManualMergeRecord {
   stream?: File;
 }
 
-export type ManualMergeInputErrorCode = "empty" | "unsupported" | "missingMain" | "duplicate";
-
-export class ManualMergeInputError extends Error {
-  constructor(
-    readonly code: ManualMergeInputErrorCode,
-    readonly filename = "",
-  ) {
-    super(code);
-    this.name = "ManualMergeInputError";
-  }
-}
-
 /** Localize a merge input validation error for display. */
 export function mergeInputErrorMessage(error: unknown, t: Translate): string {
-  if (!(error instanceof ManualMergeInputError)) {
+  if (!(error instanceof MergeInputError)) {
     return error instanceof Error ? error.message : String(error);
   }
   if (error.code === "empty") return t("merge.errorEmpty");
@@ -33,20 +33,57 @@ export function mergeInputErrorMessage(error: unknown, t: Translate): string {
   return t("merge.errorMissingMain");
 }
 
-interface ClassifiedMergeFile {
-  name: string;
-  role: MergeFileRole;
-  file: File;
-}
-
 /** Validate one submission as an isolated batch, then append all of its patch groups. */
 export function appendManualMergeBatch(
   current: ManualMergeRecord[],
   files: FileList | File[],
   createId: () => string = () => crypto.randomUUID(),
 ): ManualMergeRecord[] {
-  const batch = buildBatchRecords(Array.from(files), createId);
-  return [...current, ...batch];
+  return [...current, ...recordsFromMergeInputFiles(
+    Array.from(files).map(browserMergeFile),
+    createId,
+  )];
+}
+
+export function recordsFromMergeInputFiles(
+  files: MergeInputFile<File>[],
+  createId: () => string = () => crypto.randomUUID(),
+): ManualMergeRecord[] {
+  return groupMergeInputFiles(files, createId).map(webMergeRecord);
+}
+
+/** Validate TOC requirements using sidecar metadata without loading large sidecar files. */
+export async function validateManualMergeRecords(
+  records: ManualMergeRecord[],
+  t: Translate,
+  readRequirements: ReadPatchSidecarRequirements,
+): Promise<void> {
+  try {
+    const messages = patchFileMessages(t);
+    await Promise.all(records.map((record) => validateManualMergeRecord(record, messages, readRequirements)));
+  } catch (error) {
+    if (error instanceof TaskError) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new TaskError("patch.inspectFailed", message);
+  }
+}
+
+async function validateManualMergeRecord(
+  record: ManualMergeRecord,
+  messages: PatchFileMessages,
+  readRequirements: ReadPatchSidecarRequirements,
+): Promise<void> {
+  if (!record.toc) throw new MergeInputError("missingMain", record.name);
+  const required = await readRequirements(new Uint8Array(await record.toc.arrayBuffer()));
+  validatePatchSidecarSizes({
+    gpuSize: record.gpu?.size ?? 0,
+    hasGpuFile: Boolean(record.gpu),
+    hasStreamFile: Boolean(record.stream),
+    messages,
+    name: record.name,
+    required,
+    streamSize: record.stream?.size ?? 0,
+  });
 }
 
 export function moveManualMergeRecord(
@@ -63,51 +100,32 @@ export function moveManualMergeRecord(
   return next;
 }
 
-function classifyMergeFile(file: File): ClassifiedMergeFile {
-  const lower = file.name.toLowerCase();
-  if (lower.endsWith(".gpu_resources")) {
-    return { name: file.name.slice(0, -".gpu_resources".length), role: "gpu", file };
-  }
-  if (lower.endsWith(".stream")) {
-    return { name: file.name.slice(0, -".stream".length), role: "stream", file };
-  }
-  if (!isPatchMainName(file.name)) {
-    throw new ManualMergeInputError("unsupported", file.name);
-  }
-  return { name: file.name, role: "toc", file };
+function browserMergeFile(file: File) {
+  return {
+    byteLength: file.size,
+    name: file.name,
+    relativePath: file.webkitRelativePath || file.name,
+    source: file,
+  };
 }
 
-function isPatchMainName(name: string) {
-  return /^[0-9a-f]{16}(?:\.patch(?:_\d+)?)?$/i.test(name)
-    || /\.patch(?:_\d+)?$/i.test(name)
-    || /\.toc$/i.test(name);
+function webMergeRecord(group: GroupedMergeInput<File>): ManualMergeRecord {
+  return {
+    gpu: group.gpu?.source,
+    id: group.id,
+    name: group.name,
+    stream: group.stream?.source,
+    toc: group.toc.source,
+  };
 }
 
-function buildBatchRecords(
-  files: File[],
-  createId: () => string,
-) {
-  if (files.length === 0) throw new ManualMergeInputError("empty");
-  const records = new Map<string, ManualMergeRecord>();
-  for (const file of files) addBatchFile(records, classifyMergeFile(file), createId);
-  const result = [...records.values()];
-  const orphan = result.find((record) => !record.toc);
-  if (orphan) {
-    throw new ManualMergeInputError("missingMain", orphan.name);
-  }
-  return result;
-}
-
-function addBatchFile(
-  records: Map<string, ManualMergeRecord>,
-  classified: ClassifiedMergeFile,
-  createId: () => string,
-) {
-  const key = classified.name.toLowerCase();
-  const record = records.get(key) ?? { id: createId(), name: classified.name };
-  if (record[classified.role]) {
-    throw new ManualMergeInputError("duplicate", classified.file.name);
-  }
-  record[classified.role] = classified.file;
-  records.set(key, record);
+function patchFileMessages(t: Translate): PatchFileMessages {
+  return {
+    missingAction: (toc, gpu, stream) => t("patch.missingAction", { toc, gpu, stream }),
+    missingIntro: t("patch.missingIntro"),
+    missingSidecar: (filename, expected) => t("patch.missingSidecar", { filename, expected }),
+    multipleToc: t("patch.multipleToc"),
+    noToc: t("patch.noToc"),
+    shortSidecar: (filename, expected, actual) => t("patch.shortSidecar", { filename, expected, actual }),
+  };
 }

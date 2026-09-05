@@ -42,7 +42,9 @@ export function TaskReportHistoryButton(props: TaskReportHistoryButtonProps) {
             <div className="min-w-0">
               <div className="max-w-[18rem] truncate text-xs text-hd2-text">{fileName(report.output)}</div>
               <div className="text-[0.6875rem] text-hd2-muted">
-                {report.kind === "migration" ? t("result.migrationTitle") : t("result.repatchTitle")}
+                {report.kind === "migration" ? t("result.migrationTitle")
+                  : report.kind === "repatch" ? t("result.repatchTitle")
+                    : report.kind === "merge" ? t("mode.merge") : t("mode.headMerge")}
                 {" · "}{new Intl.DateTimeFormat(language, { hour: "2-digit", minute: "2-digit" }).format(report.completedAt)}
               </div>
             </div>

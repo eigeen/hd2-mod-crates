@@ -43,3 +43,12 @@ test("aborted tasks throw the shared cancellation code", () => {
     expect.objectContaining({ code: "task.cancelled" }),
   );
 });
+
+test("presents structured merge errors with merge-specific titles", () => {
+  const presentation = presentTaskError(
+    { code: "merge.failed", message: "bad patch" },
+    (key) => key,
+  );
+  expect(presentation.title).toBe("merge.failed");
+  expect(presentation.description).toBe("bad patch");
+});

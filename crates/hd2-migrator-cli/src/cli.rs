@@ -9,14 +9,14 @@ pub mod progress;
 use args::Cli;
 use clap::Parser;
 use eyre::WrapErr;
-use hd2_migrator_io::index::ArchiveIndex;
-use hd2_migrator_io::migrator::{MigrateAllOpts, MigrationReport, migrate_all};
-use hd2_migrator_io::padding::{EmptyUnitTemplate, builtin_template, extract_template};
+use hd2_migrator_core::index::ArchiveIndex;
+use hd2_migrator_core::migrator::{MigrateAllOpts, MigrationReport, migrate_all};
+use hd2_migrator_core::padding::{EmptyUnitTemplate, builtin_template, extract_template};
 use owo_colors::OwoColorize;
 use progress::IndicatifProgress;
 use std::path::Path;
 
-pub fn run() -> hd2_migrator_io::Result<()> {
+pub fn run() -> hd2_migrator_core::Result<()> {
     let mut cli = Cli::parse();
     logging::init(cli.verbose);
     print_startup_banner();
@@ -80,8 +80,8 @@ fn run_mode_a(
     out_dir: &Path,
     data_dir: &Path,
     template: Option<&EmptyUnitTemplate>,
-    padding_mode: hd2_migrator_io::padding::PaddingMode,
-) -> hd2_migrator_io::Result<Vec<MigrationReport>> {
+    padding_mode: hd2_migrator_core::padding::PaddingMode,
+) -> hd2_migrator_core::Result<Vec<MigrationReport>> {
     let target_filter = if cli.target.is_empty() {
         None
     } else {

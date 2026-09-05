@@ -3,7 +3,10 @@ import {
   appendManualMergeBatch,
   ManualMergeInputError,
   moveManualMergeRecord,
+  recordsFromMergeInputFiles,
+  validateManualMergeRecords,
 } from "../src/manualMergeInputs";
+import { TaskError, type Translate } from "@hd2-mod-tools/migrator-ui";
 
 describe("manual MOD merge inputs", () => {
   test("creates one record per main patch and leaves sidecars unset", () => {
@@ -54,6 +57,36 @@ describe("manual MOD merge inputs", () => {
   test("rejects a duplicate role inside one submission", () => {
     expectBatchError([file("a.patch_1"), file("a.patch_1", "duplicate")], "duplicate");
   });
+
+  test("keeps normalized wrapper paths when browser Files have no relative path", () => {
+    const sameFileNameA = file("same.patch_0");
+    const sameFileNameB = file("same.patch_0");
+    const records = recordsFromMergeInputFiles([
+      { name: sameFileNameA.name, relativePath: "A/same.patch_0", source: sameFileNameA },
+      { name: sameFileNameB.name, relativePath: "B/same.patch_0", source: sameFileNameB },
+    ], ids());
+    expect(records).toHaveLength(2);
+  });
+
+  test("reports a missing required sidecar during import", async () => {
+    const records = appendManualMergeBatch([], [file("mod.patch_0", "toc")], ids());
+    await expect(validateManualMergeRecords(records, translate, async () => ({ gpu: "4", stream: "0" })))
+      .rejects.toMatchObject({ code: "patch.inspectFailed" });
+  });
+
+  test("checks sidecar size without reading its contents", async () => {
+    const records = appendManualMergeBatch([], [
+      file("mod.patch_0", "toc"),
+      file("mod.patch_0.gpu_resources", "x"),
+    ], ids());
+    try {
+      await validateManualMergeRecords(records, translate, async () => ({ gpu: "4", stream: "0" }));
+      throw new Error("expected sidecar validation to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(TaskError);
+      expect((error as TaskError).message).toContain("mod.patch_0.gpu_resources needs 4, found 1");
+    }
+  });
 });
 
 function file(name: string, contents = "") {
@@ -74,3 +107,11 @@ function expectBatchError(files: File[], code: ManualMergeInputError["code"]) {
     expect((error as ManualMergeInputError).code).toBe(code);
   }
 }
+
+const translate: Translate = (key, values) => {
+  if (key === "patch.missingIntro") return "missing sidecars";
+  if (key === "patch.missingAction") return "select sidecars";
+  if (key === "patch.missingSidecar") return `${values?.filename} missing ${values?.expected}`;
+  if (key === "patch.shortSidecar") return `${values?.filename} needs ${values?.expected}, found ${values?.actual}`;
+  return key;
+};

@@ -1,5 +1,6 @@
-use hd2_migrator_io::archive::toc_only::TocOnlyPackage;
-use hd2_migrator_io::archive::{SerializedPart, StreamToc};
+use hd2_migrator_core::archive::toc_only::TocOnlyPackage;
+use hd2_migrator_core::archive::SerializedPart;
+use hd2_migrator_core::operations::PreparedArchiveOutput;
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use tempfile::NamedTempFile;
@@ -14,12 +15,6 @@ pub struct OutputZip {
 pub trait OutputProgress: Sync {
     fn ensure_active(&self) -> io::Result<()>;
     fn report_bytes(&self, completed: u64, total: u64) -> io::Result<()>;
-}
-
-pub struct PatchZipContext<'a> {
-    pub directory: &'a str,
-    pub progress: Option<&'a dyn OutputProgress>,
-    pub suffix: &'a str,
 }
 
 pub fn create_zip(path: &Path) -> Result<OutputZip, String> {
@@ -41,7 +36,7 @@ pub fn write_zip_entry_with_progress(
     path: &str,
     bytes: &[u8],
     progress: Option<&dyn OutputProgress>,
-) -> hd2_migrator_io::Result<()> {
+) -> hd2_migrator_core::Result<()> {
     let normalized = path.replace('\\', "/");
     write_zip_content(
         zip,
@@ -66,7 +61,7 @@ pub fn write_repatch_toc_to_zip(
     path: &str,
     source: RepatchTocSource<'_>,
     progress: Option<&dyn OutputProgress>,
-) -> hd2_migrator_io::Result<()> {
+) -> hd2_migrator_core::Result<()> {
     let total = match source {
         RepatchTocSource::Original(bytes) => bytes.len(),
         RepatchTocSource::Rebuilt(package) => package.serialized_len(),
@@ -85,30 +80,21 @@ pub fn write_repatch_toc_to_zip(
     )
 }
 
-pub fn write_patch_to_zip(
+pub fn write_prepared_archive_to_zip(
     zip: &mut OutputZip,
-    patch: &mut StreamToc,
-    context: PatchZipContext<'_>,
-) -> hd2_migrator_io::Result<()> {
-    let serializer = patch.serializer();
-    let toc_path = format!("{}/{}", context.directory, context.suffix);
-    write_serialized_entry(
-        zip,
-        &serializer,
-        entry_context(&toc_path, SerializedPart::Toc, context.progress),
-    )?;
-    let gpu_path = format!("{toc_path}.gpu_resources");
-    write_serialized_entry(
-        zip,
-        &serializer,
-        entry_context(&gpu_path, SerializedPart::Gpu, context.progress),
-    )?;
-    let stream_path = format!("{toc_path}.stream");
-    write_serialized_entry(
-        zip,
-        &serializer,
-        entry_context(&stream_path, SerializedPart::Stream, context.progress),
-    )
+    output: &mut PreparedArchiveOutput,
+    progress: Option<&dyn OutputProgress>,
+) -> hd2_migrator_core::Result<()> {
+    let entries = output.manifest().entries().clone();
+    let serializer = output.serializer();
+    for entry in &entries {
+        write_serialized_entry(
+            zip,
+            &serializer,
+            entry_context(&entry.path, entry.part, progress),
+        )?;
+    }
+    Ok(())
 }
 
 struct SerializedEntryContext<'a> {
@@ -131,9 +117,9 @@ fn entry_context<'a>(
 
 fn write_serialized_entry(
     zip: &mut OutputZip,
-    serializer: &hd2_migrator_io::archive::StreamTocSerializer<'_>,
+    serializer: &hd2_migrator_core::archive::StreamTocSerializer<'_>,
     context: SerializedEntryContext<'_>,
-) -> hd2_migrator_io::Result<()> {
+) -> hd2_migrator_core::Result<()> {
     let total = serializer.part_len(context.part) as u64;
     write_zip_content(
         zip,
@@ -156,9 +142,9 @@ fn write_zip_content<F>(
     zip: &mut OutputZip,
     context: ZipEntryContext<'_>,
     write: F,
-) -> hd2_migrator_io::Result<()>
+) -> hd2_migrator_core::Result<()>
 where
-    F: FnOnce(&mut ProgressWriter<'_, ZipWriter<NamedTempFile>>) -> hd2_migrator_io::Result<()>,
+    F: FnOnce(&mut ProgressWriter<'_, ZipWriter<NamedTempFile>>) -> hd2_migrator_core::Result<()>,
 {
     validate_entry_path(context.path)?;
     ensure_active(context.progress)?;
@@ -249,7 +235,7 @@ pub fn finish_zip(zip: OutputZip) -> Result<(), String> {
         .map_err(|error| format!("Move completed ZIP to {}: {error}", output_path.display()))
 }
 
-fn validate_entry_path(value: &str) -> hd2_migrator_io::Result<()> {
+fn validate_entry_path(value: &str) -> hd2_migrator_core::Result<()> {
     let path = Path::new(value);
     if value.is_empty() || path.is_absolute() {
         eyre::bail!("invalid output ZIP entry path {value:?}");
@@ -266,7 +252,8 @@ fn validate_entry_path(value: &str) -> hd2_migrator_io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hd2_migrator_io::archive::TocEntry;
+    use hd2_migrator_core::archive::StreamToc;
+    use hd2_migrator_core::archive::TocEntry;
     use std::fs::File;
     use std::io::Read;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -405,21 +392,14 @@ mod tests {
     fn streams_archive_parts_directly_into_zip_entries() {
         let directory = tempfile::tempdir().expect("temp directory");
         let output = directory.path().join("output.zip");
-        let mut patch = sample_patch();
+        let patch = sample_patch();
         let (expected_toc, expected_gpu, expected_stream) = patch.clone().serialize();
+        let mut prepared = PreparedArchiveOutput::new(patch, "variant/example.patch_0");
         let mut zip = create_zip(&output).expect("create ZIP");
         let progress = TestProgress::active();
 
-        write_patch_to_zip(
-            &mut zip,
-            &mut patch,
-            PatchZipContext {
-                directory: "variant",
-                progress: Some(&progress),
-                suffix: "example.patch_0",
-            },
-        )
-        .expect("stream patch");
+        write_prepared_archive_to_zip(&mut zip, &mut prepared, Some(&progress))
+            .expect("stream patch");
         finish_zip(zip).expect("finish ZIP");
 
         let mut archive =

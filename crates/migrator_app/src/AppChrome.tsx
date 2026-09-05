@@ -21,6 +21,7 @@ interface AppChromeProps {
   footer?: ReactNode;
   headerAction?: ReactNode;
   layout: "web" | "desktop";
+  navigationDisabled: boolean;
   onClearReports: () => void;
   onOpenReport: (id: string) => void;
   onOpenUpdateInfo: () => void;
@@ -94,12 +95,15 @@ function ToolNavigation(props: AppChromeProps & { navRef: { current: HTMLDivElem
   const { t } = useI18n();
   return (
     <div className="toolModeNav" ref={props.navRef}>
-      <Tabs value={props.toolMode === "migrate" || props.toolMode === "repatch" ? props.toolMode : false} onChange={(_, mode: ToolMode) => props.onToolModeChange(mode)}>
-        <Tab label={t("mode.migrate")} value="migrate" />
-        <Tab label={t("mode.repatch")} value="repatch" />
+      <Tabs value={props.toolMode === "migrate" || props.toolMode === "repatch" ? props.toolMode : false} onChange={(_, mode: ToolMode) => {
+        if (!props.navigationDisabled) props.onToolModeChange(mode);
+      }}>
+        <Tab disabled={props.navigationDisabled} label={t("mode.migrate")} value="migrate" />
+        <Tab disabled={props.navigationDisabled} label={t("mode.repatch")} value="repatch" />
       </Tabs>
       <AdvancedToolsMenu
         active={props.toolMode}
+        disabled={props.navigationDisabled}
         items={[{ mode: "merge", label: t("mode.merge") }, { mode: "head-merge", label: t("mode.headMerge") }]}
         onSelect={(mode) => props.onToolModeChange(mode as ToolMode)}
       />

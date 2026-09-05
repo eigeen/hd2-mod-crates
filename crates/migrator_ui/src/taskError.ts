@@ -3,6 +3,8 @@ export type TaskErrorCode =
   | "gameData.discoveryFailed"
   | "gameData.invalid"
   | "migration.failed"
+  | "merge.failed"
+  | "headMerge.failed"
   | "patch.inspectFailed"
   | "repatch.failed"
   | "task.cancelled"
@@ -29,6 +31,8 @@ type TaskErrorTranslationKey =
   | "error.gameDataDiscoveryFailed"
   | "error.gameDataInvalid"
   | "error.migrationFailed"
+  | "merge.failed"
+  | "headMerge.failed"
   | "error.patchInspectFailed"
   | "error.repatchFailed"
   | "error.taskConflict"
@@ -41,6 +45,8 @@ const ERROR_TITLES: Record<Exclude<TaskErrorCode, "task.cancelled">, TaskErrorTr
   "gameData.discoveryFailed": "error.gameDataDiscoveryFailed",
   "gameData.invalid": "error.gameDataInvalid",
   "migration.failed": "error.migrationFailed",
+  "merge.failed": "merge.failed",
+  "headMerge.failed": "headMerge.failed",
   "patch.inspectFailed": "error.patchInspectFailed",
   "repatch.failed": "error.repatchFailed",
   "task.conflict": "error.taskConflict",

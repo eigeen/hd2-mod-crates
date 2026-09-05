@@ -3,6 +3,7 @@ import {
   HeadArmorMergeTool,
   type HeadMergeAdapter,
   type HeadMergeRecord,
+  type MergeInputFile,
 } from "@hd2-mod-tools/migrator-app";
 import {
   headMergeCandidates,
@@ -12,33 +13,45 @@ import {
 } from "@hd2-mod-tools/migrator-ui";
 import { downloadZip } from "./fileInputs";
 import {
-  appendManualMergeBatch,
   mergeInputErrorMessage,
+  recordsFromMergeInputFiles,
+  validateManualMergeRecords,
   type ManualMergeRecord,
 } from "./manualMergeInputs";
-import { inspectEquipmentContents, mergeHeadIntoArmor } from "./wasmClient";
+import { inspectEquipmentContents, mergeHeadIntoArmor, patchSidecarRequirements } from "./wasmClient";
 
 export function WebHeadArmorMergeTool() {
   const { t } = useI18n();
-  const adapter = useMemo<HeadMergeAdapter<ManualMergeRecord>>(() => ({
-    cancellable: false,
+  const adapter = useMemo<HeadMergeAdapter<ManualMergeRecord, File>>(() => ({
+    browserFileReference,
+    cancellable: true,
     pickRecords: async () => {
       const files = await chooseFiles();
-      return files ? createRecords(files, t) : null;
+      return files ? createRecords(files.map(browserFileReference), t) : null;
     },
-    recordsFromDrop: async (transfer) => createRecords(Array.from(transfer.files), t),
+    recordsFromFiles: async (files) => createRecords(files, t),
     runMerge: runWebHeadMerge,
   }), [t]);
   return <HeadArmorMergeTool adapter={adapter} />;
 }
 
+function browserFileReference(file: File): MergeInputFile<File> {
+  return {
+    byteLength: file.size,
+    name: file.name,
+    relativePath: file.webkitRelativePath || file.name,
+    source: file,
+  };
+}
+
 async function createRecords(
-  files: File[],
+  files: MergeInputFile<File>[],
   t: ReturnType<typeof useI18n>["t"],
 ): Promise<HeadMergeRecord<ManualMergeRecord>[]> {
   let records: ManualMergeRecord[];
   try {
-    records = appendManualMergeBatch([], files);
+    records = recordsFromMergeInputFiles(files);
+    await validateManualMergeRecords(records, t, patchSidecarRequirements);
   } catch (error) {
     throw new Error(mergeInputErrorMessage(error, t), { cause: error });
   }
@@ -65,7 +78,7 @@ async function runWebHeadMerge(
   const result = await mergeHeadIntoArmor(armorPatch, headPatch, {
     armorHash: request.armorHash,
     helmetHash: request.helmetHash,
-  });
+  }, { signal: request.signal });
   throwIfTaskCancelled(request.signal);
   const output = "hd2-head-merged-mod.zip";
   downloadZip(result.zipBlob, output);

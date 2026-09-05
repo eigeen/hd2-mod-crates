@@ -1,5 +1,6 @@
 import {
   HeadArmorMergeTool,
+  groupMergeInputFiles,
   type HeadMergeAdapter,
   type HeadMergeRecord,
 } from "@hd2-mod-tools/migrator-app";
@@ -9,17 +10,24 @@ import {
   choosePatchPaths,
   inspectPatch,
   startHeadArmorMerge,
-  type DesktopTask,
 } from "./desktopClient";
+import { waitForDesktopTask } from "./desktopTask";
+import {
+  discoverDesktopPatchGroups,
+  pathsFromDesktopGroup,
+  subscribeToDesktopMergeFiles,
+} from "./desktopMergeInputs";
 
 interface DesktopHeadMergeSource {
   paths: string[];
 }
 
-const desktopHeadMergeAdapter: HeadMergeAdapter<DesktopHeadMergeSource> = {
+const desktopHeadMergeAdapter: HeadMergeAdapter<DesktopHeadMergeSource, string> = {
   cancellable: true,
   pickRecords: pickDesktopHeadMergeRecord,
+  recordsFromFiles: (files) => recordsFromGroups(groupMergeInputFiles(files)),
   runMerge: runDesktopHeadMerge,
+  subscribeToFileDrop: subscribeToDesktopMergeFiles,
 };
 
 export function DesktopSharedHeadMergeTool() {
@@ -29,14 +37,23 @@ export function DesktopSharedHeadMergeTool() {
 async function pickDesktopHeadMergeRecord(): Promise<HeadMergeRecord<DesktopHeadMergeSource>[] | null> {
   const paths = await choosePatchPaths();
   if (!paths) return null;
-  const result = await inspectPatch(paths, null);
-  return [{
-    armors: headMergeCandidates(result.inspection.sources, "Armor"),
-    helmets: headMergeCandidates(result.inspection.sources, "Helmet"),
-    id: crypto.randomUUID(),
-    name: result.patch.name,
-    source: { paths },
-  }];
+  return recordsFromGroups(await discoverDesktopPatchGroups(paths));
+}
+
+async function recordsFromGroups(
+  groups: ReturnType<typeof groupMergeInputFiles<string>>,
+): Promise<HeadMergeRecord<DesktopHeadMergeSource>[]> {
+  return Promise.all(groups.map(async (group) => {
+    const paths = pathsFromDesktopGroup(group);
+    const result = await inspectPatch(paths, null);
+    return {
+      armors: headMergeCandidates(result.inspection.sources, "Armor"),
+      helmets: headMergeCandidates(result.inspection.sources, "Helmet"),
+      id: group.id,
+      name: result.patch.name,
+      source: { paths },
+    };
+  }));
 }
 
 async function runDesktopHeadMerge(
@@ -52,17 +69,6 @@ async function runDesktopHeadMerge(
     outputPath,
     options: { armorHash: request.armorHash, helmetHash: request.helmetHash },
   }, () => undefined);
-  const summary = await waitForTask(task, request.signal);
+  const summary = await waitForDesktopTask(task, request.signal);
   return { output: outputPath, summary };
-}
-
-async function waitForTask<T>(task: DesktopTask<T>, signal: AbortSignal): Promise<T> {
-  const cancel = () => { void task.cancel(); };
-  signal.addEventListener("abort", cancel, { once: true });
-  if (signal.aborted) cancel();
-  try {
-    return await task.result;
-  } finally {
-    signal.removeEventListener("abort", cancel);
-  }
 }

@@ -1,8 +1,8 @@
 //! JS-backed output sink for moving serialized files out of WASM one at a time.
 
 use crc32fast::Hasher;
-use hd2_migrator_io::archive::{SerializedPart, StreamTocSerializer};
-use hd2_migrator_io::web::WebOutputFile;
+use hd2_migrator_core::archive::{SerializedPart, StreamTocSerializer};
+use hd2_migrator_core::operations::{PreparedArchiveOutput, WebOutputFile};
 use js_sys::Function;
 use std::io::{self, Write};
 use wasm_bindgen::{JsCast, prelude::*};
@@ -52,6 +52,15 @@ impl JsArchiveOutputSink {
             .map_err(crate::error::js_error)?;
         writer.flush().map_err(crate::error::js_error)?;
         self.on_file_end.call0(&self.target).map(|_| ())
+    }
+
+    pub fn write_archive(&self, output: &mut PreparedArchiveOutput) -> Result<(), JsValue> {
+        let entries = output.manifest().entries().clone();
+        let serializer = output.serializer();
+        for entry in &entries {
+            self.write_part(&entry.path, &serializer, entry.part)?;
+        }
+        Ok(())
     }
 
     fn start_file(&self, path: &str, size: u32, crc32: u32) -> Result<(), JsValue> {

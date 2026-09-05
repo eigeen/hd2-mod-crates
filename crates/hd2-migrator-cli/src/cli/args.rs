@@ -66,13 +66,13 @@ pub struct Cli {
 }
 
 impl Cli {
-    pub fn padding_mode(&self) -> hd2_migrator_io::padding::PaddingMode {
+    pub fn padding_mode(&self) -> hd2_migrator_core::padding::PaddingMode {
         if self.no_padding {
-            hd2_migrator_io::padding::PaddingMode::Disabled
+            hd2_migrator_core::padding::PaddingMode::Disabled
         } else if self.empty_mesh_verbatim {
-            hd2_migrator_io::padding::PaddingMode::Verbatim
+            hd2_migrator_core::padding::PaddingMode::Verbatim
         } else {
-            hd2_migrator_io::padding::PaddingMode::Sanitized
+            hd2_migrator_core::padding::PaddingMode::Sanitized
         }
     }
 }

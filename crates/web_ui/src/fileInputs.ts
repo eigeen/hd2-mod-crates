@@ -93,6 +93,26 @@ export function validatePatchFiles(
   });
 }
 
+export function validatePatchSidecarSizes(check: {
+  gpuSize: number;
+  hasGpuFile: boolean;
+  hasStreamFile: boolean;
+  messages: PatchFileMessages;
+  name: string;
+  required: PatchSidecarRequirements;
+  streamSize: number;
+}): void {
+  validatePatchSidecars({
+    gpuLen: check.gpuSize,
+    hasGpuFile: check.hasGpuFile,
+    hasStreamFile: check.hasStreamFile,
+    messages: check.messages,
+    name: check.name,
+    required: check.required,
+    streamLen: check.streamSize,
+  });
+}
+
 export function downloadZip(blob: Blob, filename: string) {
   downloadBlob(blob, filename);
 }

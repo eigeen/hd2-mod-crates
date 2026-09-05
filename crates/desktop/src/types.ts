@@ -31,6 +31,15 @@ export interface PatchDescriptor {
   byteLength: number;
 }
 
+export interface DiscoveredPatchFile {
+  name: string;
+  path: string;
+  relativePath: string;
+  rootId: number;
+  size: number;
+  sourceRoot: string;
+}
+
 export interface InspectPatchResult {
   patch: PatchDescriptor;
   inspection: { sources: DetectedSource[] };

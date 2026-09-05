@@ -5,7 +5,7 @@ import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import MergeTypeIcon from "@mui/icons-material/MergeType";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import { Button, CircularProgress, IconButton, TextField } from "@mui/material";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   closestCenter,
@@ -28,6 +28,8 @@ import {
   useI18n,
   type PatchMergeSummary,
 } from "@hd2-mod-tools/migrator-ui";
+import { useTaskController } from "./taskController";
+import type { MergeInputFile } from "./mergeInputs";
 
 export interface ManualMergeRecord<Source> {
   byteLength?: number;
@@ -37,10 +39,15 @@ export interface ManualMergeRecord<Source> {
   source: Source;
 }
 
-export interface ManualMergeAdapter<Source> {
+export interface ManualMergeAdapter<Source, FileSource = never> {
+  browserFileReference?: (file: File) => MergeInputFile<FileSource>;
   cancellable: boolean;
   pickRecords: () => Promise<ManualMergeRecord<Source>[] | null>;
-  recordsFromDrop?: (transfer: DataTransfer) => Promise<ManualMergeRecord<Source>[]>;
+  recordsFromFiles?: (files: MergeInputFile<FileSource>[]) => Promise<ManualMergeRecord<Source>[]>;
+  subscribeToFileDrop?: (
+    receive: (files: MergeInputFile<FileSource>[]) => void,
+    reject: (error: unknown) => void,
+  ) => () => void;
   runMerge: (request: {
     outputName: string;
     records: ManualMergeRecord<Source>[];
@@ -48,13 +55,13 @@ export interface ManualMergeAdapter<Source> {
   }) => Promise<{ output: string; summary: PatchMergeSummary } | null>;
 }
 
-export function ManualMergeTool<Source>({ adapter }: { adapter: ManualMergeAdapter<Source> }) {
+export function ManualMergeTool<Source, FileSource>({ adapter }: { adapter: ManualMergeAdapter<Source, FileSource> }) {
   const { t } = useI18n();
   const [records, setRecords] = useState<ManualMergeRecord<Source>[]>([]);
   const [outputName, setOutputName] = useState("");
-  const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<PatchMergeSummary | null>(null);
-  const [task, setTask] = useState<AbortController | null>(null);
+  const task = useTaskController();
+  const runTask = task.run;
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -68,49 +75,53 @@ export function ManualMergeTool<Source>({ adapter }: { adapter: ManualMergeAdapt
   }, []);
 
   const pickRecords = useCallback(async () => {
-    try {
-      const selected = await adapter.pickRecords();
-      if (selected) addRecords(selected);
-    } catch (error) {
-      showMergeError(error, t("merge.failed"));
-    }
-  }, [adapter, addRecords, t]);
+    await runTask({
+      execute: () => adapter.pickRecords(),
+      fallbackErrorCode: "merge.failed",
+      onSuccess: addRecords,
+    });
+  }, [adapter, addRecords, runTask]);
 
+  const receiveFiles = useCallback(async (files: MergeInputFile<FileSource>[]) => {
+    if (!adapter.recordsFromFiles) return;
+    await runTask({
+      execute: () => adapter.recordsFromFiles!(files),
+      fallbackErrorCode: "merge.failed",
+      onSuccess: addRecords,
+    });
+  }, [adapter, addRecords, runTask]);
   const receiveDrop = useCallback(async (transfer: DataTransfer) => {
-    if (!adapter.recordsFromDrop) return;
-    try {
-      addRecords(await adapter.recordsFromDrop(transfer));
-    } catch (error) {
-      showMergeError(error, t("merge.failed"));
-    }
-  }, [adapter, addRecords, t]);
+    if (!adapter.browserFileReference) return;
+    await receiveFiles(Array.from(transfer.files).map(adapter.browserFileReference));
+  }, [adapter.browserFileReference, receiveFiles]);
   const dropZone = useDropZone(receiveDrop);
-  const dropEnabled = Boolean(adapter.recordsFromDrop);
+  const browserDropEnabled = Boolean(adapter.browserFileReference && adapter.recordsFromFiles);
+  const dropEnabled = browserDropEnabled || Boolean(adapter.subscribeToFileDrop);
+  useEffect(() => adapter.subscribeToFileDrop?.(
+    (files) => { void receiveFiles(files); },
+    (error) => { void runTask({ execute: () => Promise.reject(error), fallbackErrorCode: "merge.failed" }); },
+  ), [adapter, receiveFiles, runTask]);
   const summaries = useMemo(() => summary?.sources ?? [], [summary]);
   const canMerge = records.length > 0
     && records.every((record) => record.fileRoles?.toc !== false)
     && outputName.trim() !== "";
 
   const runMerge = useCallback(async () => {
-    const controller = new AbortController();
-    setTask(controller);
-    setBusy(true);
-    try {
-      const result = await adapter.runMerge({
+    await runTask({
+      acceptResultAfterCancel: true,
+      execute: (signal) => adapter.runMerge({
         outputName: outputName.trim(),
         records,
-        signal: controller.signal,
-      });
-      if (!result) return;
-      setSummary(result.summary);
-      toast.success(t("merge.completed", { count: result.summary.resourceCount }));
-    } catch (error) {
-      showMergeError(error, t("merge.failed"));
-    } finally {
-      setTask(null);
-      setBusy(false);
-    }
-  }, [adapter, outputName, records, t]);
+        signal,
+      }),
+      fallbackErrorCode: "merge.failed",
+      onSuccess: (result) => {
+        setSummary(result.summary);
+        toast.success(t("merge.completed", { count: result.summary.resourceCount }));
+      },
+      report: (result) => ({ kind: "merge", ...result }),
+    });
+  }, [adapter, outputName, records, runTask, t]);
 
   const moveRecord = useCallback((sourceId: string, targetId: string) => {
     setRecords((current) => moveRecordToTarget(current, sourceId, targetId));
@@ -124,14 +135,14 @@ export function ManualMergeTool<Source>({ adapter }: { adapter: ManualMergeAdapt
 
   return (
     <section className="border-t border-hd2-border bg-black/20 p-5 min-[51.25rem]:p-6">
-      <div className={dropEnabled ? `border border-dashed px-4 py-4 ${dropZone.dragging ? "border-hd2-yellow bg-hd2-yellow-bg" : "border-hd2-line"}` : ""} {...(dropEnabled ? dropZone.handlers : {})}>
+      <div className={dropEnabled ? `border border-dashed px-4 py-4 ${dropZone.dragging ? "border-hd2-yellow bg-hd2-yellow-bg" : "border-hd2-line"}` : ""} {...(browserDropEnabled ? dropZone.handlers : {})}>
         <div className="flex flex-wrap items-center gap-3">
-          <Button disabled={busy} onClick={() => void pickRecords()} startIcon={<UploadFileIcon />} variant="contained">{t("merge.pick")}</Button>
+          <Button disabled={task.busy} onClick={() => void pickRecords()} startIcon={<UploadFileIcon />} variant="contained">{t("merge.pick")}</Button>
           {dropEnabled && <span className="text-xs text-hd2-muted">{dropZone.dragging ? t("merge.dropActive") : t("merge.dropHint")}</span>}
         </div>
       </div>
       <RecordList
-        busy={busy}
+        busy={task.busy}
         finishDrag={finishDrag}
         moveRecord={moveRecord}
         records={records}
@@ -143,11 +154,11 @@ export function ManualMergeTool<Source>({ adapter }: { adapter: ManualMergeAdapt
         summaries={summaries}
       />
       <div className="mt-5 flex flex-col gap-3 border-t border-hd2-border pt-4 min-[40rem]:flex-row min-[40rem]:items-center">
-        <TextField disabled={busy} fullWidth label={t("merge.outputName")} onChange={(event) => setOutputName(event.target.value)} size="small" value={outputName} />
-        {busy && adapter.cancellable ? (
-          <Button color="error" className="shrink-0" onClick={() => task?.abort()} variant="outlined">{t("task.cancel")}</Button>
+        <TextField disabled={task.busy} fullWidth label={t("merge.outputName")} onChange={(event) => setOutputName(event.target.value)} size="small" value={outputName} />
+        {task.busy && adapter.cancellable ? (
+          <Button color="error" className="shrink-0" onClick={task.cancel} variant="outlined">{t("task.cancel")}</Button>
         ) : (
-          <Button className="shrink-0" disabled={!canMerge || busy} onClick={() => void runMerge()} startIcon={busy ? <CircularProgress size="1rem" /> : <MergeTypeIcon />} variant="contained">{busy ? t("merge.running") : t("merge.run")}</Button>
+          <Button className="shrink-0" disabled={!canMerge || task.busy} onClick={() => void runMerge()} startIcon={task.busy ? <CircularProgress size="1rem" /> : <MergeTypeIcon />} variant="contained">{task.busy ? t("merge.running") : t("merge.run")}</Button>
         )}
       </div>
       {records.some((record) => record.fileRoles?.toc === false) && <p className="mb-0 mt-3 text-xs text-red-300">{t("merge.mainRequired")}</p>}
@@ -253,8 +264,4 @@ function moveRecordToTarget<Source>(records: ManualMergeRecord<Source>[], source
 function formatBytes(value: number): string {
   if (value < 1024 * 1024) return `${Math.ceil(value / 1024)} KiB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
-}
-
-function showMergeError(error: unknown, title: string) {
-  toast.error(title, { description: error instanceof Error ? error.message : String(error) });
 }

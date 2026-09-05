@@ -5,29 +5,24 @@ import {
   copyTaskErrorDiagnostic,
   createMigrationProgressCounter,
   maxWebSeparateOutputsForPatch,
-  migrationMappingLabel,
   throwIfTaskCancelled,
-  uniqueOutputFilename,
   useI18n,
-  type MigrationMapping,
   type MigrationSummary,
   type TaskErrorCode,
   type Translate,
-  type UnifiedMigrateOptions,
 } from "@hd2-mod-tools/migrator-ui";
-import type {
-  MigratorPlatform,
-  PlatformViewExtras,
-  SelectedGameData,
-  SelectedPatch,
-  SetupPanelsProps,
+import {
+  DEFAULT_REPATCH_OUTPUT,
+  type MigratorPlatform,
+  type PlatformViewExtras,
+  type SelectedGameData,
+  type SelectedPatch,
+  type SetupPanelsProps,
 } from "@hd2-mod-tools/migrator-app";
 import {
   DesktopDownloadEntry,
   DesktopErrorRecommendation,
   DesktopRecommendation,
-  MultiTargetGuidanceDialog,
-  RepatchGuidanceDialog,
   WebMappingLimitDialog,
 } from "./DesktopGuidance";
 import { isDesktopRecoverableWebError } from "./desktopGuidancePolicy";
@@ -42,22 +37,14 @@ import {
   patchSidecarRequirements,
   previewEquipmentMappings,
   repatchUnits,
-  type MigrationProgressSink,
+  type MigrationTaskContext,
 } from "./wasmClient";
 import type { PatchFiles } from "@hd2-mod-tools/migrator-ui";
 
-const PATCH_SUFFIX = "9ba626afa44a3aa3.patch_0";
-
 export const webPlatform: MigratorPlatform<PatchFiles, GameDirSelection> = {
-  capabilities: {
-    batchTargetSelection: false,
-    confirmMultiTarget: true,
-    confirmRepatch: true,
-    mappingLimits: {
-      separateOutputLimit: maxWebSeparateOutputsForPatch,
-      singlePatchLimit: MAX_WEB_SINGLE_PATCH_MAPPINGS,
-    },
-    recommendDesktop: true,
+  resourceLimits: {
+    separateOutputLimit: maxWebSeparateOutputsForPatch,
+    singlePatchLimit: MAX_WEB_SINGLE_PATCH_MAPPINGS,
   },
   copyDiagnostic: copyTaskErrorDiagnostic,
   errorFallbackCode: (error) => isWasmRuntimeTrapError(error) ? "wasm.runtime" : "unknown",
@@ -118,24 +105,12 @@ export const webViewExtras: Omit<PlatformViewExtras, "footer"> = {
     <DesktopErrorRecommendation>{description}</DesktopErrorRecommendation>
   ),
   guidanceDialogs: (props) => (
-    <>
-      <MultiTargetGuidanceDialog
-        onCancel={props.onRejectMultiTarget}
-        onContinue={props.onConfirmMultiTarget}
-        open={props.multiTargetOpen}
-      />
-      <RepatchGuidanceDialog
-        onCancel={props.onRejectRepatch}
-        onContinue={props.onConfirmRepatch}
-        open={props.repatchOpen}
-      />
-      <WebMappingLimitDialog
-        count={props.mappingLimit?.count ?? 0}
-        max={props.mappingLimit?.max ?? 0}
-        onClose={props.onCloseMappingLimit}
-        open={props.mappingLimit !== null}
-      />
-    </>
+    <WebMappingLimitDialog
+      count={props.mappingLimit?.count ?? 0}
+      max={props.mappingLimit?.max ?? 0}
+      onClose={props.onCloseMappingLimit}
+      open={props.mappingLimit !== null}
+    />
   ),
   mappingNotice: ({ limit, selectedTargetCount }) => (
     <DesktopRecommendation
@@ -149,22 +124,14 @@ export const webViewExtras: Omit<PlatformViewExtras, "footer"> = {
 async function runWebMigration(
   request: Parameters<typeof webPlatform.runMigration>[0],
 ): Promise<{ output: string; summary: MigrationSummary }> {
-  const options: UnifiedMigrateOptions = {
-    variants: request.variants,
-    patchSuffix: PATCH_SUFFIX,
-    noPadding: request.noPadding,
-    unmatchedUnitPolicy: request.unmatchedUnitPolicy,
-    unitBehavior: request.unitBehavior,
-  };
-  const mappings = request.variants.flatMap((variant) => variant.mappings);
   const result = await migrateEquipmentVariants(
     request.patch.source,
-    options,
+    request.options,
     new GameDataSource(request.gameData.handle),
-    webMigrationProgress(mappings, request),
+    webMigrationProgress(request),
   );
   throwIfTaskCancelled(request.signal);
-  const output = migrationOutputFilename(request.patch, request.variants, request.equipmentOptions);
+  const output = request.suggestedOutputFilename;
   downloadZip(result.zipBlob, output);
   return { output, summary: result.summary };
 }
@@ -177,10 +144,10 @@ async function runWebRepatch(
     request.patch.source,
     { missingUnitPolicy: request.missingUnitPolicy },
     new GameDataSource(request.gameData.handle),
-    { onStage: () => throwIfTaskCancelled(request.signal) },
+    { onStage: () => throwIfTaskCancelled(request.signal), signal: request.signal },
   );
   throwIfTaskCancelled(request.signal);
-  const outputName = "hd2-repatched-mod.zip";
+  const outputName = DEFAULT_REPATCH_OUTPUT;
   downloadRepatchedPatch(
     request.patch.source,
     output.tocBytes,
@@ -191,36 +158,17 @@ async function runWebRepatch(
   return { output: outputName, summary: output.summary };
 }
 
-function webMigrationProgress(
-  mappings: MigrationMapping[],
-  request: Parameters<typeof webPlatform.runMigration>[0],
-): MigrationProgressSink {
-  const labels = mappings.map((mapping) => migrationMappingLabel(mapping, request.equipmentOptions));
-  const counter = createMigrationProgressCounter(labels, request.onProgressLabel);
+function webMigrationProgress(request: Parameters<typeof webPlatform.runMigration>[0]): MigrationTaskContext {
+  const counter = createMigrationProgressCounter(request.progressLabels, request.onProgressLabel);
   return {
+    signal: request.signal,
     onTargetStart: () => throwIfTaskCancelled(request.signal),
     onStage: () => throwIfTaskCancelled(request.signal),
-    onTargetFinish: () => {
+    onTargetFinish: (targetName) => {
       throwIfTaskCancelled(request.signal);
-      counter.advance();
+      counter.finish(targetName);
     },
   };
-}
-
-function migrationOutputFilename(
-  patch: SelectedPatch<PatchFiles>,
-  variants: Parameters<typeof webPlatform.runMigration>[0]["variants"],
-  equipmentOptions: Parameters<typeof webPlatform.runMigration>[0]["equipmentOptions"],
-) {
-  const mapping = variants.length === 1 && variants[0].mappings.length === 1
-    ? variants[0].mappings[0]
-    : null;
-  if (!mapping) return "hd2-migrated-patch.zip";
-  return uniqueOutputFilename(
-    patch.originalName ?? patch.info.name,
-    mapping.targetHash,
-    equipmentOptions,
-  );
 }
 
 function selectedWebPatch(source: PatchFiles): SelectedPatch<PatchFiles> {

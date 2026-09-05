@@ -4,7 +4,6 @@ members = [
     "crates/hd2-migrator-cli",
     "crates/hd2-migrator-core",
     "crates/hd2-migrator-data",
-    "crates/hd2-migrator-io",
     "crates/hd2-migrator-wasm",
     "crates/hd2-unit-matching",
     "crates/desktop/src-tauri",

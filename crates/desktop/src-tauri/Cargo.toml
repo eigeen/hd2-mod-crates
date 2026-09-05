@@ -20,7 +20,6 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-hd2-migrator-io = { path = "../../hd2-migrator-io" }
 hd2-migrator-core = { path = "../../hd2-migrator-core" }
 hd2-migrator-data = { path = "../../hd2-migrator-data" }
 svd-core = { path = "../../svd-core" }

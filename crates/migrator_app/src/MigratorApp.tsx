@@ -1,7 +1,7 @@
 import CancelIcon from "@mui/icons-material/Cancel";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { Button, CircularProgress } from "@mui/material";
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { toast, Toaster } from "sonner";
 import {
   MappingPreviewAccordion,
@@ -13,6 +13,7 @@ import {
   backgroundUrl,
   exceedsWebMappingLimit,
   presentTaskError,
+  selectTarget,
   useI18n,
   useTaskReportHistory,
   useUpdateInfo,
@@ -29,44 +30,15 @@ import {
   type SelectedPatch,
 } from "./platform";
 import { useMigrationWorkspace } from "./useMigrationWorkspace";
+import { compileMigrationRequest } from "./migrationRequest";
+import { TaskControllerProvider, useTaskController } from "./taskController";
 
 export function MigratorApp<PatchSource, GameDataSource>(
   props: MigratorAppProps<PatchSource, GameDataSource>,
 ) {
   const { extras, layout, platform } = props;
   const { t } = useI18n();
-  const [equipmentOptions, setEquipmentOptions] = useState<Awaited<ReturnType<typeof platform.loadEquipmentOptions>>>([]);
-  const [patch, setPatch] = useState<SelectedPatch<PatchSource> | null>(null);
-  const [gameData, setGameData] = useState<SelectedGameData<GameDataSource> | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
-  const [progressLabel, setProgressLabel] = useState("");
-  const [multiConfirmed, setMultiConfirmed] = useState(false);
-  const [multiWarningOpen, setMultiWarningOpen] = useState(false);
-  const [repatchWarningOpen, setRepatchWarningOpen] = useState(false);
-  const [mappingLimitWarning, setMappingLimitWarning] = useState<{ count: number; max: number } | null>(null);
-  const activeTask = useRef<AbortController | null>(null);
-  const workspace = useMigrationWorkspace(equipmentOptions);
   const reports = useTaskReportHistory();
-  const updateInfo = useUpdateInfo();
-  const limits = mappingLimits(props, patch);
-  const selectedTargetCount = workspace.configuredMappings.length;
-  const activeLimit = workspace.outputAsSinglePatch ? limits.single : limits.separate;
-  const limitExceeded = Boolean(
-    props.platform.capabilities.mappingLimits
-      && exceedsWebMappingLimit(workspace.configuredMappings, activeLimit),
-  );
-  const canMigrate = Boolean(gameData?.ready && patch && selectedTargetCount && !limitExceeded);
-  const canRepatch = Boolean(gameData?.ready && patch);
-  const canRun = props.toolMode === "migrate" ? canMigrate : canRepatch;
-  const hint = blockerHint({
-    gameData: Boolean(gameData?.ready),
-    patch: Boolean(patch),
-    targetCount: props.toolMode === "migrate" ? selectedTargetCount : 1,
-    limitExceeded,
-    limit: activeLimit,
-  }, props.toolMode, t);
-
   const reportError = useCallback((error: unknown) => {
     console.error(`[hd2-migrator:${layout}] task failed:`, error);
     const fallback = platform.errorFallbackCode?.(error) ?? "unknown";
@@ -88,6 +60,52 @@ export function MigratorApp<PatchSource, GameDataSource>(
       },
     });
   }, [extras?.enhanceErrorDescription, layout, platform, t]);
+  return (
+    <TaskControllerProvider recordReport={reports.recordReport} reportError={reportError}>
+      <MigratorAppContent {...props} reportError={reportError} reports={reports} />
+    </TaskControllerProvider>
+  );
+}
+
+function MigratorAppContent<PatchSource, GameDataSource>(
+  props: MigratorAppProps<PatchSource, GameDataSource> & {
+    reportError: (error: unknown) => void;
+    reports: ReturnType<typeof useTaskReportHistory>;
+  },
+) {
+  const { platform, reportError } = props;
+  const { t } = useI18n();
+  const [equipmentOptions, setEquipmentOptions] = useState<Awaited<ReturnType<typeof platform.loadEquipmentOptions>>>([]);
+  const [patch, setPatch] = useState<SelectedPatch<PatchSource> | null>(null);
+  const [gameData, setGameData] = useState<SelectedGameData<GameDataSource> | null>(null);
+  const [inspecting, setInspecting] = useState(false);
+  const [mappingLimitWarning, setMappingLimitWarning] = useState<{ count: number; max: number } | null>(null);
+  const task = useTaskController();
+  const [displayedToolMode, setDisplayedToolMode] = useState(props.toolMode);
+  const activeToolMode = task.busy ? displayedToolMode : props.toolMode;
+  const workspace = useMigrationWorkspace(equipmentOptions);
+  const reports = props.reports;
+  const updateInfo = useUpdateInfo();
+  useEffect(() => {
+    if (!task.busy) setDisplayedToolMode(props.toolMode);
+  }, [props.toolMode, task.busy]);
+  const limits = mappingLimits(props, patch);
+  const selectedTargetCount = workspace.configuredMappings.length;
+  const activeLimit = workspace.outputAsSinglePatch ? limits.single : limits.separate;
+  const limitExceeded = Boolean(
+    props.platform.resourceLimits
+      && exceedsWebMappingLimit(workspace.configuredMappings, activeLimit),
+  );
+  const canMigrate = Boolean(gameData?.ready && patch && selectedTargetCount && !limitExceeded);
+  const canRepatch = Boolean(gameData?.ready && patch);
+  const canRun = activeToolMode === "migrate" ? canMigrate : canRepatch;
+  const hint = blockerHint({
+    gameData: Boolean(gameData?.ready),
+    patch: Boolean(patch),
+    targetCount: activeToolMode === "migrate" ? selectedTargetCount : 1,
+    limitExceeded,
+    limit: activeLimit,
+  }, activeToolMode, t);
 
   useEffect(() => {
     let disposed = false;
@@ -112,29 +130,13 @@ export function MigratorApp<PatchSource, GameDataSource>(
       return;
     }
     let disposed = false;
-    setBusy(true);
+    setInspecting(true);
     void platform.inspectPatch(patch.source, gameData?.source ?? null)
       .then((analysis) => { if (!disposed) workspace.applyAnalysis(analysis); })
       .catch((error) => { if (!disposed) reportError(error); })
-      .finally(() => { if (!disposed) setBusy(false); });
+      .finally(() => { if (!disposed) setInspecting(false); });
     return () => { disposed = true; };
   }, [gameData?.key, patch?.key, platform]);
-
-  const runCancellable = useCallback(async (task: (signal: AbortSignal) => Promise<void>) => {
-    const controller = new AbortController();
-    activeTask.current = controller;
-    setBusy(true);
-    try {
-      await task(controller.signal);
-    } catch (error) {
-      reportError(error);
-    } finally {
-      if (activeTask.current === controller) activeTask.current = null;
-      setBusy(false);
-      setCancelling(false);
-      setProgressLabel("");
-    }
-  }, [reportError]);
 
   const runMigration = useCallback(async () => {
     if (!patch || !gameData?.ready) return;
@@ -142,44 +144,51 @@ export function MigratorApp<PatchSource, GameDataSource>(
       setMappingLimitWarning({ count: selectedTargetCount, max: activeLimit });
       return;
     }
-    await runCancellable(async (signal) => {
-      const result = await platform.runMigration({
-        equipmentOptions,
-        gameData: gameData.source,
-        noPadding: workspace.noPadding,
-        onProgressLabel: setProgressLabel,
-        patch,
-        signal,
-        unitBehavior: workspace.unitBehavior,
-        unmatchedUnitPolicy: workspace.unmatchedUnitPolicy,
-        variants: workspace.variants,
-      });
-      if (result) reports.recordReport({ kind: "migration", ...result });
+    const compiled = compileMigrationRequest({
+      equipmentOptions,
+      noPadding: workspace.noPadding,
+      patch,
+      unitBehavior: workspace.unitBehavior,
+      unmatchedUnitPolicy: workspace.unmatchedUnitPolicy,
+      variants: workspace.variants,
     });
-  }, [activeLimit, equipmentOptions, gameData, limitExceeded, patch, platform, reports.recordReport, runCancellable, selectedTargetCount, workspace]);
+    await task.run({
+      acceptResultAfterCancel: true,
+      execute: (signal, onProgressLabel) => platform.runMigration({
+        gameData: gameData.source,
+        onProgressLabel,
+        patch,
+        ...compiled,
+        signal,
+      }),
+      fallbackErrorCode: "migration.failed",
+      report: (result) => ({ kind: "migration", ...result }),
+    });
+  }, [activeLimit, equipmentOptions, gameData, limitExceeded, patch, platform, reports.recordReport, selectedTargetCount, task, workspace]);
 
   const runRepatch = useCallback(async () => {
     if (!patch || !gameData?.ready) return;
-    await runCancellable(async (signal) => {
-      const result = await platform.runRepatch({
+    await task.run({
+      acceptResultAfterCancel: true,
+      execute: (signal, onProgressLabel) => platform.runRepatch({
         gameData: gameData.source,
         missingUnitPolicy: workspace.missingUnitPolicy,
-        onProgressLabel: setProgressLabel,
+        onProgressLabel,
         patch,
         signal,
-      });
-      if (result) reports.recordReport({ kind: "repatch", ...result });
+      }),
+      fallbackErrorCode: "repatch.failed",
+      report: (result) => ({ kind: "repatch", ...result }),
     });
-  }, [gameData, patch, platform, reports.recordReport, runCancellable, workspace.missingUnitPolicy]);
+  }, [gameData, patch, platform, reports.recordReport, task, workspace.missingUnitPolicy]);
 
   const requestRun = useCallback(() => {
-    if (props.toolMode === "migrate") {
+    if (activeToolMode === "migrate") {
       void runMigration();
       return;
     }
-    if (platform.capabilities.confirmRepatch) setRepatchWarningOpen(true);
-    else void runRepatch();
-  }, [platform.capabilities.confirmRepatch, props.toolMode, runMigration, runRepatch]);
+    void runRepatch();
+  }, [activeToolMode, runMigration, runRepatch]);
 
   const toggleMultiTarget = useCallback((enabled: boolean) => {
     if (!workspace.multiTargetEligible) return;
@@ -188,26 +197,21 @@ export function MigratorApp<PatchSource, GameDataSource>(
       return;
     }
     workspace.setMultiTarget(true);
-    if (platform.capabilities.confirmMultiTarget && !multiConfirmed) {
-      setMultiWarningOpen(true);
-    }
-  }, [multiConfirmed, platform.capabilities.confirmMultiTarget, workspace]);
+  }, [workspace]);
 
   const replaceTargets = useCallback((targets: string[]) => {
     const nextCount = configuredMappingCount(workspace, targets);
     const reducesCount = nextCount < selectedTargetCount;
-    if (!reducesCount && platform.capabilities.mappingLimits && nextCount > activeLimit) {
+    if (!reducesCount && platform.resourceLimits && nextCount > activeLimit) {
       setMappingLimitWarning({ count: nextCount, max: activeLimit });
       return;
     }
     workspace.replaceActiveTargets(targets);
-  }, [activeLimit, platform.capabilities.mappingLimits, selectedTargetCount, workspace]);
+  }, [activeLimit, platform.resourceLimits, selectedTargetCount, workspace]);
 
   const chooseTarget = useCallback((hash: string) => {
     const current = workspace.activeTargets;
-    const next = workspace.multiTarget
-      ? current.includes(hash) ? current.filter((target) => target !== hash) : [...current, hash]
-      : [hash];
+    const next = selectTarget(current, hash, workspace.multiTarget);
     replaceTargets(next);
   }, [replaceTargets, workspace.activeTargets, workspace.multiTarget]);
 
@@ -221,9 +225,9 @@ export function MigratorApp<PatchSource, GameDataSource>(
   }, [limits.separate, limits.single, selectedTargetCount, workspace.setSinglePatch]);
 
   const SetupPanels = props.SetupPanels;
-  const mainContent = props.toolMode === "merge"
+  const mainContent = activeToolMode === "merge"
     ? <props.MergeTool />
-    : props.toolMode === "head-merge"
+    : activeToolMode === "head-merge"
       ? <props.HeadMergeTool />
       : (
         <>
@@ -246,21 +250,20 @@ export function MigratorApp<PatchSource, GameDataSource>(
             selectedTargetCount={selectedTargetCount}
             toggleMultiTarget={toggleMultiTarget}
             toggleSinglePatch={toggleSinglePatch}
-            toolMode={props.toolMode}
+            toolMode={activeToolMode}
             workspace={workspace}
           />
           <ActionRow
             blockerHint={hint}
-            busy={busy}
-            cancelling={cancelling}
+            busy={task.busy || inspecting}
+            cancelling={task.snapshot.phase === "cancelling"}
             canRun={canRun}
             onCancel={() => {
-              setCancelling(true);
-              activeTask.current?.abort();
+              task.cancel();
             }}
             onRun={requestRun}
-            progressLabel={progressLabel}
-            toolMode={props.toolMode}
+            progressLabel={task.snapshot.progressLabel}
+            toolMode={activeToolMode}
             workspace={workspace}
           />
         </>
@@ -276,7 +279,7 @@ export function MigratorApp<PatchSource, GameDataSource>(
         report={reports.activeReport}
       />
       <UpdateInfoDialog controller={updateInfo} />
-      {extras?.overlay?.(busy)}
+      {props.extras?.overlay?.(task.busy)}
       <AppChrome
         afterHeader={props.extras?.afterHeader}
         footer={props.extras?.footer}
@@ -285,22 +288,19 @@ export function MigratorApp<PatchSource, GameDataSource>(
         onClearReports={reports.clearHistory}
         onOpenReport={reports.openReport}
         onOpenUpdateInfo={updateInfo.openLatest}
-        onToolModeChange={props.onToolModeChange}
+        navigationDisabled={task.busy}
+        onToolModeChange={(mode) => {
+          if (!task.busy) props.onToolModeChange(mode);
+        }}
         reports={reports.history}
-        toolMode={props.toolMode}
+        toolMode={activeToolMode}
         updateInfoAvailable={updateInfo.available}
       >
         {mainContent}
       </AppChrome>
       {props.extras?.guidanceDialogs?.({
         mappingLimit: mappingLimitWarning,
-        multiTargetOpen: multiWarningOpen,
         onCloseMappingLimit: () => setMappingLimitWarning(null),
-        onConfirmMultiTarget: () => { setMultiConfirmed(true); setMultiWarningOpen(false); },
-        onConfirmRepatch: () => { setRepatchWarningOpen(false); void runRepatch(); },
-        onRejectMultiTarget: () => { setMultiWarningOpen(false); workspace.disableMultiTarget(); },
-        onRejectRepatch: () => setRepatchWarningOpen(false),
-        repatchOpen: repatchWarningOpen,
       })}
     </div>
   );
@@ -310,7 +310,7 @@ function mappingLimits<PatchSource, GameDataSource>(
   props: MigratorAppProps<PatchSource, GameDataSource>,
   patch: SelectedPatch<PatchSource> | null,
 ) {
-  const configured = props.platform.capabilities.mappingLimits;
+  const configured = props.platform.resourceLimits;
   return configured ? {
     separate: configured.separateOutputLimit(patch?.byteLength ?? 0),
     single: configured.singlePatchLimit,
@@ -347,7 +347,7 @@ interface WorkspacePanelsProps<PatchSource, GameDataSource> {
 function MigrationWorkspacePanels<PatchSource, GameDataSource>(props: WorkspacePanelsProps<PatchSource, GameDataSource>) {
   if (props.toolMode === "repatch") return null;
   const workspace = props.workspace;
-  const showLimits = Boolean(props.platform.capabilities.mappingLimits);
+  const showLimits = Boolean(props.platform.resourceLimits);
   const showNotice = showLimits && props.selectedTargetCount >= Math.ceil(props.activeLimit / 2)
     && props.selectedTargetCount <= props.activeLimit;
   return (
@@ -357,7 +357,7 @@ function MigrationWorkspacePanels<PatchSource, GameDataSource>(props: WorkspaceP
         equipmentOptions={props.equipmentOptions}
         multiTarget={workspace.multiTarget}
         multiTargetEligible={workspace.multiTargetEligible}
-        onBatchSelect={props.platform.capabilities.batchTargetSelection ? props.replaceTargets : undefined}
+        onBatchSelect={props.replaceTargets}
         onMultiTargetChange={props.toggleMultiTarget}
         onResolveSource={workspace.resolveSource}
         onSinglePatchChange={props.toggleSinglePatch}

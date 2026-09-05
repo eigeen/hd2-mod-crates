@@ -2,17 +2,13 @@ import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createMigrationProgressCounter } from "@hd2-mod-tools/migrator-ui";
 import {
-  createMigrationProgressCounter,
-  uniqueOutputFilename,
-  type EquipmentOption,
-  type MigrationVariant,
-} from "@hd2-mod-tools/migrator-ui";
-import type {
-  MigratorPlatform,
-  SelectedGameData,
-  SelectedPatch,
-  SetupPanelsProps,
+  DEFAULT_REPATCH_OUTPUT,
+  type MigratorPlatform,
+  type SelectedGameData,
+  type SelectedPatch,
+  type SetupPanelsProps,
 } from "@hd2-mod-tools/migrator-app";
 import {
   chooseGameDataDir,
@@ -26,22 +22,15 @@ import {
   startMigration,
   startRepatch,
   validateGameDataDir,
-  type DesktopTask,
 } from "./desktopClient";
+import { waitForDesktopTask } from "./desktopTask";
 import { DesktopGameDataPanel, DesktopPatchPanel } from "./DesktopPanels";
 import { dropZoneFromPhysicalPosition, type DropZone } from "./dropTarget";
 import type { PatchDescriptor } from "./types";
 
-const PATCH_SUFFIX = "9ba626afa44a3aa3.patch_0";
 const GAME_DATA_STORAGE_KEY = "hd2-migrator-native-game-data";
 
 export const desktopPlatform: MigratorPlatform<string[], string> = {
-  capabilities: {
-    batchTargetSelection: true,
-    confirmMultiTarget: false,
-    confirmRepatch: false,
-    recommendDesktop: false,
-  },
   copyDiagnostic: writeText,
   inspectPatch: async (paths, dataDir) => {
     const result = await inspectPatch(paths, dataDir);
@@ -116,28 +105,17 @@ async function runDesktopMigration(
   request: Parameters<typeof desktopPlatform.runMigration>[0],
 ) {
   const outputPath = await chooseOutputZip(
-    migrationOutputFilename(request.patch, request.variants, request.equipmentOptions),
+    request.suggestedOutputFilename,
   );
   if (!outputPath) return null;
-  const mappings = request.variants.flatMap((variant) => variant.mappings);
-  const labels = mappings.map((mapping) => (
-    request.equipmentOptions.find((option) => option.hash === mapping.targetHash)?.name
-      ?? mapping.targetHash
-  ));
-  const counter = createMigrationProgressCounter(labels, request.onProgressLabel);
+  const counter = createMigrationProgressCounter(request.progressLabels, request.onProgressLabel);
   const task = startMigration({
     patchPaths: request.patch.source,
     dataDir: request.gameData,
     outputPath,
-    options: {
-      variants: request.variants,
-      patchSuffix: PATCH_SUFFIX,
-      noPadding: request.noPadding,
-      unmatchedUnitPolicy: request.unmatchedUnitPolicy,
-      unitBehavior: request.unitBehavior,
-    },
+    options: request.options,
   }, (event) => {
-    if (event.kind === "targetFinish") counter.advance();
+    if (event.kind === "targetFinish") counter.finish(event.targetName);
   });
   const summary = await waitForDesktopTask(task, request.signal);
   return { output: outputPath, summary };
@@ -146,7 +124,7 @@ async function runDesktopMigration(
 async function runDesktopRepatch(
   request: Parameters<typeof desktopPlatform.runRepatch>[0],
 ) {
-  const outputPath = await chooseOutputZip("hd2-repatched-mod.zip");
+  const outputPath = await chooseOutputZip(DEFAULT_REPATCH_OUTPUT);
   if (!outputPath) return null;
   request.onProgressLabel("1/1");
   const task = startRepatch({
@@ -157,33 +135,6 @@ async function runDesktopRepatch(
   }, () => undefined);
   const summary = await waitForDesktopTask(task, request.signal);
   return { output: outputPath, summary };
-}
-
-async function waitForDesktopTask<T>(task: DesktopTask<T>, signal: AbortSignal): Promise<T> {
-  const cancel = () => { void task.cancel(); };
-  signal.addEventListener("abort", cancel, { once: true });
-  if (signal.aborted) cancel();
-  try {
-    return await task.result;
-  } finally {
-    signal.removeEventListener("abort", cancel);
-  }
-}
-
-function migrationOutputFilename(
-  patch: SelectedPatch<string[]>,
-  variants: MigrationVariant[],
-  equipmentOptions: EquipmentOption[],
-) {
-  const mapping = variants.length === 1 && variants[0].mappings.length === 1
-    ? variants[0].mappings[0]
-    : null;
-  if (!mapping) return "hd2-migrated-patch.zip";
-  return uniqueOutputFilename(
-    patch.originalName ?? patch.info.name,
-    mapping.targetHash,
-    equipmentOptions,
-  );
 }
 
 async function selectedDesktopPatch(paths: string[]): Promise<SelectedPatch<string[]>> {

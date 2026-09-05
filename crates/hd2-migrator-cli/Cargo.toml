@@ -14,7 +14,7 @@ clap.workspace = true
 color-eyre.workspace = true
 dialoguer.workspace = true
 eyre.workspace = true
-hd2-migrator-io = { path = "../hd2-migrator-io" }
+hd2-migrator-core = { path = "../hd2-migrator-core" }
 indicatif = { workspace = true, features = ["rayon"] }
 owo-colors.workspace = true
 serde_json.workspace = true

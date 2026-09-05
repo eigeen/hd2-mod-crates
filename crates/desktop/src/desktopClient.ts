@@ -14,6 +14,7 @@ import type {
   HeadArmorMergeRequest,
   HeadArmorMergeSummary,
   PatchDescriptor,
+  DiscoveredPatchFile,
   PatchMergeRequest,
   PatchMergeSummary,
   UnitRepatchSummary,
@@ -45,6 +46,10 @@ export function inspectPatch(paths: string[], dataDir: string | null): Promise<I
 
 export function describePatch(paths: string[]): Promise<PatchDescriptor> {
   return invoke("describe_patch", { paths });
+}
+
+export function enumeratePatchFiles(paths: string[]): Promise<DiscoveredPatchFile[]> {
+  return invoke("enumerate_patch_files", { paths });
 }
 
 export function previewEquipmentMapping(

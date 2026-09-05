@@ -13,6 +13,8 @@ import {
   type EquipmentOption,
   type HeadArmorMergeSummary,
 } from "@hd2-mod-tools/migrator-ui";
+import { useTaskController } from "./taskController";
+import type { MergeInputFile } from "./mergeInputs";
 
 export interface HeadMergeRecord<Source> {
   armors: EquipmentOption[];
@@ -22,10 +24,15 @@ export interface HeadMergeRecord<Source> {
   source: Source;
 }
 
-export interface HeadMergeAdapter<Source> {
+export interface HeadMergeAdapter<Source, FileSource = never> {
+  browserFileReference?: (file: File) => MergeInputFile<FileSource>;
   cancellable: boolean;
   pickRecords: () => Promise<HeadMergeRecord<Source>[] | null>;
-  recordsFromDrop?: (transfer: DataTransfer) => Promise<HeadMergeRecord<Source>[]>;
+  recordsFromFiles?: (files: MergeInputFile<FileSource>[]) => Promise<HeadMergeRecord<Source>[]>;
+  subscribeToFileDrop?: (
+    receive: (files: MergeInputFile<FileSource>[]) => void,
+    reject: (error: unknown) => void,
+  ) => () => void;
   runMerge: (request: {
     armorHash: string;
     armorRecord: HeadMergeRecord<Source>;
@@ -35,14 +42,14 @@ export interface HeadMergeAdapter<Source> {
   }) => Promise<{ output: string; summary: HeadArmorMergeSummary } | null>;
 }
 
-export function HeadArmorMergeTool<Source>({ adapter }: { adapter: HeadMergeAdapter<Source> }) {
+export function HeadArmorMergeTool<Source, FileSource>({ adapter }: { adapter: HeadMergeAdapter<Source, FileSource> }) {
   const { t } = useI18n();
   const [records, setRecords] = useState<HeadMergeRecord<Source>[]>([]);
   const [armorHash, setArmorHash] = useState("");
   const [helmetHash, setHelmetHash] = useState("");
   const [adding, setAdding] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [task, setTask] = useState<AbortController | null>(null);
+  const task = useTaskController();
+  const runTask = task.run;
   const [summary, setSummary] = useState<HeadArmorMergeSummary | null>(null);
   const combined = useMemo(() => combineEquipmentChoices(records.map((record) => ({
     sourceName: record.name,
@@ -63,72 +70,74 @@ export function HeadArmorMergeTool<Source>({ adapter }: { adapter: HeadMergeAdap
 
   const pickRecords = useCallback(async () => {
     setAdding(true);
-    try {
-      const selected = await adapter.pickRecords();
-      if (selected) addRecords(selected);
-    } catch (error) {
-      showError(error, t("headMerge.failed"));
-    } finally {
-      setAdding(false);
-    }
-  }, [adapter, addRecords, t]);
+    await runTask({
+      execute: () => adapter.pickRecords(),
+      fallbackErrorCode: "headMerge.failed",
+      onSuccess: addRecords,
+    });
+    setAdding(false);
+  }, [adapter, addRecords, runTask]);
 
-  const receiveDrop = useCallback(async (transfer: DataTransfer) => {
-    if (!adapter.recordsFromDrop) return;
+  const receiveFiles = useCallback(async (files: MergeInputFile<FileSource>[]) => {
+    if (!adapter.recordsFromFiles) return;
     setAdding(true);
-    try {
-      addRecords(await adapter.recordsFromDrop(transfer));
-    } catch (error) {
-      showError(error, t("headMerge.failed"));
-    } finally {
-      setAdding(false);
-    }
-  }, [adapter, addRecords, t]);
+    await runTask({
+      execute: () => adapter.recordsFromFiles!(files),
+      fallbackErrorCode: "headMerge.failed",
+      onSuccess: addRecords,
+    });
+    setAdding(false);
+  }, [adapter, addRecords, runTask]);
+  const receiveDrop = useCallback(async (transfer: DataTransfer) => {
+    if (!adapter.browserFileReference) return;
+    await receiveFiles(Array.from(transfer.files).map(adapter.browserFileReference));
+  }, [adapter.browserFileReference, receiveFiles]);
   const dropZone = useDropZone(receiveDrop);
-  const dropEnabled = Boolean(adapter.recordsFromDrop);
+  const browserDropEnabled = Boolean(adapter.browserFileReference && adapter.recordsFromFiles);
+  const dropEnabled = browserDropEnabled || Boolean(adapter.subscribeToFileDrop);
+  useEffect(() => adapter.subscribeToFileDrop?.(
+    (files) => { void receiveFiles(files); },
+    (error) => { void runTask({ execute: () => Promise.reject(error), fallbackErrorCode: "headMerge.failed" }); },
+  ), [adapter, receiveFiles, runTask]);
   const blocker = headMergeBlocker(records, combined, armorHash, helmetHash, t);
-  const canRun = !busy && !adding && blocker === null;
+  const canRun = !task.busy && !adding && blocker === null;
 
   const run = useCallback(async () => {
     const armorRecord = records.find((record) => record.armors.some((option) => option.hash === armorHash));
     const helmetRecord = records.find((record) => record.helmets.some((option) => option.hash === helmetHash));
     if (!armorRecord || !helmetRecord) return;
-    const controller = new AbortController();
-    setTask(controller);
-    setBusy(true);
-    try {
-      const result = await adapter.runMerge({ armorHash, armorRecord, helmetHash, helmetRecord, signal: controller.signal });
-      if (!result) return;
-      setSummary(result.summary);
-      toast.success(t("headMerge.completed", { count: result.summary.mergedLods }));
-    } catch (error) {
-      showError(error, t("headMerge.failed"));
-    } finally {
-      setTask(null);
-      setBusy(false);
-    }
-  }, [adapter, armorHash, helmetHash, records, t]);
+    await runTask({
+      acceptResultAfterCancel: true,
+      execute: (signal) => adapter.runMerge({ armorHash, armorRecord, helmetHash, helmetRecord, signal }),
+      fallbackErrorCode: "headMerge.failed",
+      onSuccess: (result) => {
+        setSummary(result.summary);
+        toast.success(t("headMerge.completed", { count: result.summary.mergedLods }));
+      },
+      report: (result) => ({ kind: "headMerge", ...result }),
+    });
+  }, [adapter, armorHash, helmetHash, records, runTask, t]);
 
   return (
     <section className="border-t border-hd2-border bg-black/20 p-5 min-[51.25rem]:p-6">
-      <div className={dropEnabled ? `border border-dashed px-4 py-4 ${dropZone.dragging ? "border-hd2-yellow bg-hd2-yellow-bg" : "border-hd2-line"}` : ""} {...(dropEnabled ? dropZone.handlers : {})}>
+      <div className={dropEnabled ? `border border-dashed px-4 py-4 ${dropZone.dragging ? "border-hd2-yellow bg-hd2-yellow-bg" : "border-hd2-line"}` : ""} {...(browserDropEnabled ? dropZone.handlers : {})}>
         <div className="flex flex-wrap items-center gap-3">
-          <Button disabled={adding || busy} onClick={() => void pickRecords()} startIcon={adding ? <CircularProgress size="1rem" /> : <UploadFileIcon />} variant="contained">{t("headMerge.pick")}</Button>
+          <Button disabled={adding || task.busy} onClick={() => void pickRecords()} startIcon={adding ? <CircularProgress size="1rem" /> : <UploadFileIcon />} variant="contained">{t("headMerge.pick")}</Button>
           {dropEnabled && <span className="text-xs text-hd2-muted">{dropZone.dragging ? t("headMerge.dropActive") : t("headMerge.dropHint")}</span>}
         </div>
       </div>
-      <HeadMergeRecordList records={records} removeRecord={(id) => {
+      <HeadMergeRecordList busy={task.busy} records={records} removeRecord={(id) => {
         setRecords((current) => current.filter((record) => record.id !== id));
         setSummary(null);
       }} />
       <div className="mt-5 grid gap-4 min-[51.25rem]:grid-cols-2">
-        <EquipmentChoice disabled={busy} label={t("headMerge.armorChoice")} onChange={setArmorHash} options={combined.armors} records={records.length} value={armorHash} />
-        <EquipmentChoice disabled={busy} label={t("headMerge.helmetChoice")} onChange={setHelmetHash} options={combined.helmets} records={records.length} value={helmetHash} />
+        <EquipmentChoice disabled={task.busy} label={t("headMerge.armorChoice")} onChange={setArmorHash} options={combined.armors} records={records.length} value={armorHash} />
+        <EquipmentChoice disabled={task.busy} label={t("headMerge.helmetChoice")} onChange={setHelmetHash} options={combined.helmets} records={records.length} value={helmetHash} />
       </div>
       <div className="mt-5 flex flex-col items-start gap-3">
         <div className="flex gap-3">
-          <Button disabled={!canRun} onClick={() => void run()} startIcon={busy ? <CircularProgress size="1rem" /> : <MergeTypeIcon />} variant="contained">{busy ? t("headMerge.running") : t("headMerge.run")}</Button>
-          {busy && adapter.cancellable && <Button color="error" onClick={() => task?.abort()} variant="outlined">{t("task.cancel")}</Button>}
+          <Button disabled={!canRun} onClick={() => void run()} startIcon={task.busy ? <CircularProgress size="1rem" /> : <MergeTypeIcon />} variant="contained">{task.busy ? t("headMerge.running") : t("headMerge.run")}</Button>
+          {task.busy && adapter.cancellable && <Button color="error" onClick={task.cancel} variant="outlined">{t("task.cancel")}</Button>}
         </div>
         {blocker && <p className="mb-0 text-xs text-hd2-muted">{blocker}</p>}
       </div>
@@ -137,16 +146,18 @@ export function HeadArmorMergeTool<Source>({ adapter }: { adapter: HeadMergeAdap
   );
 }
 
-function HeadMergeRecordList<Source>({ records, removeRecord }: {
+function HeadMergeRecordList<Source>({ busy, records, removeRecord }: {
+  busy: boolean;
   records: HeadMergeRecord<Source>[];
   removeRecord: (id: string) => void;
 }) {
   const { t } = useI18n();
   if (!records.length) return <p className="m-0 mt-4 border border-hd2-line px-4 py-6 text-center text-sm text-hd2-muted">{t("headMerge.empty")}</p>;
-  return <div className="mt-4 space-y-2">{records.map((record, index) => <HeadMergeRecordRow index={index} key={record.id} onRemove={() => removeRecord(record.id)} record={record} />)}</div>;
+  return <div className="mt-4 space-y-2">{records.map((record, index) => <HeadMergeRecordRow busy={busy} index={index} key={record.id} onRemove={() => removeRecord(record.id)} record={record} />)}</div>;
 }
 
-function HeadMergeRecordRow<Source>({ index, onRemove, record }: {
+function HeadMergeRecordRow<Source>({ busy, index, onRemove, record }: {
+  busy: boolean;
   index: number;
   onRemove: () => void;
   record: HeadMergeRecord<Source>;
@@ -160,7 +171,7 @@ function HeadMergeRecordRow<Source>({ index, onRemove, record }: {
         <p className="m-0 truncate font-mono text-xs text-hd2-text" title={record.name}>{record.name}</p>
         <p className="m-0 mt-1 text-[0.6875rem] text-hd2-muted">{detected > 0 ? t("headMerge.recordDetected", { armors: record.armors.length, helmets: record.helmets.length }) : t("headMerge.recordNone")}</p>
       </div>
-      <IconButton aria-label={t("merge.remove")} onClick={onRemove} size="small"><DeleteIcon fontSize="small" /></IconButton>
+      <IconButton aria-label={t("merge.remove")} disabled={busy} onClick={onRemove} size="small"><DeleteIcon fontSize="small" /></IconButton>
     </div>
   );
 }
@@ -210,8 +221,4 @@ function headMergeBlocker<Source>(
 function keepOrAuto(current: string, options: EquipmentOption[]): string {
   if (current && options.some((option) => option.hash === current)) return current;
   return uniqueHeadMergeHash(options);
-}
-
-function showError(error: unknown, title: string) {
-  toast.error(title, { description: error instanceof Error ? error.message : String(error) });
 }

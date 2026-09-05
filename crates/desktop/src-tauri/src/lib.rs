@@ -25,6 +25,7 @@ pub fn run() {
             migration::load_equipment_options,
             migration::inspect_patch,
             migration::describe_patch,
+            migration::enumerate_patch_files,
             migration::preview_equipment_mapping,
             migration::preview_equipment_mappings,
             migration::migrate_equipment,

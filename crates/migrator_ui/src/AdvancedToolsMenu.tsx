@@ -11,6 +11,7 @@ export interface AdvancedToolsItem<TMode extends string> {
 interface AdvancedToolsMenuProps<TMode extends string> {
   /** Currently active tool mode; the matching item is highlighted. */
   active: string;
+  disabled?: boolean;
   /** Secondary tools listed inside the dropdown. */
   items: AdvancedToolsItem<TMode>[];
   /** Called with the selected item's mode. */
@@ -23,6 +24,7 @@ interface AdvancedToolsMenuProps<TMode extends string> {
  */
 export function AdvancedToolsMenu<TMode extends string>({
   active,
+  disabled = false,
   items,
   onSelect,
 }: AdvancedToolsMenuProps<TMode>) {
@@ -37,6 +39,7 @@ export function AdvancedToolsMenu<TMode extends string>({
         aria-expanded={Boolean(anchor)}
         aria-haspopup="menu"
         className={activeItem ? "advancedToolsTab advancedToolsTab-active" : "advancedToolsTab"}
+        disabled={disabled}
         endIcon={<ExpandMoreIcon />}
         onClick={(event) => setAnchor(event.currentTarget)}
       >

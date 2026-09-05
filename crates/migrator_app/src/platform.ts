@@ -5,15 +5,13 @@ import type {
   EquipmentPartGraph,
   MigrationMapping,
   MigrationSummary,
-  MigrationVariant,
   MissingUnitPolicy,
   PatchInfo,
   PatchInspection,
   TaskErrorCode,
   Translate,
-  UnitBehaviorOptions,
   UnitRepatchSummary,
-  UnmatchedUnitPolicy,
+  UnifiedMigrateOptions,
 } from "@hd2-mod-tools/migrator-ui";
 
 export type ToolMode = "migrate" | "repatch" | "merge" | "head-merge";
@@ -43,23 +41,13 @@ export interface MappingLimits {
   singlePatchLimit: number;
 }
 
-export interface PlatformCapabilities {
-  batchTargetSelection: boolean;
-  confirmMultiTarget: boolean;
-  confirmRepatch: boolean;
-  mappingLimits?: MappingLimits;
-  recommendDesktop: boolean;
-}
-
 export interface MigrationRunRequest<PatchSource, GameDataSource> {
-  equipmentOptions: EquipmentOption[];
   gameData: GameDataSource;
-  noPadding: boolean;
+  options: UnifiedMigrateOptions;
   patch: SelectedPatch<PatchSource>;
+  progressLabels: string[];
   signal: AbortSignal;
-  unitBehavior: UnitBehaviorOptions;
-  unmatchedUnitPolicy: UnmatchedUnitPolicy;
-  variants: MigrationVariant[];
+  suggestedOutputFilename: string;
   onProgressLabel: (label: string) => void;
 }
 
@@ -77,7 +65,6 @@ export interface CompletedRun<Summary> {
 }
 
 export interface MigratorPlatform<PatchSource, GameDataSource> {
-  capabilities: PlatformCapabilities;
   copyDiagnostic: (diagnostic: string) => Promise<void>;
   errorFallbackCode?: (error: unknown) => TaskErrorCode;
   inspectPatch: (
@@ -90,6 +77,7 @@ export interface MigratorPlatform<PatchSource, GameDataSource> {
     patch: PatchSource,
     mappings: MigrationMapping[],
   ) => Promise<EquipmentMappingPreview[]>;
+  resourceLimits?: MappingLimits;
   restoreGameData?: () => Promise<SelectedGameData<GameDataSource> | null>;
   revealOutput?: (output: string) => Promise<void>;
   runMigration: (
@@ -115,13 +103,7 @@ export interface MappingNoticeProps {
 
 export interface GuidanceDialogProps {
   mappingLimit: { count: number; max: number } | null;
-  multiTargetOpen: boolean;
   onCloseMappingLimit: () => void;
-  onConfirmMultiTarget: () => void;
-  onConfirmRepatch: () => void;
-  onRejectMultiTarget: () => void;
-  onRejectRepatch: () => void;
-  repatchOpen: boolean;
 }
 
 export interface PlatformViewExtras {

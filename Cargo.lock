@@ -2089,7 +2089,7 @@ dependencies = [
  "color-eyre",
  "dialoguer",
  "eyre",
- "hd2-migrator-io",
+ "hd2-migrator-core",
  "indicatif",
  "owo-colors",
  "serde_json",
@@ -2102,22 +2102,6 @@ dependencies = [
 
 [[package]]
 name = "hd2-migrator-core"
-version = "1.2.0"
-dependencies = [
- "eyre",
- "hd2-archive-format",
- "hd2-migrator-data",
- "hd2-unit-matching",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "hd2-migrator-data"
-version = "1.2.0"
-
-[[package]]
-name = "hd2-migrator-io"
 version = "1.2.0"
 dependencies = [
  "byteorder",
@@ -2135,12 +2119,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hd2-migrator-data"
+version = "1.2.0"
+
+[[package]]
 name = "hd2-migrator-wasm"
 version = "1.2.0"
 dependencies = [
  "crc32fast",
  "eyre",
- "hd2-migrator-io",
+ "hd2-migrator-core",
  "js-sys",
  "serde",
  "serde-wasm-bindgen",
@@ -2167,7 +2155,6 @@ dependencies = [
  "eyre",
  "hd2-migrator-core",
  "hd2-migrator-data",
- "hd2-migrator-io",
  "pollster",
  "self_update",
  "serde",

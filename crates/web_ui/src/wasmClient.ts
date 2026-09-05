@@ -1,5 +1,6 @@
 import type { GameDataSource } from "./gameDataSource";
-import { StoreZipBuilder } from "./fileInputs";
+import { runWasmWorkerTask } from "./worker/taskWorkerClient";
+import type { MigrationProgressEvent } from "./worker/protocol";
 import {
   TaskError,
   normalizeTaskError,
@@ -26,15 +27,11 @@ export interface MigrationProgressSink {
   onTargetFinish?: (targetName: string) => void;
 }
 
-interface MigrationCallbacks extends MigrationProgressSink {
-  onFile: (path: string, bytes: Uint8Array, crc32: number) => void;
+export interface WasmTaskContext {
+  signal?: AbortSignal;
 }
 
-interface ArchiveOutputCallbacks {
-  onFileStart: (path: string, size: number, crc32: number) => void;
-  onFileChunk: (bytes: Uint8Array) => void;
-  onFileEnd: () => void;
-}
+export interface MigrationTaskContext extends MigrationProgressSink, WasmTaskContext {}
 
 export class WasmRuntimeTrapError extends Error {
   constructor() {
@@ -44,7 +41,8 @@ export class WasmRuntimeTrapError extends Error {
 }
 
 export function isWasmRuntimeTrapError(error: unknown): error is WasmRuntimeTrapError {
-  return error instanceof WasmRuntimeTrapError;
+  return error instanceof WasmRuntimeTrapError
+    || Boolean(error && typeof error === "object" && (error as { code?: unknown }).code === "wasm.runtime");
 }
 
 let ready: Promise<typeof import("./wasm/hd2_migrator_wasm/hd2_migrator_wasm.js")> | null = null;
@@ -81,29 +79,32 @@ export async function patchSidecarRequirements(toc: Uint8Array) {
 export async function mergePatches(
   inputs: PatchFiles[],
   outputName: string,
+  context: WasmTaskContext = {},
 ): Promise<{ patch: PatchFiles; summary: PatchMergeSummary }> {
-  const wasm = await loadWasm();
-  return callWasm("merge_patches", () =>
-    wasm.merge_patches(inputs, outputName),
-  ) as Promise<{ patch: PatchFiles; summary: PatchMergeSummary }>;
+  return runWasmWorkerTask("mergePatches", { inputs, outputName }, {
+    signal: context.signal,
+  });
+}
+
+export async function mergePatchesToZip(
+  inputs: PatchFiles[],
+  outputName: string,
+  context: WasmTaskContext = {},
+): Promise<{ zipBlob: Blob; summary: PatchMergeSummary }> {
+  return runWasmWorkerTask("mergePatchesToZip", { inputs, outputName }, {
+    signal: context.signal,
+  });
 }
 
 export async function mergeHeadIntoArmor(
   armorPatch: PatchFiles,
   headPatch: PatchFiles | null,
   options: HeadArmorMergeOptions,
+  context: WasmTaskContext = {},
 ): Promise<{ zipBlob: Blob; summary: HeadArmorMergeSummary }> {
-  const wasm = await loadWasm();
-  const zip = new StoreZipBuilder();
-  const callbacks: ArchiveOutputCallbacks = {
-    onFileStart: (path, size, crc32) => zip.beginFile(path, size, crc32),
-    onFileChunk: (bytes) => zip.addFileChunk(bytes),
-    onFileEnd: () => zip.endFile(),
-  };
-  const result = await callWasm("merge_head_into_armor_stream", () =>
-    wasm.merge_head_into_armor_stream(armorPatch, headPatch, options, callbacks),
-  ) as { summary: HeadArmorMergeSummary };
-  return { zipBlob: zip.finish(), summary: result.summary };
+  return runWasmWorkerTask("mergeHeadIntoArmor", { armorPatch, headPatch, options }, {
+    signal: context.signal,
+  });
 }
 
 export async function detectSource(patch: PatchFiles, category = "Armor") {
@@ -175,36 +176,39 @@ export async function migrateEquipmentVariants(
   patch: PatchFiles,
   options: UnifiedMigrateOptions,
   dataSource: GameDataSource,
-  progress: MigrationProgressSink | null,
+  progress: MigrationTaskContext | null,
 ): Promise<MigrationResult> {
-  const wasm = await loadWasm();
-  const zip = new StoreZipBuilder();
-  const callbacks: MigrationCallbacks = {
-    ...progress,
-    onFile: (path, bytes, crc32) => zip.add(path, bytes, crc32),
-  };
-  const result = await callWasm("migrate_equipment_variants", () =>
-    wasm.migrate_equipment_variants(
-      patch,
-      options,
-      dataSource,
-      callbacks,
-    ),
-  ) as { summary: MigrationResult["summary"] };
-  return { zipBlob: zip.finish(), summary: result.summary };
+  return runWasmWorkerTask("migrateEquipmentVariants", { patch, options }, {
+    signal: progress?.signal,
+    gameData: dataSource,
+    onProgress: migrationProgressHandler(progress),
+  });
 }
 
 export async function repatchUnits(
   patch: PatchFiles,
   options: UnitRepatchOptions,
   dataSource: GameDataSource,
-  progress: MigrationProgressSink | null = null,
+  progress: MigrationTaskContext | null = null,
 ): Promise<UnitRepatchResult> {
-  const wasm = await loadWasm();
-  // Sidecars stay in JS and are reused verbatim in the output ZIP.
-  return callWasm("repatch_units", () =>
-    wasm.repatch_units(patch, options, dataSource, progress),
-  ) as Promise<UnitRepatchResult>;
+  return runWasmWorkerTask("repatchUnits", { patch, options }, {
+    signal: progress?.signal,
+    gameData: dataSource,
+    onProgress: migrationProgressHandler(progress),
+  });
+}
+
+function migrationProgressHandler(progress: MigrationProgressSink | null) {
+  if (!progress) return undefined;
+  return (event: MigrationProgressEvent) => {
+    if (event.kind === "targetStart") {
+      progress.onTargetStart?.(event.targetName, event.targetHash);
+    } else if (event.kind === "stage") {
+      progress.onStage?.(event.targetName, event.stage);
+    } else {
+      progress.onTargetFinish?.(event.targetName);
+    }
+  };
 }
 
 async function callWasm<T>(label: string, fn: () => T | Promise<T>): Promise<T> {

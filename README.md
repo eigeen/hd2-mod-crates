@@ -104,16 +104,22 @@ cargo build --release -p hd2-migrator-cli
 | `crates/hd2-archive-format` | 可在 WASM 中使用的归档格式基础能力 |
 | `crates/hd2-migrator-data` | 内嵌索引、装备映射和空网格资源 |
 | `crates/hd2-unit-matching` | Unit 部件识别与匹配 |
-| `crates/hd2-migrator-core` | 平台无关的迁移规划与核心类型 |
-| `crates/hd2-migrator-io` | 原生文件系统、归档读取和迁移编排 |
+| `crates/hd2-migrator-core` | Desktop / Web / CLI 共用迁移引擎：业务用例、运行归档模型、Unit 算法与数据读取接口 |
 | `crates/hd2-migrator-wasm` | Web 前端使用的 WASM API |
 | `crates/hd2-migrator-cli` | 命令行入口 |
-| `crates/migrator_ui` | Desktop / Web 共用界面 |
+| `crates/migrator_ui` | Desktop / Web 共用组件、类型、文案和报告 |
+| `crates/migrator_app` | Desktop / Web 共用工具页面、请求组装与任务生命周期 |
 | `crates/desktop` | Tauri 桌面端 |
 | `crates/web_ui` | React Web 前端 |
 | `crates/svd-core` | SVD 打包与解包核心能力 |
 | `crates/svd-pack` | SVD 打包工具 |
 | `crates/svd-export` | SVD 导出工具 |
+
+`hd2-migrator-io` 已并入 `hd2-migrator-core`，仓库内不再维护独立的 IO crate。
+Web 通过 WASM 桥接调用 `core::operations`，桌面通过 Tauri 调用同一套用例；
+CLI 使用 `core::migrator` 的原生编排入口。`core::io` 保留数据读取接口和原生文件读取实现，
+浏览器回调、桌面保存与更新分别留在宿主中。新增业务规则应放入共享引擎，平台差异只负责接入。
+模块边界和本次合并取舍见 [共享引擎架构](docs/shared-engine-architecture.md)。
 
 ## 内嵌数据
 

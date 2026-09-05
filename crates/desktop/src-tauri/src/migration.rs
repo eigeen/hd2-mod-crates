@@ -2,15 +2,18 @@ mod output;
 mod patch;
 
 use self::output::{
-    PatchZipContext, RepatchTocSource, create_zip, finish_zip, write_patch_to_zip,
+    RepatchTocSource, create_zip, finish_zip, write_prepared_archive_to_zip,
     write_repatch_toc_to_zip, write_zip_entry_with_progress,
 };
-use self::patch::{LoadedPatch, PatchDescriptor, load_patch};
+use self::patch::{
+    DiscoveredPatchFile, LoadedPatch, PatchDescriptor, describe_patch_metadata,
+    discover_patch_files, inspect_patch_metadata, load_patch,
+};
 use crate::command_error::CommandError;
 use crate::task::TaskRegistry;
-use hd2_migrator_io::io::NativeDataSource;
-use hd2_migrator_io::web::{
-    self, ParallelVariantPatchCallbacks, UnitRepatchOptions, VariantPatchOutput,
+use hd2_migrator_core::io::NativeDataSource;
+use hd2_migrator_core::operations::{
+    self as operations, ParallelVariantPatchCallbacks, UnitRepatchOptions, VariantPatchOutput,
     WebEquipmentInspection, WebEquipmentMappingPreview, WebEquipmentOption, WebEquipmentPartGraph,
     WebEquipmentPatchAnalysis, WebMigrationMapping, WebMigrationSummary, WebProgress,
     WebUnifiedMigrateOptions,
@@ -75,7 +78,7 @@ pub struct HeadArmorMergeRequest {
     armor_paths: Vec<PathBuf>,
     head_paths: Option<Vec<PathBuf>>,
     output_path: PathBuf,
-    options: web::HeadArmorMergeOptions,
+    options: operations::HeadArmorMergeOptions,
 }
 
 #[derive(Debug, Deserialize)]
@@ -108,7 +111,7 @@ enum ProgressKind {
 
 #[tauri::command]
 pub fn load_equipment_options() -> Result<Vec<WebEquipmentOption>, CommandError> {
-    web::list_equipment_options()
+    operations::list_equipment_options()
         .map_err(|error| CommandError::from_display("equipment.loadFailed", error))
 }
 
@@ -124,7 +127,17 @@ pub async fn inspect_patch(
 
 #[tauri::command]
 pub async fn describe_patch(paths: Vec<PathBuf>) -> Result<PatchDescriptor, CommandError> {
-    tauri::async_runtime::spawn_blocking(move || load_patch(&paths).map(|patch| patch.descriptor()))
+    tauri::async_runtime::spawn_blocking(move || describe_patch_metadata(&paths))
+        .await
+        .map_err(|error| CommandError::from_display("task.joinFailed", error))?
+        .map_err(|error| CommandError::new("patch.inspectFailed", error))
+}
+
+#[tauri::command]
+pub async fn enumerate_patch_files(
+    paths: Vec<PathBuf>,
+) -> Result<Vec<DiscoveredPatchFile>, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || discover_patch_files(&paths))
         .await
         .map_err(|error| CommandError::from_display("task.joinFailed", error))?
         .map_err(|error| CommandError::new("patch.inspectFailed", error))
@@ -136,7 +149,8 @@ pub async fn preview_equipment_mapping(
 ) -> Result<WebEquipmentMappingPreview, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
         let patch = load_patch(&request.patch_paths)?;
-        web::preview_equipment_mapping(patch.bytes(), &request.mapping).map_err(display_error)
+        operations::preview_equipment_mapping(patch.bytes(), &request.mapping)
+            .map_err(display_error)
     })
     .await
     .map_err(|error| CommandError::from_display("task.joinFailed", error))?
@@ -149,7 +163,8 @@ pub async fn preview_equipment_mappings(
 ) -> Result<Vec<WebEquipmentMappingPreview>, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
         let patch = load_patch(&request.patch_paths)?;
-        web::preview_equipment_mappings(patch.bytes(), &request.mappings).map_err(display_error)
+        operations::preview_equipment_mappings(patch.bytes(), &request.mappings)
+            .map_err(display_error)
     })
     .await
     .map_err(|error| CommandError::from_display("task.joinFailed", error))?
@@ -182,7 +197,7 @@ pub async fn repatch_mod(
     task_id: String,
     on_progress: Channel<MigrationProgressEvent>,
     tasks: State<'_, TaskRegistry>,
-) -> Result<web::UnitRepatchSummary, CommandError> {
+) -> Result<operations::UnitRepatchSummary, CommandError> {
     let lease = tasks.register(task_id)?;
     let cancellation = lease.cancellation();
     let task_cancellation = Arc::clone(&cancellation);
@@ -202,7 +217,7 @@ pub async fn merge_head_into_armor(
     task_id: String,
     on_progress: Channel<MigrationProgressEvent>,
     tasks: State<'_, TaskRegistry>,
-) -> Result<web::HeadArmorMergeSummary, CommandError> {
+) -> Result<operations::HeadArmorMergeSummary, CommandError> {
     let lease = tasks.register(task_id)?;
     let cancellation = lease.cancellation();
     let task_cancellation = Arc::clone(&cancellation);
@@ -213,7 +228,7 @@ pub async fn merge_head_into_armor(
     })
     .await
     .map_err(|error| CommandError::from_display("task.joinFailed", error))?;
-    task_result(result, &cancellation, "migration.failed")
+    task_result(result, &cancellation, "headMerge.failed")
 }
 
 #[tauri::command]
@@ -222,7 +237,7 @@ pub async fn merge_patches(
     task_id: String,
     on_progress: Channel<MigrationProgressEvent>,
     tasks: State<'_, TaskRegistry>,
-) -> Result<web::PatchMergeSummary, CommandError> {
+) -> Result<operations::PatchMergeSummary, CommandError> {
     let lease = tasks.register(task_id)?;
     let cancellation = lease.cancellation();
     let task_cancellation = Arc::clone(&cancellation);
@@ -242,7 +257,7 @@ pub fn cancel_task(task_id: String, tasks: State<'_, TaskRegistry>) -> bool {
 }
 
 fn inspect_patch_blocking(request: InspectPatchRequest) -> Result<InspectPatchResult, String> {
-    let patch = load_patch(&request.paths)?;
+    let patch = inspect_patch_metadata(&request.paths)?;
     let analysis = analyze_with_optional_source(patch.bytes(), request.data_dir)?;
     Ok(InspectPatchResult {
         patch: patch.descriptor(),
@@ -252,15 +267,15 @@ fn inspect_patch_blocking(request: InspectPatchRequest) -> Result<InspectPatchRe
 }
 
 fn analyze_with_optional_source(
-    patch: &web::PatchBytes,
+    patch: &operations::PatchBytes,
     data_dir: Option<PathBuf>,
 ) -> Result<WebEquipmentPatchAnalysis, String> {
     let result = match data_dir {
-        Some(path) => pollster::block_on(web::analyze_equipment_patch_with_source(
+        Some(path) => pollster::block_on(operations::analyze_equipment_patch_with_source(
             patch,
             &NativeDataSource::new(path),
         )),
-        None => web::analyze_equipment_patch(patch),
+        None => operations::analyze_equipment_patch(patch),
     };
     result.map_err(display_error)
 }
@@ -275,18 +290,15 @@ async fn migrate_equipment_blocking(
     let mut zip = create_zip(&request.output_path)?;
     let parallel_progress = progress.map(|value| value as &(dyn WebProgress + Sync));
     let callbacks =
-        ParallelVariantPatchCallbacks::new(parallel_progress, |mut output: VariantPatchOutput| {
-            write_patch_to_zip(
+        ParallelVariantPatchCallbacks::new(parallel_progress, |output: VariantPatchOutput| {
+            let mut prepared = output.into_prepared_output();
+            write_prepared_archive_to_zip(
                 &mut zip,
-                &mut output.patch,
-                PatchZipContext {
-                    directory: &output.directory,
-                    progress: progress.map(|value| value as &dyn output::OutputProgress),
-                    suffix: &output.suffix,
-                },
+                &mut prepared,
+                progress.map(|value| value as &dyn output::OutputProgress),
             )
         });
-    let summary = web::migrate_variants_to_patch_sink_parallel(
+    let summary = operations::migrate_variants_to_patch_sink_parallel(
         patch.into_bytes(),
         request.options,
         &source,
@@ -301,10 +313,10 @@ async fn migrate_equipment_blocking(
 async fn repatch_mod_blocking(
     request: RepatchRequest,
     progress: Option<&DesktopProgress>,
-) -> Result<web::UnitRepatchSummary, String> {
+) -> Result<operations::UnitRepatchSummary, String> {
     validate_output_request(&request.data_dir, &request.output_path)?;
     let patch = load_patch(&request.patch_paths)?;
-    let result = web::repatch_patch_with_progress(
+    let result = operations::repatch_patch_with_progress(
         patch.bytes().clone(),
         request.options,
         &NativeDataSource::new(request.data_dir),
@@ -319,7 +331,7 @@ async fn repatch_mod_blocking(
 fn merge_head_into_armor_blocking(
     request: HeadArmorMergeRequest,
     progress: &DesktopProgress,
-) -> Result<web::HeadArmorMergeSummary, String> {
+) -> Result<operations::HeadArmorMergeSummary, String> {
     progress.ensure_active().map_err(display_error)?;
     let armor = load_patch(&request.armor_paths)?.into_bytes();
     let head = request
@@ -329,28 +341,42 @@ fn merge_head_into_armor_blocking(
         .transpose()?
         .map(LoadedPatch::into_bytes);
     progress.ensure_active().map_err(display_error)?;
-    let result = web::merge_head_into_armor(armor, head, request.options).map_err(display_error)?;
+    let prepared = operations::prepare_head_armor_merge(armor, head, request.options)
+        .map_err(display_error)?;
     progress.ensure_active().map_err(display_error)?;
-    write_patch_zip(&request.output_path, &result.patch, Some(progress))?;
-    Ok(result.summary)
+    let summary = prepared.summary.clone();
+    let mut output = prepared.into_output();
+    let mut zip = create_zip(&request.output_path)?;
+    write_prepared_archive_to_zip(&mut zip, &mut output, Some(progress)).map_err(display_error)?;
+    finish_zip(zip)?;
+    Ok(summary)
 }
 
 fn merge_patches_blocking(
     request: PatchMergeRequest,
     progress: Option<&DesktopProgress>,
-) -> Result<web::PatchMergeSummary, String> {
+) -> Result<operations::PatchMergeSummary, String> {
     ensure_task_active(progress)?;
     let patches = load_merge_patches(&request.input_paths, progress)?;
-    let result = web::merge_patches(patches, request.output_name).map_err(display_error)?;
+    let prepared =
+        operations::prepare_patch_merge(patches, request.output_name).map_err(display_error)?;
     ensure_task_active(progress)?;
-    write_patch_zip(&request.output_path, &result.patch, progress)?;
-    Ok(result.summary)
+    let mut zip = create_zip(&request.output_path)?;
+    let mut output = prepared.output;
+    write_prepared_archive_to_zip(
+        &mut zip,
+        &mut output,
+        progress.map(|value| value as &dyn output::OutputProgress),
+    )
+    .map_err(display_error)?;
+    finish_zip(zip)?;
+    Ok(prepared.summary)
 }
 
 fn load_merge_patches(
     input_paths: &[Vec<PathBuf>],
     progress: Option<&DesktopProgress>,
-) -> Result<Vec<web::PatchBytes>, String> {
+) -> Result<Vec<operations::PatchBytes>, String> {
     let mut patches = Vec::with_capacity(input_paths.len());
     for paths in input_paths {
         ensure_task_active(progress)?;
@@ -367,36 +393,10 @@ fn ensure_task_active(progress: Option<&DesktopProgress>) -> Result<(), String> 
         .map_err(display_error)
 }
 
-fn write_patch_zip(
-    output_path: &Path,
-    patch: &web::PatchBytes,
-    progress: Option<&DesktopProgress>,
-) -> Result<(), String> {
-    if output_path.as_os_str().is_empty() {
-        return Err("Output path is required".to_owned());
-    }
-    let mut zip = create_zip(output_path)?;
-    let sink = progress.map(|value| value as &dyn output::OutputProgress);
-    write_sidecar(&mut zip, &patch.name, &patch.toc, sink)?;
-    write_sidecar(
-        &mut zip,
-        &format!("{}.gpu_resources", patch.name),
-        &patch.gpu,
-        sink,
-    )?;
-    write_sidecar(
-        &mut zip,
-        &format!("{}.stream", patch.name),
-        &patch.stream,
-        sink,
-    )?;
-    finish_zip(zip)
-}
-
 fn write_repatched_zip(
     output_path: &Path,
     patch: &LoadedPatch,
-    updated: &web::UnitRepatchResult,
+    updated: &operations::UnitRepatchResult,
     progress: Option<&DesktopProgress>,
 ) -> Result<(), String> {
     let mut zip = create_zip(output_path)?;
@@ -460,7 +460,7 @@ impl DesktopProgress {
         name: &str,
         hash: &str,
         stage: &str,
-    ) -> hd2_migrator_io::Result<()> {
+    ) -> hd2_migrator_core::Result<()> {
         self.ensure_active()?;
         let event = MigrationProgressEvent {
             completed_bytes: 0,
@@ -475,7 +475,7 @@ impl DesktopProgress {
             .map_err(|error| eyre::eyre!("send task progress: {error}"))
     }
 
-    fn ensure_active(&self) -> hd2_migrator_io::Result<()> {
+    fn ensure_active(&self) -> hd2_migrator_core::Result<()> {
         if self.cancellation.load(Ordering::Acquire) {
             eyre::bail!("task cancelled");
         }
@@ -507,15 +507,15 @@ impl output::OutputProgress for DesktopProgress {
 }
 
 impl WebProgress for DesktopProgress {
-    fn target_started(&self, name: &str, hash: &str) -> hd2_migrator_io::Result<()> {
+    fn target_started(&self, name: &str, hash: &str) -> hd2_migrator_core::Result<()> {
         self.emit(ProgressKind::TargetStart, name, hash, "")
     }
 
-    fn stage(&self, name: &str, stage: &str) -> hd2_migrator_io::Result<()> {
+    fn stage(&self, name: &str, stage: &str) -> hd2_migrator_core::Result<()> {
         self.emit(ProgressKind::Stage, name, "", stage)
     }
 
-    fn target_finished(&self, name: &str) -> hd2_migrator_io::Result<()> {
+    fn target_finished(&self, name: &str) -> hd2_migrator_core::Result<()> {
         self.emit(ProgressKind::TargetFinish, name, "", "")
     }
 }
@@ -568,7 +568,7 @@ mod task_result_tests {
 #[cfg(test)]
 mod patch_merge_tests {
     use super::*;
-    use hd2_migrator_io::archive::{StreamToc, TocEntry};
+    use hd2_migrator_core::archive::{StreamToc, TocEntry};
     use std::io::Read;
 
     #[test]
@@ -627,7 +627,9 @@ mod patch_merge_tests {
 #[cfg(test)]
 mod real_data_tests {
     use super::*;
-    use hd2_migrator_io::web::{UnmatchedUnitPolicy, WebMigrationMapping, WebMigrationVariant};
+    use hd2_migrator_core::operations::{
+        UnmatchedUnitPolicy, WebMigrationMapping, WebMigrationVariant,
+    };
 
     #[test]
     #[ignore = "requires HD2_DESKTOP_TEST_PATCH and HD2_DESKTOP_TEST_DATA"]
@@ -667,7 +669,7 @@ mod real_data_tests {
                 variants: vec![WebMigrationVariant {
                     mappings: vec![mapping],
                 }],
-                patch_suffix: Some(web::migration::DEFAULT_PATCH_SUFFIX.to_owned()),
+                patch_suffix: Some(operations::migration::DEFAULT_PATCH_SUFFIX.to_owned()),
                 no_padding: false,
                 unmatched_unit_policy: UnmatchedUnitPolicy::Keep,
                 unit_behavior: Default::default(),
@@ -704,7 +706,7 @@ mod real_data_tests {
             output_path: output_path.clone(),
             options: WebUnifiedMigrateOptions {
                 variants: vec![WebMigrationVariant { mappings }],
-                patch_suffix: Some(web::migration::DEFAULT_PATCH_SUFFIX.to_owned()),
+                patch_suffix: Some(operations::migration::DEFAULT_PATCH_SUFFIX.to_owned()),
                 no_padding: false,
                 unmatched_unit_policy: UnmatchedUnitPolicy::Keep,
                 unit_behavior: Default::default(),
@@ -763,9 +765,9 @@ mod real_data_tests {
             .collect()
     }
 
-    fn mapping_for_source(source: &web::WebDetectedSource) -> WebMigrationMapping {
+    fn mapping_for_source(source: &operations::WebDetectedSource) -> WebMigrationMapping {
         let source_hash = source.resolved_hash.clone().expect("source hash");
-        let target = web::list_equipment_options()
+        let target = operations::list_equipment_options()
             .expect("equipment options")
             .into_iter()
             .find(|target| {

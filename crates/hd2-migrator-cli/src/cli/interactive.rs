@@ -8,11 +8,11 @@
 use crate::cli::args::Cli;
 use dialoguer::{theme::ColorfulTheme, FuzzySelect, Input, MultiSelect, Select};
 use eyre::WrapErr;
-use hd2_migrator_io::index::ArchiveIndex;
+use hd2_migrator_core::index::ArchiveIndex;
 use std::path::PathBuf;
 use walkdir::WalkDir;
 
-pub fn fill_in(cli: &mut Cli, index: &ArchiveIndex) -> hd2_migrator_io::Result<()> {
+pub fn fill_in(cli: &mut Cli, index: &ArchiveIndex) -> hd2_migrator_core::Result<()> {
     let theme = ColorfulTheme::default();
 
     if cli.patch.is_none() {
@@ -87,7 +87,7 @@ pub fn fill_in(cli: &mut Cli, index: &ArchiveIndex) -> hd2_migrator_io::Result<(
 fn prompt_patch_path(
     theme: &ColorfulTheme,
     non_interactive: bool,
-) -> hd2_migrator_io::Result<PathBuf> {
+) -> hd2_migrator_core::Result<PathBuf> {
     if non_interactive {
         eyre::bail!("--patch is required in --non-interactive mode");
     }
@@ -136,7 +136,7 @@ fn prompt_path(
     default: Option<&str>,
     non_interactive: bool,
     flag: &str,
-) -> hd2_migrator_io::Result<PathBuf> {
+) -> hd2_migrator_core::Result<PathBuf> {
     if non_interactive {
         eyre::bail!("{} is required in --non-interactive mode", flag);
     }
@@ -161,11 +161,11 @@ fn strip_wrapping_double_quotes(value: &str) -> &str {
         .unwrap_or(value)
 }
 
-fn selected_by_default(entries: &[hd2_migrator_io::index::ArmorEntry]) -> Vec<bool> {
+fn selected_by_default(entries: &[hd2_migrator_core::index::ArmorEntry]) -> Vec<bool> {
     entries
         .iter()
         .map(|entry| {
-            !hd2_migrator_io::target_exclusions::is_default_excluded_target(
+            !hd2_migrator_core::target_exclusions::is_default_excluded_target(
                 &entry.hash,
                 &entry.name,
             )
@@ -198,12 +198,12 @@ mod tests {
     #[test]
     fn target_prompt_defaults_to_all_selected() {
         let entries = vec![
-            hd2_migrator_io::index::ArmorEntry {
+            hd2_migrator_core::index::ArmorEntry {
                 hash: "a".to_string(),
                 name: "A".to_string(),
                 extra: Default::default(),
             },
-            hd2_migrator_io::index::ArmorEntry {
+            hd2_migrator_core::index::ArmorEntry {
                 hash: "b".to_string(),
                 name: "B".to_string(),
                 extra: Default::default(),
@@ -215,12 +215,12 @@ mod tests {
     #[test]
     fn target_prompt_defaults_exclude_sa_7() {
         let entries = vec![
-            hd2_migrator_io::index::ArmorEntry {
+            hd2_migrator_core::index::ArmorEntry {
                 hash: "d895f447d332c331".to_string(),
                 name: "SA-7 Headfirst".to_string(),
                 extra: Default::default(),
             },
-            hd2_migrator_io::index::ArmorEntry {
+            hd2_migrator_core::index::ArmorEntry {
                 hash: "a".to_string(),
                 name: "A".to_string(),
                 extra: Default::default(),
