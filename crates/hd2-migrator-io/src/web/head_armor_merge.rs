@@ -10,7 +10,6 @@ use crate::unit::helmet_authority::HelmetMappingTable;
 use crate::unit::mesh::{merge_visible_head_into_body, visible_material_file_ids};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -57,20 +56,40 @@ pub struct HeadArmorMergeResult {
     pub summary: HeadArmorMergeSummary,
 }
 
+pub struct PreparedHeadArmorMerge {
+    pub archive: StreamToc,
+    pub summary: HeadArmorMergeSummary,
+}
+
 /// Merge one selected helmet into every mapped body Unit present in the armor Patch.
 pub fn merge_head_into_armor(
     armor_patch: PatchBytes,
     head_patch: Option<PatchBytes>,
     options: HeadArmorMergeOptions,
 ) -> crate::Result<HeadArmorMergeResult> {
+    let prepared = prepare_head_armor_merge(armor_patch, head_patch, options)?;
+    let patch = serialize_archive(prepared.archive)?;
+    Ok(HeadArmorMergeResult {
+        patch,
+        summary: prepared.summary,
+    })
+}
+
+/// Prepare merged archive entries so callers can choose buffered or streamed serialization.
+pub fn prepare_head_armor_merge(
+    armor_patch: PatchBytes,
+    head_patch: Option<PatchBytes>,
+    options: HeadArmorMergeOptions,
+) -> crate::Result<PreparedHeadArmorMerge> {
     let selection = Selection::resolve(&options)?;
-    let mut armor = parse_patch(&armor_patch)?;
+    let separate_patch = head_patch.is_some();
+    let mut armor = parse_owned_patch(armor_patch)?;
     let targeted_body_units = targeted_body_count(&armor, &selection);
     if targeted_body_units == 0 {
         eyre::bail!("Armor Mod does not contain a mapped body Unit");
     }
-    let head = match &head_patch {
-        Some(patch) => parse_patch(patch)?,
+    let head = match head_patch {
+        Some(patch) => parse_owned_patch(patch)?,
         None => armor.clone(),
     };
     let helmet = find_entry(&head, selection.helmet_unit_id, UNIT_ID, "helmet Unit")?.clone();
@@ -78,19 +97,20 @@ pub fn merge_head_into_armor(
     let dependency_request = DependencyCopyRequest {
         source: &head,
         helmet: &helmet,
-        separate_patch: head_patch.is_some(),
+        separate_patch,
     };
     let material_map = copy_head_dependencies(dependency_request, &mut armor, &mut summary)?;
     let sources = BodyMergeSources {
-        patch: &armor,
+        patch: &mut armor,
         helmet: &helmet,
     };
-    let updates = merge_body_variants(sources, &selection, &material_map, &mut summary);
+    merge_body_variants(sources, &selection, &material_map, &mut summary);
     ensure_targeted_body_variants_merged(&summary, targeted_body_units)?;
-    apply_body_updates(&mut armor, updates);
     summary.removed_helmet_units = remove_selected_helmet(&mut armor, selection.helmet_unit_id);
-    let patch = serialize_and_validate(armor, armor_patch.name)?;
-    Ok(HeadArmorMergeResult { patch, summary })
+    Ok(PreparedHeadArmorMerge {
+        archive: armor,
+        summary,
+    })
 }
 
 struct Selection {
@@ -167,8 +187,8 @@ fn mapped_body_units(
     Ok(units)
 }
 
-fn parse_patch(patch: &PatchBytes) -> crate::Result<StreamToc> {
-    StreamToc::from_buffers(&patch.toc, &patch.gpu, &patch.stream, patch.name.clone())
+fn parse_owned_patch(patch: PatchBytes) -> crate::Result<StreamToc> {
+    StreamToc::from_owned_buffers(patch.toc, patch.gpu, patch.stream, patch.name)
 }
 
 fn find_entry<'a>(
@@ -189,21 +209,26 @@ fn merge_body_variants(
     selection: &Selection,
     materials: &HashMap<u64, u64>,
     summary: &mut HeadArmorMergeSummary,
-) -> Vec<BodyMergeUpdate> {
-    let requests = prepare_body_merge_requests(sources, selection);
-    let mut updates = Vec::with_capacity(requests.len());
-    for request in requests {
+) {
+    for (variant, unit_id) in &selection.body_units {
+        let target = BodyTarget {
+            variant,
+            unit_id: *unit_id,
+        };
+        let Some(request) = prepare_body_merge_request(sources.patch, sources.helmet, target)
+        else {
+            continue;
+        };
         if let Some(update) = merge_body_variant(&request, materials, summary) {
-            updates.push(update);
+            sources.patch.entries[update.body_index] = update.entry;
         }
     }
-    updates
 }
 
-struct BodyMergeRequest {
+struct BodyMergeRequest<'a> {
     body_index: usize,
     body: TocEntry,
-    helmet: TocEntry,
+    helmet: &'a TocEntry,
     variant: String,
 }
 
@@ -217,9 +242,8 @@ struct BodyTarget<'a> {
     unit_id: u64,
 }
 
-#[derive(Clone, Copy)]
 struct BodyMergeSources<'a> {
-    patch: &'a StreamToc,
+    patch: &'a mut StreamToc,
     helmet: &'a TocEntry,
 }
 
@@ -231,32 +255,16 @@ fn targeted_body_count(armor: &StreamToc, selection: &Selection) -> usize {
         .count()
 }
 
-fn prepare_body_merge_requests(
-    sources: BodyMergeSources<'_>,
-    selection: &Selection,
-) -> Vec<BodyMergeRequest> {
-    selection
-        .body_units
-        .iter()
-        .filter_map(|(variant, unit_id)| {
-            let target = BodyTarget {
-                variant,
-                unit_id: *unit_id,
-            };
-            prepare_body_merge_request(sources, target)
-        })
-        .collect()
-}
-
-fn prepare_body_merge_request(
-    sources: BodyMergeSources<'_>,
+fn prepare_body_merge_request<'a>(
+    patch: &StreamToc,
+    helmet: &'a TocEntry,
     target: BodyTarget<'_>,
-) -> Option<BodyMergeRequest> {
-    let body_index = find_unit_index(sources.patch, target.unit_id)?;
+) -> Option<BodyMergeRequest<'a>> {
+    let body_index = find_unit_index(patch, target.unit_id)?;
     Some(BodyMergeRequest {
         body_index,
-        body: sources.patch.entries[body_index].clone(),
-        helmet: copy_unit_data(sources.helmet),
+        body: patch.entries[body_index].clone(),
+        helmet,
         variant: target.variant.to_owned(),
     })
 }
@@ -269,11 +277,11 @@ fn find_unit_index(archive: &StreamToc, unit_id: u64) -> Option<usize> {
 }
 
 fn merge_body_variant(
-    request: &BodyMergeRequest,
+    request: &BodyMergeRequest<'_>,
     materials: &HashMap<u64, u64>,
     summary: &mut HeadArmorMergeSummary,
 ) -> Option<BodyMergeUpdate> {
-    let result = match merge_visible_head_into_body(&request.body, &request.helmet, materials) {
+    let result = match merge_visible_head_into_body(&request.body, request.helmet, materials) {
         Ok(result) => result,
         Err(error) => {
             summary
@@ -311,13 +319,6 @@ fn merge_body_variant(
     })
 }
 
-fn copy_unit_data(entry: &TocEntry) -> TocEntry {
-    let mut copy = entry.clone();
-    copy.gpu_data = Arc::from(entry.gpu_data.as_ref());
-    copy.stream_data = Arc::from(entry.stream_data.as_ref());
-    copy
-}
-
 fn ensure_targeted_body_variants_merged(
     summary: &HeadArmorMergeSummary,
     expected: usize,
@@ -332,12 +333,6 @@ fn ensure_targeted_body_variants_merged(
         .collect::<Vec<_>>()
         .join("; ");
     eyre::bail!("Head was not merged into every targeted body variant and visible LOD: {reasons}")
-}
-
-fn apply_body_updates(armor: &mut StreamToc, updates: Vec<BodyMergeUpdate>) {
-    for update in updates {
-        armor.entries[update.body_index] = update.entry;
-    }
 }
 
 fn skipped(variant: &str, lod: i32, reason: impl Into<String>) -> HeadArmorMergeSkippedPart {
@@ -491,10 +486,9 @@ fn remove_selected_helmet(archive: &mut StreamToc, helmet_unit_id: u64) -> usize
     before - archive.entries.len()
 }
 
-fn serialize_and_validate(mut archive: StreamToc, name: String) -> crate::Result<PatchBytes> {
-    archive.name = name.clone();
-    let (toc, gpu, stream) = archive.serialize();
-    StreamToc::from_buffers(&toc, &gpu, &stream, name.clone())?;
+fn serialize_archive(mut archive: StreamToc) -> crate::Result<PatchBytes> {
+    let name = archive.name.clone();
+    let (toc, gpu, stream) = archive.try_serialize()?;
     Ok(PatchBytes {
         name,
         toc,
@@ -543,27 +537,39 @@ mod tests {
     }
 
     #[test]
-    fn body_variants_receive_independent_head_copies() {
+    fn body_merge_requests_borrow_shared_helmet_data() {
         let mut helmet = fixture_entry(7, UNIT_ID, b"helmet");
-        helmet.gpu_data = Arc::from([1, 2, 3]);
+        helmet.gpu_data = [1, 2, 3].into();
         let output = archive(vec![
             fixture_entry(8, UNIT_ID, b"slim"),
             fixture_entry(9, UNIT_ID, b"stocky"),
         ]);
-        let selection = fixture_selection();
-        let sources = BodyMergeSources {
-            patch: &output,
-            helmet: &helmet,
-        };
+        let first = prepare_body_merge_request(
+            &output,
+            &helmet,
+            BodyTarget {
+                variant: "slim body",
+                unit_id: 8,
+            },
+        )
+        .unwrap();
+        let second = prepare_body_merge_request(
+            &output,
+            &helmet,
+            BodyTarget {
+                variant: "stocky body",
+                unit_id: 9,
+            },
+        )
+        .unwrap();
 
-        let requests = prepare_body_merge_requests(sources, &selection);
-
-        assert_eq!(requests.len(), 2);
-        assert!(!Arc::ptr_eq(&requests[0].helmet.gpu_data, &helmet.gpu_data));
-        assert!(!Arc::ptr_eq(
-            &requests[0].helmet.gpu_data,
-            &requests[1].helmet.gpu_data,
-        ));
+        assert!(first.helmet.gpu_data.shares_storage_with(&helmet.gpu_data));
+        assert!(
+            first
+                .helmet
+                .gpu_data
+                .shares_storage_with(&second.helmet.gpu_data)
+        );
     }
 
     #[test]
@@ -571,17 +577,26 @@ mod tests {
         let helmet = fixture_entry(7, UNIT_ID, b"helmet");
         let output = archive(vec![fixture_entry(8, UNIT_ID, b"slim")]);
         let selection = fixture_selection();
-        let sources = BodyMergeSources {
-            patch: &output,
-            helmet: &helmet,
-        };
-
-        let requests = prepare_body_merge_requests(sources, &selection);
+        let slim = prepare_body_merge_request(
+            &output,
+            &helmet,
+            BodyTarget {
+                variant: "slim body",
+                unit_id: 8,
+            },
+        );
+        let stocky = prepare_body_merge_request(
+            &output,
+            &helmet,
+            BodyTarget {
+                variant: "stocky body",
+                unit_id: 9,
+            },
+        );
 
         assert_eq!(targeted_body_count(&output, &selection), 1);
-        assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].body_index, 0);
-        assert_eq!(requests[0].variant, "slim body");
+        assert_eq!(slim.unwrap().body_index, 0);
+        assert!(stocky.is_none());
     }
 
     #[test]
@@ -589,13 +604,17 @@ mod tests {
         let helmet = fixture_entry(7, UNIT_ID, b"helmet");
         let output = archive(vec![fixture_entry(10, UNIT_ID, b"arm")]);
         let selection = fixture_selection();
-        let sources = BodyMergeSources {
-            patch: &output,
-            helmet: &helmet,
-        };
+        let request = prepare_body_merge_request(
+            &output,
+            &helmet,
+            BodyTarget {
+                variant: "slim body",
+                unit_id: 8,
+            },
+        );
 
         assert_eq!(targeted_body_count(&output, &selection), 0);
-        assert!(prepare_body_merge_requests(sources, &selection).is_empty());
+        assert!(request.is_none());
     }
 
     #[test]

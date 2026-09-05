@@ -1,9 +1,10 @@
 use crate::data_source::JsDataSource;
 use crate::error::{WasmResult, js_error};
-use crate::output_sink::JsOutputSink;
+use crate::output_sink::{JsArchiveOutputSink, JsOutputSink};
 use crate::progress::JsProgress;
 use crate::zip_store::zip_store;
 use hd2_migrator_io::{
+    archive::SerializedPart,
     index::ArchiveIndex,
     target_exclusions::is_default_excluded_target,
     web::{self, PatchBytes, WebMigrateOptions, WebMigrationSummary, WebTargetOption},
@@ -76,15 +77,53 @@ pub fn merge_head_into_armor(
     options: JsValue,
 ) -> WasmResult<JsValue> {
     let armor_patch = patch_bytes_from_js(&armor_patch)?;
-    let head_patch = if head_patch.is_null() || head_patch.is_undefined() {
-        None
-    } else {
-        Some(patch_bytes_from_js(&head_patch)?)
-    };
+    let head_patch = optional_patch_bytes_from_js(&head_patch)?;
     let options: web::HeadArmorMergeOptions =
         serde_wasm_bindgen::from_value(options).map_err(js_error)?;
     let result = web::merge_head_into_armor(armor_patch, head_patch, options).map_err(js_error)?;
     patch_and_summary_result(result.patch, &result.summary)
+}
+
+/// Merge and move each output archive part to JS in bounded chunks.
+#[wasm_bindgen]
+pub fn merge_head_into_armor_stream(
+    armor_patch: JsValue,
+    head_patch: JsValue,
+    options: JsValue,
+    output_sink: JsValue,
+) -> WasmResult<JsValue> {
+    let armor_patch = patch_bytes_from_js(&armor_patch)?;
+    let head_patch = optional_patch_bytes_from_js(&head_patch)?;
+    let options: web::HeadArmorMergeOptions =
+        serde_wasm_bindgen::from_value(options).map_err(js_error)?;
+    let prepared =
+        web::prepare_head_armor_merge(armor_patch, head_patch, options).map_err(js_error)?;
+    let sink = JsArchiveOutputSink::from_js(output_sink)?;
+    write_prepared_head_merge(prepared, &sink)
+}
+
+fn write_prepared_head_merge(
+    prepared: web::PreparedHeadArmorMerge,
+    sink: &JsArchiveOutputSink,
+) -> WasmResult<JsValue> {
+    let web::PreparedHeadArmorMerge {
+        mut archive,
+        summary,
+    } = prepared;
+    let name = archive.name.clone();
+    let serializer = archive.serializer();
+    sink.write_part(&name, &serializer, SerializedPart::Toc)?;
+    sink.write_part(
+        &format!("{name}.gpu_resources"),
+        &serializer,
+        SerializedPart::Gpu,
+    )?;
+    sink.write_part(
+        &format!("{name}.stream"),
+        &serializer,
+        SerializedPart::Stream,
+    )?;
+    serialized_summary_result(&summary)
 }
 
 #[wasm_bindgen]
@@ -288,6 +327,13 @@ fn patch_bytes_from_js(patch: &JsValue) -> WasmResult<PatchBytes> {
     })
 }
 
+fn optional_patch_bytes_from_js(patch: &JsValue) -> WasmResult<Option<PatchBytes>> {
+    if patch.is_null() || patch.is_undefined() {
+        return Ok(None);
+    }
+    patch_bytes_from_js(patch).map(Some)
+}
+
 fn required_string(value: &JsValue, key: &str) -> WasmResult<String> {
     property(value, key)?
         .as_string()
@@ -334,11 +380,15 @@ fn migration_result(zip_bytes: Vec<u8>, summary: WebMigrationSummary) -> WasmRes
 }
 
 fn summary_result(summary: WebMigrationSummary) -> WasmResult<JsValue> {
+    serialized_summary_result(&summary)
+}
+
+fn serialized_summary_result<T: Serialize>(summary: &T) -> WasmResult<JsValue> {
     let result = Object::new();
     Reflect::set(
         &result,
         &JsValue::from_str("summary"),
-        &serde_wasm_bindgen::to_value(&summary).map_err(js_error)?,
+        &serde_wasm_bindgen::to_value(summary).map_err(js_error)?,
     )?;
     Ok(result.into())
 }

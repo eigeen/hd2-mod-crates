@@ -278,9 +278,7 @@ fn read_resource_range_sync(
             resource.extend_from_slice(&decompressed);
         }
         if resource.is_empty() {
-            eyre::bail!(
-                "bundle resource read returned zero bytes at offset {resource_offset}"
-            );
+            eyre::bail!("bundle resource read returned zero bytes at offset {resource_offset}");
         }
         current += resource.len() as u64;
         data.extend_from_slice(&resource);
@@ -422,10 +420,38 @@ mod tests {
     fn plan_chunk_walk_stops_at_boundary() {
         let header = BundleChunkHeader {
             descriptors: vec![
-                ChunkDescriptor { unc_off: 0, comp_off: 0, unc_sz: 0, comp_sz: 0, comp_type: 0, chunk_type: 0 },
-                ChunkDescriptor { unc_off: 100, comp_off: 0, unc_sz: 0, comp_sz: 0, comp_type: 0, chunk_type: 0 },
-                ChunkDescriptor { unc_off: 200, comp_off: 0, unc_sz: 0, comp_sz: 0, comp_type: 0, chunk_type: 2 },
-                ChunkDescriptor { unc_off: 300, comp_off: 0, unc_sz: 0, comp_sz: 0, comp_type: 0, chunk_type: 0 },
+                ChunkDescriptor {
+                    unc_off: 0,
+                    comp_off: 0,
+                    unc_sz: 0,
+                    comp_sz: 0,
+                    comp_type: 0,
+                    chunk_type: 0,
+                },
+                ChunkDescriptor {
+                    unc_off: 100,
+                    comp_off: 0,
+                    unc_sz: 0,
+                    comp_sz: 0,
+                    comp_type: 0,
+                    chunk_type: 0,
+                },
+                ChunkDescriptor {
+                    unc_off: 200,
+                    comp_off: 0,
+                    unc_sz: 0,
+                    comp_sz: 0,
+                    comp_type: 0,
+                    chunk_type: 2,
+                },
+                ChunkDescriptor {
+                    unc_off: 300,
+                    comp_off: 0,
+                    unc_sz: 0,
+                    comp_sz: 0,
+                    comp_type: 0,
+                    chunk_type: 0,
+                },
             ],
             offsets: [(0, 0), (100, 1), (200, 2), (300, 3)].into_iter().collect(),
         };

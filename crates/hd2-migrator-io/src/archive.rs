@@ -19,11 +19,13 @@
 pub mod bundle;
 pub mod dsar;
 pub mod reassembly;
+mod resource_bytes;
 pub mod sidecar;
 pub mod stream_metadata;
 pub mod toc_only;
 
 pub use bundle::BundleIndex;
+pub use resource_bytes::ResourceBytes;
 
 use crate::constants::{GPU_ALIGN, LEGACY_MAGIC, STREAM_ALIGN, align_up};
 use crate::error::MigratorError;
@@ -32,7 +34,6 @@ use eyre::WrapErr;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 const TOC_FILE_TYPE_SIZE: usize = 32;
 const TOC_ENTRY_SIZE: usize = 80;
@@ -90,8 +91,8 @@ pub struct TocEntry {
     pub entry_index: u32,
     pub toc_data: Vec<u8>,
     /// Resource sidecars are immutable during migration and shared across variants.
-    pub gpu_data: Arc<[u8]>,
-    pub stream_data: Arc<[u8]>,
+    pub gpu_data: ResourceBytes,
+    pub stream_data: ResourceBytes,
 }
 
 impl TocEntry {
@@ -105,8 +106,8 @@ impl TocEntry {
             unknown4: 64,
             entry_index: 0,
             toc_data: Vec::new(),
-            gpu_data: Arc::default(),
-            stream_data: Arc::default(),
+            gpu_data: ResourceBytes::default(),
+            stream_data: ResourceBytes::default(),
         }
     }
 }
@@ -417,13 +418,42 @@ impl StreamToc {
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_string();
-        Self::from_buffers(&toc_bytes, &gpu_bytes, &stream_bytes, name)
+        Self::from_owned_buffers(toc_bytes, gpu_bytes, stream_bytes, name)
     }
 
     pub fn from_buffers(
         toc_data: &[u8],
         gpu_data: &[u8],
         stream_data: &[u8],
+        name: String,
+    ) -> crate::Result<Self> {
+        Self::from_resource_buffers(
+            toc_data,
+            ResourceBytes::from(gpu_data.to_vec()),
+            ResourceBytes::from(stream_data.to_vec()),
+            name,
+        )
+    }
+
+    /// Parse owned sidecars without copying each entry's resource bytes.
+    pub fn from_owned_buffers(
+        toc_data: Vec<u8>,
+        gpu_data: Vec<u8>,
+        stream_data: Vec<u8>,
+        name: String,
+    ) -> crate::Result<Self> {
+        Self::from_resource_buffers(
+            &toc_data,
+            ResourceBytes::from(gpu_data),
+            ResourceBytes::from(stream_data),
+            name,
+        )
+    }
+
+    fn from_resource_buffers(
+        toc_data: &[u8],
+        gpu_data: ResourceBytes,
+        stream_data: ResourceBytes,
         name: String,
     ) -> crate::Result<Self> {
         if toc_data.len() < HEADER_BASE {
@@ -483,16 +513,18 @@ impl StreamToc {
             let toc_body = slice_safe(toc_data, toc_off, toc_sz)
                 .ok_or_else(|| eyre::eyre!("toc body OOB for entry {i}"))?;
             let gpu_body = if gpu_sz != 0 {
-                slice_safe(gpu_data, gpu_off, gpu_sz)
+                gpu_data
+                    .slice(gpu_off, gpu_sz)
                     .ok_or_else(|| eyre::eyre!("gpu body OOB for entry {i}"))?
             } else {
-                &[]
+                ResourceBytes::default()
             };
             let stream_body = if stream_sz != 0 {
-                slice_safe(stream_data, stream_off, stream_sz)
+                stream_data
+                    .slice(stream_off, stream_sz)
                     .ok_or_else(|| eyre::eyre!("stream body OOB for entry {i}"))?
             } else {
-                &[]
+                ResourceBytes::default()
             };
 
             entries.push(TocEntry {
@@ -504,8 +536,8 @@ impl StreamToc {
                 unknown4,
                 entry_index,
                 toc_data: toc_body.to_vec(),
-                gpu_data: Arc::from(gpu_body),
-                stream_data: Arc::from(stream_body),
+                gpu_data: gpu_body,
+                stream_data: stream_body,
             });
         }
 
@@ -548,20 +580,17 @@ impl StreamToc {
 
     /// Refresh the archive layout and return its three serialized byte buffers.
     pub fn serialize(&mut self) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+        self.try_serialize()
+            .expect("writing an archive to memory should succeed")
+    }
+
+    /// Refresh the archive layout while reporting allocation failures to the caller.
+    pub fn try_serialize(&mut self) -> crate::Result<(Vec<u8>, Vec<u8>, Vec<u8>)> {
         let serializer = self.serializer();
-        let mut toc = Vec::new();
-        let mut gpu = Vec::new();
-        let mut stream = Vec::new();
-        serializer
-            .write_part(SerializedPart::Toc, &mut toc)
-            .expect("writing TOC to memory cannot fail");
-        serializer
-            .write_part(SerializedPart::Gpu, &mut gpu)
-            .expect("writing GPU data to memory cannot fail");
-        serializer
-            .write_part(SerializedPart::Stream, &mut stream)
-            .expect("writing stream data to memory cannot fail");
-        (toc, gpu, stream)
+        let toc = serialize_part(&serializer, SerializedPart::Toc)?;
+        let gpu = serialize_part(&serializer, SerializedPart::Gpu)?;
+        let stream = serialize_part(&serializer, SerializedPart::Stream)?;
+        Ok((toc, gpu, stream))
     }
 
     pub fn find(&self, file_id: u64, type_id: u64) -> Option<&TocEntry> {
@@ -579,6 +608,31 @@ impl StreamToc {
             out.entry(e.type_id).or_default().push(e);
         }
         out
+    }
+}
+
+fn serialize_part(
+    serializer: &StreamTocSerializer<'_>,
+    part: SerializedPart,
+) -> crate::Result<Vec<u8>> {
+    let expected_len = serializer.part_len(part);
+    let mut output = Vec::new();
+    output.try_reserve_exact(expected_len).map_err(|error| {
+        eyre::eyre!(
+            "not enough memory to serialize archive {} ({expected_len} bytes): {error}",
+            serialized_part_name(part)
+        )
+    })?;
+    serializer.write_part(part, &mut output)?;
+    debug_assert_eq!(output.len(), expected_len);
+    Ok(output)
+}
+
+fn serialized_part_name(part: SerializedPart) -> &'static str {
+    match part {
+        SerializedPart::Toc => "TOC",
+        SerializedPart::Gpu => "GPU resources",
+        SerializedPart::Stream => "stream resources",
     }
 }
 
@@ -739,8 +793,8 @@ mod tests {
     fn make_entry(file_id: u64, type_id: u64, toc: &[u8], gpu: &[u8], stream: &[u8]) -> TocEntry {
         let mut e = TocEntry::new(file_id, type_id);
         e.toc_data = toc.to_vec();
-        e.gpu_data = Arc::from(gpu);
-        e.stream_data = Arc::from(stream);
+        e.gpu_data = gpu.to_vec().into();
+        e.stream_data = stream.to_vec().into();
         e
     }
 
@@ -767,12 +821,57 @@ mod tests {
     }
 
     #[test]
+    fn serialized_part_lengths_match_the_preallocation_plan() {
+        let mut archive = StreamToc {
+            entries: vec![
+                make_entry(1, UNIT_ID, &[1; 100], &[2; 65], &[3; 17]),
+                make_entry(2, MATERIAL_ID, &[4; 20], &[5; 3], &[]),
+            ],
+            ..Default::default()
+        };
+        let (toc, gpu, stream) = archive.try_serialize().unwrap();
+        let serializer = archive.serializer();
+
+        assert_eq!(toc.len(), serializer.part_len(SerializedPart::Toc));
+        assert_eq!(gpu.len(), serializer.part_len(SerializedPart::Gpu));
+        assert_eq!(stream.len(), serializer.part_len(SerializedPart::Stream));
+    }
+
+    #[test]
+    fn owned_sidecars_become_shared_entry_views_without_copying() {
+        let mut archive = StreamToc {
+            entries: vec![
+                make_entry(1, UNIT_ID, &[1; 8], &[2; 65], &[]),
+                make_entry(2, UNIT_ID, &[3; 8], &[4; 17], &[]),
+            ],
+            ..Default::default()
+        };
+        let (toc, gpu, stream) = archive.serialize();
+        let original_gpu_address = gpu.as_ptr() as usize;
+        let parsed = StreamToc::from_owned_buffers(toc, gpu, stream, "owned".into()).unwrap();
+
+        assert_eq!(
+            parsed.entries[0].gpu_data.as_ptr() as usize,
+            original_gpu_address
+        );
+        assert!(
+            parsed.entries[0]
+                .gpu_data
+                .shares_storage_with(&parsed.entries[1].gpu_data)
+        );
+    }
+
+    #[test]
     fn cloned_entries_share_immutable_resource_sidecars() {
         let original = make_entry(1, UNIT_ID, b"toc", b"gpu", b"stream");
         let cloned = original.clone();
 
-        assert!(Arc::ptr_eq(&original.gpu_data, &cloned.gpu_data));
-        assert!(Arc::ptr_eq(&original.stream_data, &cloned.stream_data));
+        assert!(original.gpu_data.shares_storage_with(&cloned.gpu_data));
+        assert!(
+            original
+                .stream_data
+                .shares_storage_with(&cloned.stream_data)
+        );
         assert_ne!(original.toc_data.as_ptr(), cloned.toc_data.as_ptr());
     }
 

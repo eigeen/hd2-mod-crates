@@ -172,7 +172,6 @@ fn entries_equal(left: &TocEntry, right: &TocEntry) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     #[test]
     fn later_resource_wins_and_output_reparses() {
@@ -213,7 +212,7 @@ mod tests {
         let mut parsed =
             StreamToc::from_buffers(&input.toc, &input.gpu, &input.stream, input.name.clone())
                 .unwrap();
-        parsed.entries[0].gpu_data = Arc::from([1, 2, 3]);
+        parsed.entries[0].gpu_data = [1, 2, 3].into();
         let (toc, _, _) = parsed.serialize();
         input.toc = toc;
         input.gpu.clear();

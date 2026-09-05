@@ -26,7 +26,7 @@ pub use equipment_graph::{
 };
 pub use head_armor_merge::{
     HeadArmorMergeOptions, HeadArmorMergeResult, HeadArmorMergeSkippedPart, HeadArmorMergeSummary,
-    HeadArmorMergedPart, merge_head_into_armor,
+    HeadArmorMergedPart, PreparedHeadArmorMerge, merge_head_into_armor, prepare_head_armor_merge,
 };
 pub use mapping_preview::{
     MAPPING_PREVIEW_SCHEMA_VERSION, WebEquipmentMappingPreview, WebMappingPreviewSummary,

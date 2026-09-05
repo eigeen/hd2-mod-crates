@@ -1,12 +1,27 @@
 use super::vertex::{
-    CURRENT_VERSION, Component, LEGACY_VERSION, Semantic, component_size, decode, default_value,
-    encode, float_values, relative_transform, transform_direction, transform_position, uint_values,
-    validate_component,
+    CURRENT_VERSION, Component, LEGACY_VERSION, Semantic, component_size, decode, float_values,
+    relative_transform, uint_values, validate_component,
 };
 use crate::archive::TocEntry;
 use crate::hashing::{murmur32, murmur64};
 use byteorder::{ByteOrder, LittleEndian as LE};
 use std::collections::{HashMap, HashSet};
+
+mod gpu;
+mod indices;
+mod memory;
+mod stream_append;
+mod transcode;
+
+use gpu::{UnitGpuCheckpoint, UnitGpuData};
+#[cfg(test)]
+use indices::{decode_index_bytes, encode_indices};
+use indices::{decode_index_range, decode_indices, index_stride};
+use stream_append::{
+    CompletedSection, PendingSection, append_stream_sections, completed_mesh_section,
+    validate_source_indices,
+};
+use transcode::{VertexTranscodeRequest, transcode_vertices, validate_layout_compatibility};
 
 const TRANSFORM_OFFSET_FIELD: usize = 0x34;
 const BONE_OFFSET_FIELD: usize = 0x58;
@@ -108,10 +123,10 @@ struct BoneRecord {
     remaps: Vec<Vec<u32>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct ParsedUnit {
     toc: Vec<u8>,
-    gpu: Vec<u8>,
+    gpu: UnitGpuData,
     version: u32,
     stream_unknown: u32,
     streams: Vec<StreamRecord>,
@@ -120,6 +135,14 @@ struct ParsedUnit {
     bones: Vec<BoneRecord>,
     materials: Vec<(u32, u64)>,
     material_layout: MaterialTableLayout,
+}
+
+struct ParsedUnitCheckpoint {
+    gpu: UnitGpuCheckpoint,
+    streams: Vec<StreamRecord>,
+    meshes: Vec<MeshRecord>,
+    bones: Vec<BoneRecord>,
+    materials: Vec<(u32, u64)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,14 +161,14 @@ pub fn merge_visible_head_into_body(
     let mut output = ParsedUnit::parse(body)?;
     let source = ParsedUnit::parse(helmet)?;
     let lods = output.visible_lods();
+    let expected_gpu_growth = memory::estimate_gpu_growth(&output, &source, &lods)?;
+    output.gpu.reserve_growth(expected_gpu_growth)?;
     let mut merged_lods = Vec::new();
     let mut skipped_lods = Vec::new();
 
     for lod in lods {
-        let mut candidate = output.clone();
-        match candidate.merge_lod(&source, lod, material_file_ids) {
+        match output.merge_lod(&source, lod, material_file_ids) {
             Ok(()) => {
-                output = candidate;
                 merged_lods.push(lod);
             }
             Err(error) => skipped_lods.push(MergeDiagnostic {
@@ -168,7 +191,7 @@ pub fn merge_visible_head_into_body(
 
     let mut entry = body.clone();
     entry.toc_data = output.rebuild_toc()?;
-    entry.gpu_data = output.gpu.into();
+    entry.gpu_data = output.gpu.into_shared();
     ParsedUnit::parse(&entry)
         .map_err(|error| eyre::eyre!("rebuilt Unit validation failed: {error}"))?;
     Ok(MergeOutcome {
@@ -221,7 +244,7 @@ impl ParsedUnit {
             materials,
             material_layout,
             toc,
-            gpu: entry.gpu_data.to_vec(),
+            gpu: UnitGpuData::Shared(entry.gpu_data.clone()),
             version,
             stream_unknown,
             streams,
@@ -256,23 +279,41 @@ impl ParsedUnit {
     ) -> crate::Result<()> {
         let mut failures = Vec::new();
         for source_lod in source_lods_by_distance(source, target_lod) {
-            let mut candidate = self.clone();
+            let checkpoint = self.checkpoint();
             let lods = LodPair {
                 target: target_lod,
                 source: source_lod,
             };
-            match candidate.merge_lod_pair(source, lods, material_file_ids) {
-                Ok(()) => {
-                    *self = candidate;
-                    return Ok(());
+            match self.merge_lod_pair(source, lods, material_file_ids) {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    self.restore(checkpoint);
+                    failures.push(format!("helmet LOD {source_lod}: {error}"));
                 }
-                Err(error) => failures.push(format!("helmet LOD {source_lod}: {error}")),
             }
         }
         if failures.is_empty() {
             eyre::bail!("helmet has no visible LOD");
         }
         eyre::bail!(failures.join("; "))
+    }
+
+    fn checkpoint(&self) -> ParsedUnitCheckpoint {
+        ParsedUnitCheckpoint {
+            gpu: self.gpu.checkpoint(),
+            streams: self.streams.clone(),
+            meshes: self.meshes.clone(),
+            bones: self.bones.clone(),
+            materials: self.materials.clone(),
+        }
+    }
+
+    fn restore(&mut self, checkpoint: ParsedUnitCheckpoint) {
+        self.gpu.restore(checkpoint.gpu);
+        self.streams = checkpoint.streams;
+        self.meshes = checkpoint.meshes;
+        self.bones = checkpoint.bones;
+        self.materials = checkpoint.materials;
     }
 
     fn merge_lod_pair(
@@ -288,23 +329,47 @@ impl ParsedUnit {
         if source_sections.is_empty() {
             eyre::bail!("helmet has no visible mesh");
         }
-        for source_section in source_sections {
-            self.append_source_section(source, host_index, source_section, material_file_ids)?;
-        }
-        Ok(())
+        self.append_source_sections(source, host_index, source_sections, material_file_ids)
     }
 
-    fn append_source_section(
+    fn append_source_sections(
         &mut self,
         source: &ParsedUnit,
         host_index: usize,
-        source_section: SourceSection,
+        source_sections: Vec<SourceSection>,
         material_file_ids: &HashMap<u64, u64>,
     ) -> crate::Result<()> {
-        let source_mesh = &source.meshes[source_section.mesh_index];
-        let source_stream = &source.streams[source_mesh.stream_index];
         let host_stream_index = self.meshes[host_index].stream_index;
-        let host_transform = self.transform_matrix(self.meshes[host_index].transform_index)?;
+        let pending = source_sections
+            .into_iter()
+            .map(|section| {
+                self.prepare_source_section(SourceSectionRequest {
+                    source,
+                    host_index,
+                    section,
+                    material_file_ids,
+                })
+            })
+            .collect::<crate::Result<Vec<_>>>()?;
+        let completed = append_stream_sections(
+            self.gpu.make_owned()?,
+            &mut self.streams[host_stream_index],
+            pending,
+        )?;
+        self.append_completed_sections(host_index, completed);
+        Ok(())
+    }
+
+    fn prepare_source_section(
+        &mut self,
+        request: SourceSectionRequest<'_>,
+    ) -> crate::Result<PendingSection> {
+        let source = request.source;
+        let source_mesh = &source.meshes[request.section.mesh_index];
+        let source_stream = &source.streams[source_mesh.stream_index];
+        let host_stream_index = self.meshes[request.host_index].stream_index;
+        let host_transform =
+            self.transform_matrix(self.meshes[request.host_index].transform_index)?;
         let source_transform = source.transform_matrix(source_mesh.transform_index)?;
         let transform = relative_transform(&source_transform, &host_transform)?;
         validate_layout_compatibility(
@@ -315,37 +380,42 @@ impl ParsedUnit {
         )?;
 
         let (slot_id, material_id) =
-            source.section_material(source_section.mesh_index, source_section.section_index)?;
-        let mapped_material = material_file_ids
+            source.section_material(request.section.mesh_index, request.section.section_index)?;
+        let mapped_material = request
+            .material_file_ids
             .get(&material_id)
             .copied()
             .unwrap_or(material_id);
-        let local_material_index = self.add_mesh_material(host_index, slot_id, mapped_material)?;
-        let group_index = self.append_bone_remap(source, host_index, source_section)?;
-        let source_section_value = source_mesh.sections[source_section.section_index];
-        let request = StreamAppendRequest {
+        let material_index =
+            self.add_mesh_material(request.host_index, slot_id, mapped_material)?;
+        let group_index = self.append_bone_remap(source, request.host_index, request.section)?;
+        let section = source_mesh.sections[request.section.section_index];
+        let indices = decode_index_range(&source.gpu, source_stream, section)?;
+        validate_source_indices(&indices, section.vertex_count)?;
+        let vertices = transcode_vertices(VertexTranscodeRequest {
             source_gpu: &source.gpu,
             source: source_stream,
             source_version: source.version,
-            section: source_section_value,
+            section,
+            target: &self.streams[host_stream_index],
+            target_version: self.version,
             transform: &transform,
-        };
-        let appended = append_stream_data(
-            &mut self.gpu,
-            &mut self.streams[host_stream_index],
-            self.version,
-            request,
-        )?;
-        self.meshes[host_index].dirty = true;
-        self.meshes[host_index].sections.push(MeshSection {
-            material_index: local_material_index,
-            vertex_offset: appended.vertex_offset,
-            vertex_count: appended.vertex_count,
-            index_offset: appended.index_offset,
-            index_count: appended.index_count,
+        })?;
+        Ok(PendingSection {
+            material_index,
             group_index,
-        });
-        Ok(())
+            vertex_count: section.vertex_count,
+            index_count: section.index_count,
+            vertices,
+            indices,
+        })
+    }
+
+    fn append_completed_sections(&mut self, host_index: usize, sections: Vec<CompletedSection>) {
+        self.meshes[host_index].dirty = true;
+        self.meshes[host_index]
+            .sections
+            .extend(sections.into_iter().map(completed_mesh_section));
     }
 
     fn append_bone_remap(
@@ -663,20 +733,11 @@ struct SourceSection {
     section_index: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct AppendedSection {
-    vertex_offset: u32,
-    vertex_count: u32,
-    index_offset: u32,
-    index_count: u32,
-}
-
-struct StreamAppendRequest<'a> {
-    source_gpu: &'a [u8],
-    source: &'a StreamRecord,
-    source_version: u32,
-    section: MeshSection,
-    transform: &'a [f32; 16],
+struct SourceSectionRequest<'a> {
+    source: &'a ParsedUnit,
+    host_index: usize,
+    section: SourceSection,
+    material_file_ids: &'a HashMap<u64, u64>,
 }
 
 impl StreamRecord {
@@ -864,172 +925,6 @@ fn visible_source_sections(
                 })
         })
         .collect()
-}
-
-fn validate_layout_compatibility(
-    target: &StreamRecord,
-    source: &StreamRecord,
-    target_version: u32,
-    source_version: u32,
-) -> crate::Result<()> {
-    for component in &target.components {
-        validate_component(target_version, *component)?;
-    }
-    for component in &source.components {
-        validate_component(source_version, *component)?;
-        if semantic_is_required_in_target(component.semantic)
-            && !target
-                .components
-                .iter()
-                .any(|target| target.semantic == component.semantic)
-        {
-            eyre::bail!(
-                "body stream is missing required helmet vertex semantic {}/{}",
-                component.semantic.kind,
-                component.semantic.index
-            );
-        }
-    }
-    Ok(())
-}
-
-fn semantic_is_required_in_target(semantic: Semantic) -> bool {
-    matches!(semantic.kind, 0 | 6 | 7)
-}
-
-fn append_stream_data(
-    gpu: &mut Vec<u8>,
-    target: &mut StreamRecord,
-    target_version: u32,
-    request: StreamAppendRequest<'_>,
-) -> crate::Result<AppendedSection> {
-    let old_vertices = meaningful_vertex_data(gpu, target)?.to_vec();
-    let old_indices = decode_indices(
-        gpu,
-        target.index_offset,
-        target.index_count,
-        target.index_type,
-    )?;
-    let source_indices = decode_index_range(request.source_gpu, request.source, request.section)?;
-    if source_indices
-        .iter()
-        .any(|index| *index >= request.section.vertex_count)
-    {
-        eyre::bail!("helmet section index exceeds its vertex range");
-    }
-    let appended_vertices = transcode_vertices(VertexTranscodeRequest {
-        source_gpu: request.source_gpu,
-        source: request.source,
-        source_version: request.source_version,
-        section: request.section,
-        target,
-        target_version,
-        transform: request.transform,
-    })?;
-    let vertex_offset = target.vertex_count;
-    let index_offset = target.index_count;
-    let mut vertex_buffer = old_vertices;
-    vertex_buffer.extend_from_slice(&appended_vertices);
-    let mut indices = old_indices;
-    indices.extend(source_indices);
-    let index_type =
-        if target.index_type == 1 || indices.iter().any(|index| *index > u16::MAX as u32) {
-            1
-        } else {
-            0
-        };
-    let index_buffer = encode_indices(&indices, index_type);
-
-    let vertex_at = append_aligned(gpu, &vertex_buffer);
-    let index_at = append_aligned(gpu, &index_buffer);
-    target.vertex_count = target
-        .vertex_count
-        .checked_add(request.section.vertex_count)
-        .ok_or_else(|| eyre::eyre!("vertex count overflow"))?;
-    target.index_count = target
-        .index_count
-        .checked_add(request.section.index_count)
-        .ok_or_else(|| eyre::eyre!("index count overflow"))?;
-    target.vertex_offset = u32::try_from(vertex_at)?;
-    target.vertex_size = u32::try_from(vertex_buffer.len())?;
-    target.index_offset = u32::try_from(index_at)?;
-    target.index_size = u32::try_from(index_buffer.len())?;
-    target.index_type = index_type;
-    Ok(AppendedSection {
-        vertex_offset,
-        vertex_count: request.section.vertex_count,
-        index_offset,
-        index_count: request.section.index_count,
-    })
-}
-
-/// Return only declared vertices, excluding alignment padding at the buffer tail.
-fn meaningful_vertex_data<'a>(gpu: &'a [u8], stream: &StreamRecord) -> crate::Result<&'a [u8]> {
-    let size = stream
-        .vertex_count
-        .checked_mul(stream.vertex_stride)
-        .ok_or_else(|| eyre::eyre!("body vertex buffer size overflow"))?;
-    if size > stream.vertex_size {
-        eyre::bail!("body vertex count exceeds its buffer size");
-    }
-    checked_slice(gpu, stream.vertex_offset, size, "body vertex buffer")
-}
-
-struct VertexTranscodeRequest<'a> {
-    source_gpu: &'a [u8],
-    source: &'a StreamRecord,
-    source_version: u32,
-    section: MeshSection,
-    target: &'a StreamRecord,
-    target_version: u32,
-    transform: &'a [f32; 16],
-}
-
-fn transcode_vertices(request: VertexTranscodeRequest<'_>) -> crate::Result<Vec<u8>> {
-    let VertexTranscodeRequest {
-        source_gpu,
-        source,
-        source_version,
-        section,
-        target,
-        target_version,
-        transform,
-    } = request;
-    let capacity = section.vertex_count as usize * target.vertex_stride as usize;
-    let mut output = Vec::with_capacity(capacity);
-    for local_index in 0..section.vertex_count {
-        let source_index = section.vertex_offset + local_index;
-        let source_start =
-            source.vertex_offset as usize + source_index as usize * source.vertex_stride as usize;
-        let before = output.len();
-        for target_component in &target.components {
-            let mut value = if let Some(source_component) = source
-                .components
-                .iter()
-                .find(|component| component.semantic == target_component.semantic)
-            {
-                let size = component_size(source_version, source_component.format).unwrap_or(0);
-                let bytes = checked_slice_usize(
-                    source_gpu,
-                    source_start + source_component.offset,
-                    size,
-                    "helmet vertex component",
-                )?;
-                decode(source_version, source_component.format, bytes)?
-            } else {
-                default_value(target_component.semantic)
-            };
-            value = match target_component.semantic.kind {
-                0 => transform_position(value, transform),
-                1 => transform_direction(value, transform, true),
-                2 | 3 => transform_direction(value, transform, false),
-                _ => value,
-            };
-            encode(target_version, target_component.format, value, &mut output)?;
-        }
-        output.resize(before + target.vertex_stride as usize, 0);
-    }
-    Ok(output)
 }
 
 fn section_used_bone_slots(
@@ -1443,72 +1338,6 @@ fn write_section(output: &mut Vec<u8>, section: MeshSection) {
     output.extend_from_slice(&section.index_offset.to_le_bytes());
     output.extend_from_slice(&section.index_count.to_le_bytes());
     output.extend_from_slice(&section.group_index.to_le_bytes());
-}
-
-fn decode_index_range(
-    gpu: &[u8],
-    stream: &StreamRecord,
-    section: MeshSection,
-) -> crate::Result<Vec<u32>> {
-    let stride = index_stride(stream.index_type)?;
-    let start = stream.index_offset as usize + section.index_offset as usize * stride;
-    let bytes = checked_slice_usize(
-        gpu,
-        start,
-        section.index_count as usize * stride,
-        "helmet section indices",
-    )?;
-    decode_index_bytes(bytes, stream.index_type)
-}
-
-fn decode_indices(gpu: &[u8], offset: u32, count: u32, index_type: u32) -> crate::Result<Vec<u32>> {
-    let stride = index_stride(index_type)?;
-    let bytes = checked_slice_usize(
-        gpu,
-        offset as usize,
-        count as usize * stride,
-        "body index buffer",
-    )?;
-    decode_index_bytes(bytes, index_type)
-}
-
-fn decode_index_bytes(bytes: &[u8], index_type: u32) -> crate::Result<Vec<u32>> {
-    match index_type {
-        0 => Ok(bytes
-            .chunks_exact(2)
-            .map(|chunk| LE::read_u16(chunk) as u32)
-            .collect()),
-        1 => Ok(bytes.chunks_exact(4).map(LE::read_u32).collect()),
-        _ => eyre::bail!("unsupported index type {index_type}"),
-    }
-}
-
-fn encode_indices(indices: &[u32], index_type: u32) -> Vec<u8> {
-    if index_type == 1 {
-        return indices
-            .iter()
-            .flat_map(|value| value.to_le_bytes())
-            .collect();
-    }
-    indices
-        .iter()
-        .flat_map(|value| (*value as u16).to_le_bytes())
-        .collect()
-}
-
-fn index_stride(index_type: u32) -> crate::Result<usize> {
-    match index_type {
-        0 => Ok(2),
-        1 => Ok(4),
-        _ => eyre::bail!("unsupported index type {index_type}"),
-    }
-}
-
-fn append_aligned(output: &mut Vec<u8>, bytes: &[u8]) -> usize {
-    output.resize(align_up(output.len(), 16), 0);
-    let offset = output.len();
-    output.extend_from_slice(bytes);
-    offset
 }
 
 fn unique_slot(materials: &[(u32, u64)], original: u32, material: u64) -> u32 {

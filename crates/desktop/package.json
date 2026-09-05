@@ -5,14 +5,16 @@
   "type": "module",
   "scripts": {
     "update-info": "bun run ../web_ui/scripts/build-update-info.ts",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
     "dev": "bun run update-info && bunx --bun vite",
-    "build": "bun run update-info && bunx --bun tsc && bunx --bun vite build",
+    "build": "bun run update-info && bun run typecheck && bunx --bun vite build",
     "exe:info": "bun run scripts/exe-info.ts",
     "preview": "bunx --bun vite preview",
     "smoke": "bun run scripts/runtime-smoke.ts",
     "desktop": "tauri"
   },
   "dependencies": {
+    "@hd2-mod-tools/migrator-app": "workspace:*",
     "@hd2-mod-tools/migrator-ui": "workspace:*",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
@@ -27,6 +29,7 @@
     "sonner": "^2.0.8"
   },
   "devDependencies": {
+    "@types/node": "^24.10.13",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",

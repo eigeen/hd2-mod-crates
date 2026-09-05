@@ -9,8 +9,8 @@
     "web:dev": "bun run --cwd crates/web_ui dev",
     "web:build": "bun run --cwd crates/web_ui build",
     "web:wasm": "bun run --cwd crates/web_ui wasm",
-    "ui:typecheck": "bun run --cwd crates/migrator_ui typecheck",
-    "ui:test": "bun test crates/migrator_ui/tests crates/web_ui/tests",
+    "ui:typecheck": "bun run --cwd crates/migrator_ui typecheck && bun run --cwd crates/migrator_app typecheck && bun run --cwd crates/web_ui typecheck && bun run --cwd crates/desktop typecheck",
+    "ui:test": "bun test crates/migrator_ui/tests crates/migrator_app/tests crates/web_ui/tests crates/desktop/tests",
     "desktop:build": "bun run --cwd crates/desktop desktop build",
     "desktop:info": "bun run --cwd crates/desktop exe:info"
   }

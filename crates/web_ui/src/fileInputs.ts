@@ -138,21 +138,43 @@ function storeZip(entries: StoreZipEntry[]): Blob {
 export class StoreZipBuilder {
   private readonly fileParts: Blob[] = [];
   private readonly centralParts: ArrayBuffer[] = [];
+  private activeRemaining: number | null = null;
   private offset = 0;
   private centralSize = 0;
 
   add(name: string, bytes: Uint8Array, precomputedCrc?: number): void {
+    this.beginFile(name, bytes.length, precomputedCrc ?? crc32(bytes));
+    this.addFileChunk(bytes);
+    this.endFile();
+  }
+
+  beginFile(name: string, size: number, crc: number): void {
+    if (this.activeRemaining !== null) throw new Error("Finish the current ZIP entry first.");
     const encodedName = new TextEncoder().encode(name);
-    const crc = precomputedCrc ?? crc32(bytes);
-    const local = localZipHeader(encodedName, bytes.length, crc);
-    const central = centralZipHeader(encodedName, bytes.length, crc, this.offset);
-    this.fileParts.push(new Blob([exactBuffer(local), exactBuffer(bytes)]));
+    const local = localZipHeader(encodedName, size, crc);
+    const central = centralZipHeader(encodedName, size, crc, this.offset);
+    this.fileParts.push(new Blob([exactBuffer(local)]));
     this.centralParts.push(exactBuffer(central));
-    this.offset += local.length + bytes.length;
+    this.offset += local.length + size;
     this.centralSize += central.length;
+    this.activeRemaining = size;
+  }
+
+  addFileChunk(bytes: Uint8Array): void {
+    if (this.activeRemaining === null) throw new Error("Start a ZIP entry before adding data.");
+    if (bytes.length > this.activeRemaining) throw new Error("ZIP entry received too much data.");
+    if (bytes.length > 0) this.fileParts.push(new Blob([exactBuffer(bytes)]));
+    this.activeRemaining -= bytes.length;
+  }
+
+  endFile(): void {
+    if (this.activeRemaining === null) throw new Error("No ZIP entry is active.");
+    if (this.activeRemaining !== 0) throw new Error("ZIP entry ended before all data was received.");
+    this.activeRemaining = null;
   }
 
   finish(): Blob {
+    if (this.activeRemaining !== null) throw new Error("Finish the current ZIP entry first.");
     const end = endOfCentralDirectory(
       this.centralParts.length,
       this.centralSize,

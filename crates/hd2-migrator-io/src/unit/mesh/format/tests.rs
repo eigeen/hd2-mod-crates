@@ -122,6 +122,37 @@ fn nearest_head_lod_is_used_when_body_lod_number_differs() {
 }
 
 #[test]
+fn merge_checkpoint_restores_gpu_and_unit_metadata() {
+    let mut unit = ParsedUnit::parse(&fixture_unit(7, 77, 0.0)).unwrap();
+    let original_gpu = unit.gpu.to_vec();
+    let original_toc = unit.rebuild_toc().unwrap();
+    let checkpoint = unit.checkpoint();
+
+    unit.gpu.make_owned().unwrap().extend_from_slice(&[9; 64]);
+    unit.streams[0].vertex_count += 3;
+    unit.meshes[0].sections.clear();
+    unit.materials.push((8, 88));
+    unit.restore(checkpoint);
+
+    assert_eq!(&*unit.gpu, original_gpu);
+    assert_eq!(unit.rebuild_toc().unwrap(), original_toc);
+}
+
+#[test]
+fn parsed_unit_borrows_shared_gpu_until_mutated() {
+    let entry = fixture_unit(7, 77, 0.0);
+    let mut unit = ParsedUnit::parse(&entry).unwrap();
+
+    let UnitGpuData::Shared(parsed_gpu) = &unit.gpu else {
+        panic!("parsed GPU data should remain shared");
+    };
+    assert!(parsed_gpu.shares_storage_with(&entry.gpu_data));
+
+    unit.gpu.make_owned().unwrap().push(1);
+    assert!(matches!(unit.gpu, UnitGpuData::Owned(_)));
+}
+
+#[test]
 fn optional_head_semantics_may_be_dropped_by_body_layout() {
     let target = layout(&[(0, 0)]);
     let source = layout(&[(0, 0), (5, 0)]);

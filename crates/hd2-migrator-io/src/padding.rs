@@ -9,14 +9,14 @@
 
 pub mod empty_mesh;
 
-use crate::archive::{StreamToc, TocEntry};
+use crate::archive::{ResourceBytes, StreamToc, TocEntry};
 use crate::constants::UNIT_ID;
 use crate::refs;
 use byteorder::{ByteOrder, LittleEndian as LE};
 use eyre::WrapErr;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaddingMode {
@@ -29,8 +29,8 @@ pub enum PaddingMode {
 pub struct EmptyUnitTemplate {
     pub name: String,
     pub toc_data: Vec<u8>,
-    pub gpu_data: Arc<[u8]>,
-    pub stream_data: Arc<[u8]>,
+    pub gpu_data: ResourceBytes,
+    pub stream_data: ResourceBytes,
     pub source_file_id: u64,
     pub source_slot_ids: Vec<u32>,
 }

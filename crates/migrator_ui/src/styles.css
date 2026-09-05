@@ -1,5 +1,8 @@
 @import "tailwindcss";
 @source "./**/*.{ts,tsx}";
+@source "../../migrator_app/src/**/*.{ts,tsx}";
+@source "../../web_ui/src/**/*.{ts,tsx}";
+@source "../../desktop/src/**/*.{ts,tsx}";
 
 @theme {
   --font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
@@ -779,4 +782,3 @@ textarea {
 .advancedToolsTab .MuiSvgIcon-root {
   font-size: 1.25rem;
 }
-

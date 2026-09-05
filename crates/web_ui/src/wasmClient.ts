@@ -8,7 +8,7 @@ import {
   EquipmentMappingPreview,
   EquipmentOption,
   HeadArmorMergeOptions,
-  HeadArmorMergeResult,
+  HeadArmorMergeSummary,
   MigrationResult,
   MigrationMapping,
   PatchMergeSummary,
@@ -28,6 +28,12 @@ export interface MigrationProgressSink {
 
 interface MigrationCallbacks extends MigrationProgressSink {
   onFile: (path: string, bytes: Uint8Array, crc32: number) => void;
+}
+
+interface ArchiveOutputCallbacks {
+  onFileStart: (path: string, size: number, crc32: number) => void;
+  onFileChunk: (bytes: Uint8Array) => void;
+  onFileEnd: () => void;
 }
 
 export class WasmRuntimeTrapError extends Error {
@@ -86,11 +92,18 @@ export async function mergeHeadIntoArmor(
   armorPatch: PatchFiles,
   headPatch: PatchFiles | null,
   options: HeadArmorMergeOptions,
-): Promise<HeadArmorMergeResult> {
+): Promise<{ zipBlob: Blob; summary: HeadArmorMergeSummary }> {
   const wasm = await loadWasm();
-  return callWasm("merge_head_into_armor", () =>
-    wasm.merge_head_into_armor(armorPatch, headPatch, options),
-  ) as Promise<HeadArmorMergeResult>;
+  const zip = new StoreZipBuilder();
+  const callbacks: ArchiveOutputCallbacks = {
+    onFileStart: (path, size, crc32) => zip.beginFile(path, size, crc32),
+    onFileChunk: (bytes) => zip.addFileChunk(bytes),
+    onFileEnd: () => zip.endFile(),
+  };
+  const result = await callWasm("merge_head_into_armor_stream", () =>
+    wasm.merge_head_into_armor_stream(armorPatch, headPatch, options, callbacks),
+  ) as { summary: HeadArmorMergeSummary };
+  return { zipBlob: zip.finish(), summary: result.summary };
 }
 
 export async function detectSource(patch: PatchFiles, category = "Armor") {
@@ -258,7 +271,7 @@ function wasmErrorCode(label: string): TaskErrorCode {
   }
   if (label === "repatch_units") return "repatch.failed";
   if (label === "merge_patches") return "patch.inspectFailed";
-  if (label === "merge_head_into_armor") return "migration.failed";
+  if (label.startsWith("merge_head_into_armor")) return "migration.failed";
   if (label.includes("migrate")) return "migration.failed";
   return "unknown";
 }
