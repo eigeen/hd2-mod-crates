@@ -27,8 +27,8 @@ export interface HeadMergeRecord<Source> {
 export interface HeadMergeAdapter<Source, FileSource = never> {
   browserFileReference?: (file: File) => MergeInputFile<FileSource>;
   cancellable: boolean;
-  pickRecords: () => Promise<HeadMergeRecord<Source>[] | null>;
-  recordsFromFiles?: (files: MergeInputFile<FileSource>[]) => Promise<HeadMergeRecord<Source>[]>;
+  pickRecords: (signal: AbortSignal) => Promise<HeadMergeRecord<Source>[] | null>;
+  recordsFromFiles?: (files: MergeInputFile<FileSource>[], signal: AbortSignal) => Promise<HeadMergeRecord<Source>[]>;
   subscribeToFileDrop?: (
     receive: (files: MergeInputFile<FileSource>[]) => void,
     reject: (error: unknown) => void,
@@ -71,7 +71,7 @@ export function HeadArmorMergeTool<Source, FileSource>({ adapter }: { adapter: H
   const pickRecords = useCallback(async () => {
     setAdding(true);
     await runTask({
-      execute: () => adapter.pickRecords(),
+      execute: (signal) => adapter.pickRecords(signal),
       fallbackErrorCode: "headMerge.failed",
       onSuccess: addRecords,
     });
@@ -82,7 +82,7 @@ export function HeadArmorMergeTool<Source, FileSource>({ adapter }: { adapter: H
     if (!adapter.recordsFromFiles) return;
     setAdding(true);
     await runTask({
-      execute: () => adapter.recordsFromFiles!(files),
+      execute: (signal) => adapter.recordsFromFiles!(files, signal),
       fallbackErrorCode: "headMerge.failed",
       onSuccess: addRecords,
     });

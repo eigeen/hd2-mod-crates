@@ -1,10 +1,11 @@
 import { useCallback, useMemo, useState } from "react";
 import { MigratorApp, type SetupPanelsProps } from "@hd2-mod-tools/migrator-app";
-import type { PatchFiles, TranslationKey } from "@hd2-mod-tools/migrator-ui";
+import type { TranslationKey } from "@hd2-mod-tools/migrator-ui";
 import { FrequentlyAskedQuestions } from "./FrequentlyAskedQuestions";
 import { WebHeadArmorMergeTool } from "./WebHeadArmorMergeTool";
 import { WebManualMergeTool } from "./WebManualMergeTool";
 import type { GameDirSelection } from "./GameDataDirPanel";
+import type { PatchFileSources } from "./fileInputs";
 import { useToolModeRoute } from "./toolModeRoute";
 import { WebSetupPanels, webPlatform, webViewExtras } from "./webPlatform";
 
@@ -17,7 +18,7 @@ export default function App() {
     setFaqOpen(true);
   }, []);
   const SetupPanels = useMemo(
-    () => function WebSetup(props: SetupPanelsProps<PatchFiles, GameDirSelection>) {
+    () => function WebSetup(props: SetupPanelsProps<PatchFileSources, GameDirSelection>) {
       return <WebSetupPanels {...props} onDirectoryAccessAborted={openDirectoryHelp} />;
     },
     [openDirectoryHelp],

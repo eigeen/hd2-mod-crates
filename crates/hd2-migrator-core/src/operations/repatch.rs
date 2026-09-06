@@ -12,6 +12,9 @@ use crate::unit::repatch::{LatestUnitParts, RepatchOutcome, repatch_unit};
 use eyre::WrapErr;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
+
+const TOC_HEADER_SIZE: u64 = 72;
 
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -123,6 +126,7 @@ async fn prepare_unit_repatch<S: DataSource + ?Sized>(
     }
     let mut lookup = LatestUnitLookup::new(wanted, input.name);
     lookup.load(source, progress).await?;
+    notify_repatch_stage(progress, "repatching_units")?;
     enforce_missing_policy(&lookup.missing, options.missing_unit_policy)?;
     let summary = apply_latest_units(&mut patch, lookup, options.missing_unit_policy)?;
     let changed = !repairs.is_empty() || summary.updated_units > 0 || summary.removed_units > 0;
@@ -218,6 +222,7 @@ impl LatestUnitLookup {
         if self.wanted.is_empty() {
             return Ok(());
         }
+        notify_repatch_stage(progress, "opening_game_data")?;
         if source.exists("bundles.nxa").await? {
             self.load_bundled(source, progress).await
         } else {
@@ -234,8 +239,10 @@ impl LatestUnitLookup {
             .list_packages()
             .await
             .wrap_err("list game archives")?;
-        for package in prioritize(packages, self.preferred_archive.as_deref()) {
-            notify_scan_progress(progress, &package)?;
+        let packages = prioritize(packages, self.preferred_archive.as_deref());
+        let total = packages.len();
+        for (index, package) in packages.into_iter().enumerate() {
+            notify_scan_progress(progress, index + 1, total)?;
             self.load_legacy_package(source, &package).await?;
             if self.missing.is_empty() {
                 break;
@@ -257,13 +264,101 @@ impl LatestUnitLookup {
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
-        for package in prioritize(packages, self.preferred_archive.as_deref()) {
-            notify_scan_progress(progress, &package)?;
-            let toc = slicer.load_package(source, &package).await?;
-            self.load_package_bytes(&package, &toc);
+        let packages = prioritize(packages, self.preferred_archive.as_deref());
+        let total = packages.len();
+        for (index, package) in packages.into_iter().enumerate() {
+            notify_scan_progress(progress, index + 1, total)?;
+            self.load_bundled_package(source, &slicer, &package).await?;
             if self.missing.is_empty() {
                 break;
             }
+        }
+        Ok(())
+    }
+
+    async fn load_bundled_package<S: DataSource + ?Sized>(
+        &mut self,
+        source: &S,
+        slicer: &BundleSlicer,
+        package: &str,
+    ) -> crate::Result<()> {
+        self.scanned_archives += 1;
+        let Some(package_size) = slicer.packages.get(package).map(|metadata| metadata.size) else {
+            self.warn_package(package, eyre::eyre!("bundled package is missing"));
+            return Ok(());
+        };
+        if package_size < TOC_HEADER_SIZE {
+            self.warn_package(
+                package,
+                eyre::eyre!("TOC is too small: {package_size} bytes"),
+            );
+            return Ok(());
+        }
+        let prefix = slicer
+            .load_package_range(source, package, 0..TOC_HEADER_SIZE)
+            .await?;
+        let header = match TocHeader::parse(&prefix) {
+            Ok(header) => header,
+            Err(error) => {
+                self.warn_package(package, error);
+                return Ok(());
+            }
+        };
+        let table_size = match header
+            .table_size()
+            .and_then(|size| Ok(u64::try_from(size)?))
+        {
+            Ok(size) => size,
+            Err(error) => {
+                self.warn_package(package, error);
+                return Ok(());
+            }
+        };
+        if table_size > package_size {
+            self.warn_package(package, eyre::eyre!("TOC header table is truncated"));
+            return Ok(());
+        }
+        let mut table = prefix;
+        if table_size > TOC_HEADER_SIZE {
+            let tail = slicer
+                .load_package_range(source, package, TOC_HEADER_SIZE..table_size)
+                .await?;
+            table.extend_from_slice(&tail);
+        }
+        let all_locations = match parse_entry_locations(&table, &header) {
+            Ok(locations) => locations,
+            Err(error) => {
+                self.warn_package(package, error);
+                return Ok(());
+            }
+        };
+        let locations = retain_locations(&all_locations, UNIT_ID, &self.missing)
+            .into_iter()
+            .filter(|location| {
+                let is_valid = location
+                    .toc_offset
+                    .checked_add(u64::from(location.toc_size))
+                    .is_some_and(|end| end <= package_size);
+                if !is_valid {
+                    self.warn_location(
+                        package,
+                        location.file_id,
+                        eyre::eyre!("Unit body is out of bounds"),
+                    );
+                }
+                is_valid
+            })
+            .collect::<Vec<_>>();
+        for range in coalesce_location_ranges(&locations) {
+            let bodies = slicer
+                .load_package_range(source, package, range.clone())
+                .await?;
+            let selected = locations
+                .iter()
+                .copied()
+                .filter(|location| location_range_contains(&range, location))
+                .collect::<Vec<_>>();
+            self.insert_locations(package, &selected, range.start, &bodies);
         }
         Ok(())
     }
@@ -358,13 +453,25 @@ impl LatestUnitLookup {
         self.warnings
             .push(format!("{package}/{file_id:016x}: {error}"));
     }
+
+    fn warn_package(&mut self, package: &str, error: eyre::Report) {
+        self.warnings.push(format!("{package}: {error}"));
+    }
 }
 
-fn notify_scan_progress(progress: Option<&dyn WebProgress>, package: &str) -> crate::Result<()> {
+fn notify_scan_progress(
+    progress: Option<&dyn WebProgress>,
+    current: usize,
+    total: usize,
+) -> crate::Result<()> {
+    notify_repatch_stage(progress, &format!("scan_archives:{current}:{total}"))
+}
+
+fn notify_repatch_stage(progress: Option<&dyn WebProgress>, stage: &str) -> crate::Result<()> {
     let Some(progress) = progress else {
         return Ok(());
     };
-    progress.stage("", &format!("scanning {package}"))
+    progress.stage("", stage)
 }
 
 #[cfg(test)]
@@ -389,11 +496,34 @@ mod progress_tests {
 
     #[test]
     fn scan_progress_can_cancel_repatching() {
-        let error = notify_scan_progress(Some(&CancelledProgress), "example.patch_0")
-            .expect_err("cancel scan");
+        let error = notify_scan_progress(Some(&CancelledProgress), 1, 3).expect_err("cancel scan");
 
         assert!(error.to_string().contains("task cancelled"));
     }
+}
+
+fn coalesce_location_ranges(locations: &[TocEntryLocation]) -> Vec<Range<u64>> {
+    let mut ranges = locations
+        .iter()
+        .map(|location| location.toc_offset..location.toc_offset + u64::from(location.toc_size))
+        .collect::<Vec<_>>();
+    ranges.sort_by_key(|range| range.start);
+    let mut coalesced = Vec::<Range<u64>>::new();
+    for range in ranges {
+        if let Some(previous) = coalesced.last_mut()
+            && range.start <= previous.end
+        {
+            previous.end = previous.end.max(range.end);
+            continue;
+        }
+        coalesced.push(range);
+    }
+    coalesced
+}
+
+fn location_range_contains(range: &Range<u64>, location: &TocEntryLocation) -> bool {
+    let end = location.toc_offset + u64::from(location.toc_size);
+    range.start <= location.toc_offset && end <= range.end
 }
 
 fn apply_latest_units(
@@ -679,6 +809,15 @@ mod behavior_tests {
         assert!(error.to_string().contains("duplicate resource"));
     }
 
+    #[test]
+    fn bundled_unit_body_ranges_merge_only_when_touching() {
+        let locations = vec![location(200, 20), location(100, 20), location(120, 30)];
+
+        let ranges = coalesce_location_ranges(&locations);
+
+        assert_eq!(ranges, vec![100..150, 200..220]);
+    }
+
     fn package_with_entries(entries: Vec<TocOnlyEntry>) -> TocOnlyPackage {
         TocOnlyPackage {
             types: Vec::new(),
@@ -697,6 +836,19 @@ mod behavior_tests {
             unknown3: 0,
             unknown4: 0,
             toc_data: Vec::new(),
+            stream_offset: 0,
+            gpu_offset: 0,
+            stream_size: 0,
+            gpu_size: 0,
+        }
+    }
+
+    fn location(toc_offset: u64, toc_size: u32) -> TocEntryLocation {
+        TocEntryLocation {
+            file_id: toc_offset,
+            type_id: UNIT_ID,
+            toc_offset,
+            toc_size,
             stream_offset: 0,
             gpu_offset: 0,
             stream_size: 0,

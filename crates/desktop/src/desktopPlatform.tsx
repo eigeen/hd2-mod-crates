@@ -126,13 +126,15 @@ async function runDesktopRepatch(
 ) {
   const outputPath = await chooseOutputZip(DEFAULT_REPATCH_OUTPUT);
   if (!outputPath) return null;
-  request.onProgressLabel("1/1");
+  request.onStage("reading_patch");
   const task = startRepatch({
     patchPaths: request.patch.source,
     dataDir: request.gameData,
     outputPath,
     options: { missingUnitPolicy: request.missingUnitPolicy },
-  }, () => undefined);
+  }, (event) => {
+    if (event.kind === "stage") request.onStage(event.stage);
+  });
   const summary = await waitForDesktopTask(task, request.signal);
   return { output: outputPath, summary };
 }

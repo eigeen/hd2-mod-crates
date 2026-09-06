@@ -1,7 +1,7 @@
 import CancelIcon from "@mui/icons-material/Cancel";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { Button, CircularProgress } from "@mui/material";
-import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { toast, Toaster } from "sonner";
 import {
   MappingPreviewAccordion,
@@ -31,6 +31,7 @@ import {
 } from "./platform";
 import { useMigrationWorkspace } from "./useMigrationWorkspace";
 import { compileMigrationRequest } from "./migrationRequest";
+import { createRepatchProgress } from "./repatchProgress";
 import { TaskControllerProvider, useTaskController } from "./taskController";
 
 export function MigratorApp<PatchSource, GameDataSource>(
@@ -79,6 +80,7 @@ function MigratorAppContent<PatchSource, GameDataSource>(
   const [patch, setPatch] = useState<SelectedPatch<PatchSource> | null>(null);
   const [gameData, setGameData] = useState<SelectedGameData<GameDataSource> | null>(null);
   const [inspecting, setInspecting] = useState(false);
+  const inspectionController = useRef<AbortController | null>(null);
   const [mappingLimitWarning, setMappingLimitWarning] = useState<{ count: number; max: number } | null>(null);
   const task = useTaskController();
   const [displayedToolMode, setDisplayedToolMode] = useState(props.toolMode);
@@ -127,15 +129,22 @@ function MigratorAppContent<PatchSource, GameDataSource>(
   useEffect(() => {
     if (!patch) {
       workspace.clearPatchAnalysis();
+      setInspecting(false);
       return;
     }
     let disposed = false;
+    const controller = new AbortController();
+    inspectionController.current = controller;
     setInspecting(true);
-    void platform.inspectPatch(patch.source, gameData?.source ?? null)
+    void platform.inspectPatch(patch.source, gameData?.source ?? null, { signal: controller.signal })
       .then((analysis) => { if (!disposed) workspace.applyAnalysis(analysis); })
       .catch((error) => { if (!disposed) reportError(error); })
       .finally(() => { if (!disposed) setInspecting(false); });
-    return () => { disposed = true; };
+    return () => {
+      disposed = true;
+      controller.abort();
+      if (inspectionController.current === controller) inspectionController.current = null;
+    };
   }, [gameData?.key, patch?.key, platform]);
 
   const runMigration = useCallback(async () => {
@@ -173,14 +182,14 @@ function MigratorAppContent<PatchSource, GameDataSource>(
       execute: (signal, onProgressLabel) => platform.runRepatch({
         gameData: gameData.source,
         missingUnitPolicy: workspace.missingUnitPolicy,
-        onProgressLabel,
+        onStage: createRepatchProgress(t, signal, onProgressLabel),
         patch,
         signal,
       }),
       fallbackErrorCode: "repatch.failed",
       report: (result) => ({ kind: "repatch", ...result }),
     });
-  }, [gameData, patch, platform, reports.recordReport, task, workspace.missingUnitPolicy]);
+  }, [gameData, patch, platform, reports.recordReport, t, task, workspace.missingUnitPolicy]);
 
   const requestRun = useCallback(() => {
     if (activeToolMode === "migrate") {
@@ -259,6 +268,7 @@ function MigratorAppContent<PatchSource, GameDataSource>(
             cancelling={task.snapshot.phase === "cancelling"}
             canRun={canRun}
             onCancel={() => {
+              inspectionController.current?.abort();
               task.cancel();
             }}
             onRun={requestRun}
@@ -345,6 +355,10 @@ interface WorkspacePanelsProps<PatchSource, GameDataSource> {
 }
 
 function MigrationWorkspacePanels<PatchSource, GameDataSource>(props: WorkspacePanelsProps<PatchSource, GameDataSource>) {
+  const loadPreviews = useCallback((mappings: MigrationMapping[], context?: { signal?: AbortSignal }) => {
+    if (!props.patch) return Promise.reject(new Error("Patch is not loaded"));
+    return props.platform.previewMappings(props.patch.source, mappings, context);
+  }, [props.patch, props.platform]);
   if (props.toolMode === "repatch") return null;
   const workspace = props.workspace;
   const showLimits = Boolean(props.platform.resourceLimits);
@@ -377,10 +391,7 @@ function MigrationWorkspacePanels<PatchSource, GameDataSource>(props: WorkspaceP
       {showNotice && props.mappingNotice?.({ limit: props.activeLimit, selectedTargetCount: props.selectedTargetCount })}
       <MappingPreviewAccordion
         contextKey={props.patch?.key ?? "empty"}
-        loadPreviews={(mappings: MigrationMapping[]) => {
-          if (!props.patch) return Promise.reject(new Error("Patch is not loaded"));
-          return props.platform.previewMappings(props.patch.source, mappings);
-        }}
+        loadPreviews={loadPreviews}
         mappings={workspace.configuredMappings}
         patchGraph={workspace.equipmentGraph}
         unitBehavior={workspace.unitBehavior}

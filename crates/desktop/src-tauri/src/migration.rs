@@ -324,6 +324,9 @@ async fn repatch_mod_blocking(
     )
     .await
     .map_err(display_error)?;
+    if let Some(progress) = progress {
+        progress.stage("", "saving_output").map_err(display_error)?;
+    }
     write_repatched_zip(&request.output_path, &patch, &result, progress)?;
     Ok(result.summary)
 }

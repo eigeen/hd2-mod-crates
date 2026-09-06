@@ -42,8 +42,8 @@ export interface ManualMergeRecord<Source> {
 export interface ManualMergeAdapter<Source, FileSource = never> {
   browserFileReference?: (file: File) => MergeInputFile<FileSource>;
   cancellable: boolean;
-  pickRecords: () => Promise<ManualMergeRecord<Source>[] | null>;
-  recordsFromFiles?: (files: MergeInputFile<FileSource>[]) => Promise<ManualMergeRecord<Source>[]>;
+  pickRecords: (signal: AbortSignal) => Promise<ManualMergeRecord<Source>[] | null>;
+  recordsFromFiles?: (files: MergeInputFile<FileSource>[], signal: AbortSignal) => Promise<ManualMergeRecord<Source>[]>;
   subscribeToFileDrop?: (
     receive: (files: MergeInputFile<FileSource>[]) => void,
     reject: (error: unknown) => void,
@@ -76,7 +76,7 @@ export function ManualMergeTool<Source, FileSource>({ adapter }: { adapter: Manu
 
   const pickRecords = useCallback(async () => {
     await runTask({
-      execute: () => adapter.pickRecords(),
+      execute: (signal) => adapter.pickRecords(signal),
       fallbackErrorCode: "merge.failed",
       onSuccess: addRecords,
     });
@@ -85,7 +85,7 @@ export function ManualMergeTool<Source, FileSource>({ adapter }: { adapter: Manu
   const receiveFiles = useCallback(async (files: MergeInputFile<FileSource>[]) => {
     if (!adapter.recordsFromFiles) return;
     await runTask({
-      execute: () => adapter.recordsFromFiles!(files),
+      execute: (signal) => adapter.recordsFromFiles!(files, signal),
       fallbackErrorCode: "merge.failed",
       onSuccess: addRecords,
     });

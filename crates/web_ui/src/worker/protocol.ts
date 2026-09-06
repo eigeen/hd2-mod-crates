@@ -9,6 +9,7 @@ export const GAME_DATA_METHODS = [
 export type GameDataMethod = typeof GAME_DATA_METHODS[number];
 
 export type WasmTaskOperation =
+  | "patchMetadata"
   | "migrateEquipmentVariants"
   | "repatchUnits"
   | "mergePatches"

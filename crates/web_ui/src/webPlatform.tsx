@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   MAX_WEB_SINGLE_PATCH_MAPPINGS,
   PatchPanel,
@@ -26,7 +26,13 @@ import {
   WebMappingLimitDialog,
 } from "./DesktopGuidance";
 import { isDesktopRecoverableWebError } from "./desktopGuidancePolicy";
-import { downloadRepatchedPatch, downloadZip, patchFilesFromList } from "./fileInputs";
+import {
+  downloadRepatchedPatch,
+  downloadZip,
+  loadPatchFiles,
+  patchFileSourcesFromList,
+  type PatchFileSources,
+} from "./fileInputs";
 import { GameDataDirPanel, type GameDirSelection } from "./GameDataDirPanel";
 import { GameDataSource } from "./gameDataSource";
 import {
@@ -39,18 +45,17 @@ import {
   repatchUnits,
   type MigrationTaskContext,
 } from "./wasmClient";
-import type { PatchFiles } from "@hd2-mod-tools/migrator-ui";
-
-export const webPlatform: MigratorPlatform<PatchFiles, GameDirSelection> = {
+export const webPlatform: MigratorPlatform<PatchFileSources, GameDirSelection> = {
   resourceLimits: {
     separateOutputLimit: maxWebSeparateOutputsForPatch,
     singlePatchLimit: MAX_WEB_SINGLE_PATCH_MAPPINGS,
   },
   copyDiagnostic: copyTaskErrorDiagnostic,
   errorFallbackCode: (error) => isWasmRuntimeTrapError(error) ? "wasm.runtime" : "unknown",
-  inspectPatch: async (patch, gameData) => analyzeEquipmentContents(
+  inspectPatch: async (patch, gameData, context) => analyzeEquipmentContents(
     patch,
     gameData ? new GameDataSource(gameData.handle) : undefined,
+    context,
   ),
   isDesktopRecoverableError: isDesktopRecoverableWebError,
   loadEquipmentOptions: builtinEquipmentOptions,
@@ -60,24 +65,36 @@ export const webPlatform: MigratorPlatform<PatchFiles, GameDirSelection> = {
 };
 
 export function WebSetupPanels(
-  props: SetupPanelsProps<PatchFiles, GameDirSelection> & { onDirectoryAccessAborted?: () => void },
+  props: SetupPanelsProps<PatchFileSources, GameDirSelection> & {
+    onDirectoryAccessAborted?: () => void;
+  },
 ) {
   const { t } = useI18n();
+  const activeImport = useRef<AbortController | null>(null);
+  useEffect(() => () => activeImport.current?.abort(), []);
   const importPatchFiles = useCallback(async (
     files: FileList | File[] | null,
     originalName?: string,
   ) => {
+    activeImport.current?.abort();
     if (!files) return;
+    const controller = new AbortController();
+    activeImport.current = controller;
+    props.onPatchChange(null);
     try {
-      const source = await patchFilesFromList(
+      const source = await patchFileSourcesFromList(
         files,
         patchFileMessages(t),
-        patchSidecarRequirements,
-        originalName,
+        (toc, streamLength) => patchSidecarRequirements(toc, streamLength, { signal: controller.signal }),
+        { originalName, signal: controller.signal },
       );
+      controller.signal.throwIfAborted();
       props.onPatchChange(selectedWebPatch(source));
     } catch (error) {
+      if (controller.signal.aborted) return;
       props.reportError(error);
+    } finally {
+      if (activeImport.current === controller) activeImport.current = null;
     }
   }, [props.onPatchChange, props.reportError, t]);
 
@@ -124,8 +141,9 @@ export const webViewExtras: Omit<PlatformViewExtras, "footer"> = {
 async function runWebMigration(
   request: Parameters<typeof webPlatform.runMigration>[0],
 ): Promise<{ output: string; summary: MigrationSummary }> {
+  const patch = await loadPatchFiles(request.patch.source, request.signal);
   const result = await migrateEquipmentVariants(
-    request.patch.source,
+    patch,
     request.options,
     new GameDataSource(request.gameData.handle),
     webMigrationProgress(request),
@@ -139,17 +157,19 @@ async function runWebMigration(
 async function runWebRepatch(
   request: Parameters<typeof webPlatform.runRepatch>[0],
 ) {
-  request.onProgressLabel("1/1");
+  request.onStage("reading_patch");
+  const patch = await loadPatchFiles(request.patch.source, request.signal);
   const output = await repatchUnits(
-    request.patch.source,
+    patch,
     { missingUnitPolicy: request.missingUnitPolicy },
     new GameDataSource(request.gameData.handle),
-    { onStage: () => throwIfTaskCancelled(request.signal), signal: request.signal },
+    { onStage: (_name, stage) => request.onStage(stage), signal: request.signal },
   );
   throwIfTaskCancelled(request.signal);
   const outputName = DEFAULT_REPATCH_OUTPUT;
+  request.onStage("saving_output");
   downloadRepatchedPatch(
-    request.patch.source,
+    patch,
     output.tocBytes,
     outputName,
     output.gpuBytes,
@@ -171,9 +191,9 @@ function webMigrationProgress(request: Parameters<typeof webPlatform.runMigratio
   };
 }
 
-function selectedWebPatch(source: PatchFiles): SelectedPatch<PatchFiles> {
+function selectedWebPatch(source: PatchFileSources): SelectedPatch<PatchFileSources> {
   return {
-    byteLength: source.toc.byteLength + source.gpu.byteLength + source.stream.byteLength,
+    byteLength: source.toc.byteLength + (source.gpu?.size ?? 0) + (source.stream?.size ?? 0),
     info: { name: source.name },
     key: crypto.randomUUID(),
     originalName: source.originalName,

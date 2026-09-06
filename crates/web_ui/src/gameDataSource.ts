@@ -15,6 +15,8 @@ export interface GameDataSourcePort {
 export type GameDataRpcMethod = keyof GameDataSourcePort;
 
 export class GameDataSource implements GameDataSourcePort {
+  private readonly files = new Map<string, Promise<File>>();
+
   constructor(private readonly dir: FileSystemDirectoryHandle) {}
 
   async readFull(path: string): Promise<Uint8Array> {
@@ -63,9 +65,18 @@ export class GameDataSource implements GameDataSourcePort {
     return result;
   }
 
-  private async openFile(path: string): Promise<File> {
-    const handle = await this.dir.getFileHandle(path);
-    return handle.getFile();
+  /** Reuse file snapshots within a task without retaining their byte contents. */
+  private openFile(path: string): Promise<File> {
+    const cached = this.files.get(path);
+    if (cached) return cached;
+    const pending = this.dir.getFileHandle(path)
+      .then((handle) => handle.getFile())
+      .catch((error) => {
+        this.files.delete(path);
+        throw error;
+      });
+    this.files.set(path, pending);
+    return pending;
   }
 }
 

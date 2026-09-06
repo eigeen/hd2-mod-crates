@@ -26,7 +26,7 @@ const PREVIEW_DEBOUNCE_MS = 220;
 
 interface MappingPreviewAccordionProps {
   contextKey: string;
-  loadPreviews: (mappings: MigrationMapping[]) => Promise<EquipmentMappingPreview[]>;
+  loadPreviews: (mappings: MigrationMapping[], context?: { signal?: AbortSignal }) => Promise<EquipmentMappingPreview[]>;
   mappings: MigrationMapping[];
   patchGraph: EquipmentPartGraph | null;
   unitBehavior: UnitBehaviorOptions;
@@ -59,13 +59,17 @@ export function MappingPreviewAccordion(props: MappingPreviewAccordionProps) {
   useEffect(() => {
     if (!expanded || debounced.mappings.length === 0) return;
     let current = true;
+    const controller = new AbortController();
     setErrorRequestKey(null);
-    void props.loadPreviews(debounced.mappings).then((result) => {
+    void props.loadPreviews(debounced.mappings, { signal: controller.signal }).then((result) => {
       if (current) setLoaded({ previews: result, requestKey: debounced.requestKey });
     }).catch(() => {
       if (current) setErrorRequestKey(debounced.requestKey);
     });
-    return () => { current = false; };
+    return () => {
+      current = false;
+      controller.abort();
+    };
   }, [debounced, expanded, props.loadPreviews]);
 
   const summary = useMemo(

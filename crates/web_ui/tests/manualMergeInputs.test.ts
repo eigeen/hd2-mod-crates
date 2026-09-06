@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   appendManualMergeBatch,
+  loadManualMergePatch,
   ManualMergeInputError,
   moveManualMergeRecord,
   recordsFromMergeInputFiles,
@@ -86,6 +87,48 @@ describe("manual MOD merge inputs", () => {
       expect(error).toBeInstanceOf(TaskError);
       expect((error as TaskError).message).toContain("mod.patch_0.gpu_resources needs 4, found 1");
     }
+  });
+
+  test("merge execution stops before loading sidecars when cancelled during the TOC read", async () => {
+    const controller = new AbortController();
+    const toc = file("mod.patch_0");
+    const gpu = file("mod.patch_0.gpu_resources");
+    let gpuReads = 0;
+    toc.arrayBuffer = async () => {
+      controller.abort();
+      return new ArrayBuffer(0);
+    };
+    gpu.arrayBuffer = async () => { gpuReads += 1; return new ArrayBuffer(0); };
+    const [record] = appendManualMergeBatch([], [toc, gpu], ids());
+    await expect(loadManualMergePatch(record, controller.signal))
+      .rejects.toMatchObject({ code: "task.cancelled" });
+    expect(gpuReads).toBe(0);
+  });
+
+  test("checks a batch one file at a time instead of overlapping metadata tasks", async () => {
+    const records = appendManualMergeBatch([], [file("a.patch_0"), file("b.patch_0")], ids());
+    let active = 0;
+    let peak = 0;
+    await validateManualMergeRecords(records, translate, async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      active -= 1;
+      return { gpu: "0", stream: "0" };
+    });
+    expect(peak).toBe(1);
+  });
+
+  test("cancelling a batch prevents inspection of remaining files", async () => {
+    const records = appendManualMergeBatch([], [file("a.patch_0"), file("b.patch_0")], ids());
+    const controller = new AbortController();
+    let inspected = 0;
+    await expect(validateManualMergeRecords(records, translate, async () => {
+      inspected += 1;
+      controller.abort();
+      return { gpu: "0", stream: "0" };
+    }, { signal: controller.signal })).rejects.toMatchObject({ code: "task.cancelled" });
+    expect(inspected).toBe(1);
   });
 
   test("passes actual stream length to shared repair validation without reading the stream", async () => {

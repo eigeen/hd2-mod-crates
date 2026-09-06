@@ -4,8 +4,9 @@ import {
   type GroupedMergeInput,
   type MergeInputFile,
 } from "@hd2-mod-tools/migrator-app";
-import { TaskError, type Translate } from "@hd2-mod-tools/migrator-ui";
+import { TaskError, throwIfTaskCancelled, type PatchFiles, type Translate } from "@hd2-mod-tools/migrator-ui";
 import {
+  loadPatchFiles,
   validatePatchSidecarSizes,
   type PatchFileMessages,
   type ReadPatchSidecarRequirements,
@@ -20,6 +21,21 @@ export interface ManualMergeRecord {
   toc?: File;
   gpu?: File;
   stream?: File;
+}
+
+/** Read one record's metadata without materializing sidecar contents. */
+export async function readManualMergeToc(record: ManualMergeRecord, signal?: AbortSignal) {
+  if (signal) throwIfTaskCancelled(signal);
+  if (!record.toc) throw new MergeInputError("missingMain", record.name);
+  const toc = new Uint8Array(await record.toc.arrayBuffer());
+  if (signal) throwIfTaskCancelled(signal);
+  return { name: record.name, toc };
+}
+
+/** Execute with the same ordered, cancellable sidecar reads used by migration. */
+export async function loadManualMergePatch(record: ManualMergeRecord, signal: AbortSignal): Promise<PatchFiles> {
+  const metadata = await readManualMergeToc(record, signal);
+  return loadPatchFiles({ ...metadata, gpu: record.gpu, stream: record.stream }, signal);
 }
 
 /** Localize a merge input validation error for display. */
@@ -57,10 +73,15 @@ export async function validateManualMergeRecords(
   records: ManualMergeRecord[],
   t: Translate,
   readRequirements: ReadPatchSidecarRequirements,
+  context: { signal?: AbortSignal } = {},
 ): Promise<void> {
   try {
     const messages = patchFileMessages(t);
-    await Promise.all(records.map((record) => validateManualMergeRecord(record, messages, readRequirements)));
+    for (const record of records) {
+      if (context.signal) throwIfTaskCancelled(context.signal);
+      await validateManualMergeRecord(record, messages, readRequirements, context.signal);
+    }
+    if (context.signal) throwIfTaskCancelled(context.signal);
   } catch (error) {
     if (error instanceof TaskError) throw error;
     const message = error instanceof Error ? error.message : String(error);
@@ -72,10 +93,11 @@ async function validateManualMergeRecord(
   record: ManualMergeRecord,
   messages: PatchFileMessages,
   readRequirements: ReadPatchSidecarRequirements,
+  signal?: AbortSignal,
 ): Promise<void> {
-  if (!record.toc) throw new MergeInputError("missingMain", record.name);
+  const { toc } = await readManualMergeToc(record, signal);
   const required = await readRequirements(
-    new Uint8Array(await record.toc.arrayBuffer()),
+    toc,
     record.stream?.size ?? 0,
   );
   validatePatchSidecarSizes({

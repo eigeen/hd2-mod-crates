@@ -56,7 +56,7 @@ export interface RepatchRunRequest<PatchSource, GameDataSource> {
   missingUnitPolicy: MissingUnitPolicy;
   patch: SelectedPatch<PatchSource>;
   signal: AbortSignal;
-  onProgressLabel: (label: string) => void;
+  onStage: (stage: string) => void;
 }
 
 export interface CompletedRun<Summary> {
@@ -70,12 +70,14 @@ export interface MigratorPlatform<PatchSource, GameDataSource> {
   inspectPatch: (
     patch: PatchSource,
     gameData: GameDataSource | null,
+    context?: { signal?: AbortSignal },
   ) => Promise<PatchAnalysis>;
   isDesktopRecoverableError?: (error: unknown) => boolean;
   loadEquipmentOptions: () => Promise<EquipmentOption[]>;
   previewMappings: (
     patch: PatchSource,
     mappings: MigrationMapping[],
+    context?: { signal?: AbortSignal },
   ) => Promise<EquipmentMappingPreview[]>;
   resourceLimits?: MappingLimits;
   restoreGameData?: () => Promise<SelectedGameData<GameDataSource> | null>;

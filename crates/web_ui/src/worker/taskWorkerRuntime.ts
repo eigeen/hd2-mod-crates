@@ -1,4 +1,5 @@
 import { StoreZipBuilder } from "../fileInputs";
+import { inspectPatchMetadata, type PatchMetadataRequest } from "./patchMetadata";
 import type {
   GameDataMethod,
   GameDataResponseMessage,
@@ -98,11 +99,15 @@ async function executeTask(
     return mergeHeadIntoArmor(wasm, request.payload);
   }
   const dataSource = remoteGameDataSource(scope, state, request.taskId);
+  if (request.operation === "patchMetadata") {
+    return inspectPatchMetadata(wasm, request.payload as PatchMetadataRequest, dataSource);
+  }
   const progress = progressCallbacks(scope, request.taskId);
   if (request.operation === "migrateEquipmentVariants") {
     return migrateEquipmentVariants(wasm, request.payload, dataSource, progress);
   }
-  return repatchUnits(wasm, request.payload, dataSource, progress);
+  if (request.operation === "repatchUnits") return repatchUnits(wasm, request.payload, dataSource, progress);
+  throw new Error(`Unsupported task operation: ${request.operation}`);
 }
 
 function mergePatches(wasm: WasmModule, payload: unknown): unknown {
@@ -270,6 +275,7 @@ function taskFailure(
 }
 
 function fallbackCode(operation: WasmTaskOperation): string {
+  if (operation === "patchMetadata") return "patch.inspectFailed";
   if (operation === "mergePatches" || operation === "mergePatchesToZip") return "merge.failed";
   if (operation === "mergeHeadIntoArmor") return "headMerge.failed";
   if (operation === "repatchUnits") return "repatch.failed";

@@ -33,6 +33,8 @@ export interface WasmTaskContext {
 
 export interface MigrationTaskContext extends MigrationProgressSink, WasmTaskContext {}
 
+type PatchMetadataSource = Pick<PatchFiles, "name" | "toc">;
+
 export class WasmRuntimeTrapError extends Error {
   constructor() {
     super("WebAssembly execution stopped unexpectedly");
@@ -69,11 +71,10 @@ export async function builtinEquipmentOptions() {
   ) as Promise<EquipmentOption[]>;
 }
 
-export async function patchSidecarRequirements(toc: Uint8Array, streamLength: number) {
-  const wasm = await loadWasm();
-  return callWasm("patch_sidecar_requirements", () =>
-    wasm.patch_sidecar_requirements(toc, streamLength),
-  ) as Promise<{ gpu: string; stream: string }>;
+export function patchSidecarRequirements(toc: Uint8Array, streamLength: number, context: WasmTaskContext = {}) {
+  return runWasmWorkerTask<{ gpu: string; stream: string }>("patchMetadata", {
+    method: "sidecars", toc, streamLength,
+  }, context);
 }
 
 export async function mergePatches(
@@ -107,69 +108,55 @@ export async function mergeHeadIntoArmor(
   });
 }
 
-export async function detectSource(patch: PatchFiles, category = "Armor") {
-  const wasm = await loadWasm();
-  // 只传 toc，gpu/stream 不参与来源识别；避免把数百 MB 数据拷贝进 WASM 线性内存触发 OOM。
-  return callWasm("detect_source", () =>
-    wasm.detect_source(patch.name, patch.toc, category),
-  ) as Promise<TargetOption | null>;
+export function detectSource(patch: PatchMetadataSource, category = "Armor") {
+  return runWasmWorkerTask<TargetOption | null>("patchMetadata", {
+    method: "detect", name: patch.name, toc: patch.toc, category,
+  });
 }
 
-export async function inspectPatchContents(patch: PatchFiles, category = "Armor") {
-  const wasm = await loadWasm();
-  return callWasm("inspect_patch", () =>
-    wasm.inspect_patch(patch.name, patch.toc, category),
-  ) as Promise<PatchInspection>;
+export function inspectPatchContents(patch: PatchMetadataSource, category = "Armor") {
+  return runWasmWorkerTask<PatchInspection>("patchMetadata", {
+    method: "inspect", name: patch.name, toc: patch.toc, category,
+  });
 }
 
 export async function inspectEquipmentContents(
-  patch: PatchFiles,
+  patch: PatchMetadataSource,
   dataSource?: GameDataSource,
+  context: WasmTaskContext = {},
 ) {
-  const wasm = await loadWasm();
-  if (dataSource) {
-    return callWasm("inspect_equipment_with_source", () =>
-      wasm.inspect_equipment_with_source(patch.name, patch.toc, dataSource),
-    ) as Promise<PatchInspection>;
-  }
-  return callWasm("inspect_equipment", () =>
-    wasm.inspect_equipment(patch.name, patch.toc),
-  ) as Promise<PatchInspection>;
+  return runWasmWorkerTask<PatchInspection>("patchMetadata", {
+    method: "equipment", name: patch.name, toc: patch.toc, withGameData: Boolean(dataSource),
+  }, { ...context, gameData: dataSource });
 }
 
 export async function analyzeEquipmentContents(
-  patch: PatchFiles,
+  patch: PatchMetadataSource,
   dataSource?: GameDataSource,
+  context: WasmTaskContext = {},
 ) {
-  const wasm = await loadWasm();
-  if (dataSource) {
-    return callWasm("analyze_equipment_patch_with_source", () =>
-      wasm.analyze_equipment_patch_with_source(patch.name, patch.toc, dataSource),
-    ) as Promise<EquipmentPatchAnalysis>;
-  }
-  return callWasm("analyze_equipment_patch", () =>
-    wasm.analyze_equipment_patch(patch.name, patch.toc),
-  ) as Promise<EquipmentPatchAnalysis>;
+  return runWasmWorkerTask<EquipmentPatchAnalysis>("patchMetadata", {
+    method: "analysis", name: patch.name, toc: patch.toc, withGameData: Boolean(dataSource),
+  }, { ...context, gameData: dataSource });
 }
 
 export async function previewEquipmentMapping(
-  patch: PatchFiles,
+  patch: PatchMetadataSource,
   mapping: MigrationMapping,
 ): Promise<EquipmentMappingPreview> {
-  const wasm = await loadWasm();
-  return callWasm("preview_equipment_mapping", () =>
-    wasm.preview_equipment_mapping(patch.name, patch.toc, mapping),
-  ) as Promise<EquipmentMappingPreview>;
+  return runWasmWorkerTask<EquipmentMappingPreview>("patchMetadata", {
+    method: "preview", name: patch.name, toc: patch.toc, mapping,
+  });
 }
 
 export async function previewEquipmentMappings(
-  patch: PatchFiles,
+  patch: PatchMetadataSource,
   mappings: MigrationMapping[],
+  context: WasmTaskContext = {},
 ): Promise<EquipmentMappingPreview[]> {
-  const wasm = await loadWasm();
-  return callWasm("preview_equipment_mappings", () =>
-    wasm.preview_equipment_mappings(patch.name, patch.toc, mappings),
-  ) as Promise<EquipmentMappingPreview[]>;
+  return runWasmWorkerTask<EquipmentMappingPreview[]>("patchMetadata", {
+    method: "previews", name: patch.name, toc: patch.toc, mappings,
+  }, context);
 }
 
 export async function migrateEquipmentVariants(

@@ -8,6 +8,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./task-error": "./src/taskError.ts",
     "./styles.css": "./src/styles.css"
   },
   "peerDependencies": {

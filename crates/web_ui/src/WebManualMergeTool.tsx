@@ -6,13 +6,14 @@ import {
   type ManualMergeRecord,
 } from "@hd2-mod-tools/migrator-app";
 import {
+  TaskError,
   throwIfTaskCancelled,
   useI18n,
   type PatchFiles,
 } from "@hd2-mod-tools/migrator-ui";
 import { downloadZip } from "./fileInputs";
 import {
-  appendManualMergeBatch,
+  loadManualMergePatch,
   mergeInputErrorMessage,
   recordsFromMergeInputFiles,
   validateManualMergeRecords,
@@ -25,11 +26,12 @@ export function WebManualMergeTool() {
   const adapter = useMemo<ManualMergeAdapter<WebMergeRecord, File>>(() => ({
     browserFileReference,
     cancellable: true,
-    pickRecords: async () => {
+    pickRecords: async (signal) => {
       const files = await chooseFiles();
-      return files ? createRecords(files, t) : null;
+      throwIfTaskCancelled(signal);
+      return files ? createRecordsFromInputs(files.map(browserFileReference), t, signal) : null;
     },
-    recordsFromFiles: async (files) => createRecordsFromInputs(files, t),
+    recordsFromFiles: async (files, signal) => createRecordsFromInputs(files, t, signal),
     runMerge: runWebMerge,
   }), [t]);
   return <ManualMergeTool adapter={adapter} />;
@@ -46,8 +48,12 @@ function browserFileReference(file: File): MergeInputFile<File> {
 
 async function runWebMerge(request: Parameters<ManualMergeAdapter<WebMergeRecord>["runMerge"]>[0]) {
   throwIfTaskCancelled(request.signal);
+  const inputs: PatchFiles[] = [];
+  for (const record of request.records) {
+    inputs.push(await loadManualMergePatch(record.source, request.signal));
+  }
   const result = await mergePatchesToZip(
-    await Promise.all(request.records.map((record) => readPatchInput(record.source))),
+    inputs,
     request.outputName,
     { signal: request.signal },
   );
@@ -57,28 +63,18 @@ async function runWebMerge(request: Parameters<ManualMergeAdapter<WebMergeRecord
   return { output, summary: result.summary };
 }
 
-async function createRecords(
-  files: File[],
-  t: ReturnType<typeof useI18n>["t"],
-): Promise<ManualMergeRecord<WebMergeRecord>[]> {
-  try {
-    const records = appendManualMergeBatch([], files);
-    await validateManualMergeRecords(records, t, patchSidecarRequirements);
-    return records.map(toManualMergeRecord);
-  } catch (error) {
-    throw new Error(mergeInputErrorMessage(error, t), { cause: error });
-  }
-}
-
 async function createRecordsFromInputs(
   files: MergeInputFile<File>[],
   t: ReturnType<typeof useI18n>["t"],
+  signal: AbortSignal,
 ): Promise<ManualMergeRecord<WebMergeRecord>[]> {
   try {
     const records = recordsFromMergeInputFiles(files);
-    await validateManualMergeRecords(records, t, patchSidecarRequirements);
+    await validateManualMergeRecords(records, t,
+      (toc, streamLength) => patchSidecarRequirements(toc, streamLength, { signal }), { signal });
     return records.map(toManualMergeRecord);
   } catch (error) {
+    if (error instanceof TaskError) throw error;
     throw new Error(mergeInputErrorMessage(error, t), { cause: error });
   }
 }
@@ -90,20 +86,6 @@ function toManualMergeRecord(record: WebMergeRecord): ManualMergeRecord<WebMerge
     name: record.name,
     source: record,
   };
-}
-
-async function readPatchInput(record: WebMergeRecord): Promise<PatchFiles> {
-  if (!record.toc) throw new Error(`Missing patch main file: ${record.name}`);
-  return {
-    name: record.name,
-    toc: await fileBytes(record.toc),
-    gpu: record.gpu ? await fileBytes(record.gpu) : new Uint8Array(),
-    stream: record.stream ? await fileBytes(record.stream) : new Uint8Array(),
-  };
-}
-
-function fileBytes(file: File): Promise<Uint8Array> {
-  return file.arrayBuffer().then((buffer) => new Uint8Array(buffer));
 }
 
 function chooseFiles(): Promise<File[] | null> {

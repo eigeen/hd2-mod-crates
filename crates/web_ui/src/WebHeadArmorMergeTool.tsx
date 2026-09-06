@@ -6,13 +6,15 @@ import {
   type MergeInputFile,
 } from "@hd2-mod-tools/migrator-app";
 import {
+  TaskError,
   headMergeCandidates,
   throwIfTaskCancelled,
   useI18n,
-  type PatchFiles,
 } from "@hd2-mod-tools/migrator-ui";
 import { downloadZip } from "./fileInputs";
 import {
+  loadManualMergePatch,
+  readManualMergeToc,
   mergeInputErrorMessage,
   recordsFromMergeInputFiles,
   validateManualMergeRecords,
@@ -25,11 +27,12 @@ export function WebHeadArmorMergeTool() {
   const adapter = useMemo<HeadMergeAdapter<ManualMergeRecord, File>>(() => ({
     browserFileReference,
     cancellable: true,
-    pickRecords: async () => {
+    pickRecords: async (signal) => {
       const files = await chooseFiles();
-      return files ? createRecords(files.map(browserFileReference), t) : null;
+      throwIfTaskCancelled(signal);
+      return files ? createRecords(files.map(browserFileReference), t, signal) : null;
     },
-    recordsFromFiles: async (files) => createRecords(files, t),
+    recordsFromFiles: async (files, signal) => createRecords(files, t, signal),
     runMerge: runWebHeadMerge,
   }), [t]);
   return <HeadArmorMergeTool adapter={adapter} />;
@@ -47,34 +50,40 @@ function browserFileReference(file: File): MergeInputFile<File> {
 async function createRecords(
   files: MergeInputFile<File>[],
   t: ReturnType<typeof useI18n>["t"],
+  signal: AbortSignal,
 ): Promise<HeadMergeRecord<ManualMergeRecord>[]> {
   let records: ManualMergeRecord[];
   try {
     records = recordsFromMergeInputFiles(files);
-    await validateManualMergeRecords(records, t, patchSidecarRequirements);
+    await validateManualMergeRecords(records, t,
+      (toc, streamLength) => patchSidecarRequirements(toc, streamLength, { signal }), { signal });
   } catch (error) {
+    if (error instanceof TaskError) throw error;
     throw new Error(mergeInputErrorMessage(error, t), { cause: error });
   }
-  return Promise.all(records.map(async (record) => {
-    const inspection = await inspectEquipmentContents(await readRecordToc(record));
-    return {
+  const inspected: HeadMergeRecord<ManualMergeRecord>[] = [];
+  for (const record of records) {
+    throwIfTaskCancelled(signal);
+    const inspection = await inspectEquipmentContents(await readManualMergeToc(record, signal), undefined, { signal });
+    inspected.push({
       armors: headMergeCandidates(inspection.sources, "Armor"),
       helmets: headMergeCandidates(inspection.sources, "Helmet"),
       id: record.id,
       name: record.name,
       source: record,
-    };
-  }));
+    });
+  }
+  return inspected;
 }
 
 async function runWebHeadMerge(
   request: Parameters<HeadMergeAdapter<ManualMergeRecord>["runMerge"]>[0],
 ) {
   throwIfTaskCancelled(request.signal);
-  const armorPatch = await readRecordPatch(request.armorRecord.source);
+  const armorPatch = await loadManualMergePatch(request.armorRecord.source, request.signal);
   const headPatch = request.helmetRecord.id === request.armorRecord.id
     ? null
-    : await readRecordPatch(request.helmetRecord.source);
+    : await loadManualMergePatch(request.helmetRecord.source, request.signal);
   const result = await mergeHeadIntoArmor(armorPatch, headPatch, {
     armorHash: request.armorHash,
     helmetHash: request.helmetHash,
@@ -83,27 +92,6 @@ async function runWebHeadMerge(
   const output = "hd2-head-merged-mod.zip";
   downloadZip(result.zipBlob, output);
   return { output, summary: result.summary };
-}
-
-async function readRecordToc(record: ManualMergeRecord): Promise<PatchFiles> {
-  if (!record.toc) throw new Error(`Missing patch main file: ${record.name}`);
-  return {
-    name: record.name,
-    toc: await fileBytes(record.toc),
-    gpu: new Uint8Array(),
-    stream: new Uint8Array(),
-  };
-}
-
-async function readRecordPatch(record: ManualMergeRecord): Promise<PatchFiles> {
-  const patch = await readRecordToc(record);
-  patch.gpu = record.gpu ? await fileBytes(record.gpu) : new Uint8Array();
-  patch.stream = record.stream ? await fileBytes(record.stream) : new Uint8Array();
-  return patch;
-}
-
-function fileBytes(file: File): Promise<Uint8Array> {
-  return file.arrayBuffer().then((buffer) => new Uint8Array(buffer));
 }
 
 function chooseFiles(): Promise<File[] | null> {

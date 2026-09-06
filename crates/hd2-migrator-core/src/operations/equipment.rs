@@ -78,7 +78,16 @@ pub async fn inspect_equipment_with_source<S: DataSource + ?Sized>(
     source: &S,
 ) -> crate::Result<WebEquipmentInspection> {
     let unit_ids = patch_unit_ids(&patch.toc)?;
-    let mut inspection = inspect_equipment(patch)?;
+    let mut inspection = WebEquipmentInspection {
+        sources: detected_sources(&unit_ids)?,
+    };
+    if !inspection
+        .sources
+        .iter()
+        .any(|detected| detected.candidates.len() >= 2)
+    {
+        return Ok(inspection);
+    }
     let bundle = if source.exists("bundles.nxa").await? {
         Some(BundleSlicer::open(source).await?)
     } else {
@@ -318,6 +327,8 @@ fn category_order(category: EquipmentCategory) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::io::IoFuture;
+    use std::cell::Cell;
 
     #[test]
     fn keeps_only_maximal_overlapping_hit_sets() {
@@ -358,6 +369,125 @@ mod tests {
             .unwrap();
         assert_eq!(fs_05.hash, "8670598c1f4462dc");
         assert!(!fs_05.excluded);
+    }
+
+    #[test]
+    fn source_inspection_without_detected_equipment_does_not_read_game_data() {
+        let source = RejectingDataSource::default();
+        let inspection = pollster::block_on(inspect_equipment_with_source(
+            &patch_with_units(&[]),
+            &source,
+        ))
+        .unwrap();
+
+        assert!(inspection.sources.is_empty());
+        assert_eq!(source.calls.get(), 0);
+    }
+
+    #[test]
+    fn source_inspection_with_unique_candidate_does_not_read_game_data() {
+        let source = RejectingDataSource::default();
+        let unit_id = uniquely_owned_equipment_unit();
+        let inspection = pollster::block_on(inspect_equipment_with_source(
+            &patch_with_units(&[unit_id]),
+            &source,
+        ))
+        .unwrap();
+
+        assert!(!inspection.sources.is_empty());
+        assert!(
+            inspection
+                .sources
+                .iter()
+                .all(|detected| detected.candidates.len() == 1)
+        );
+        assert_eq!(source.calls.get(), 0);
+    }
+
+    #[derive(Default)]
+    struct RejectingDataSource {
+        calls: Cell<usize>,
+    }
+
+    impl RejectingDataSource {
+        fn reject<T>(&self) -> IoFuture<'_, T> {
+            self.calls.set(self.calls.get() + 1);
+            Box::pin(async { eyre::bail!("game data must not be read") })
+        }
+    }
+
+    impl DataSource for RejectingDataSource {
+        fn read_full<'a>(&'a self, _path: &'a str) -> IoFuture<'a, Vec<u8>> {
+            self.reject()
+        }
+
+        fn read_range<'a>(
+            &'a self,
+            _path: &'a str,
+            _offset: u64,
+            _len: u64,
+        ) -> IoFuture<'a, Vec<u8>> {
+            self.reject()
+        }
+
+        fn exists<'a>(&'a self, _path: &'a str) -> IoFuture<'a, bool> {
+            self.reject()
+        }
+
+        fn list_bundle_chunks<'a>(&'a self) -> IoFuture<'a, Vec<String>> {
+            self.reject()
+        }
+
+        fn list_packages<'a>(&'a self) -> IoFuture<'a, Vec<String>> {
+            self.reject()
+        }
+    }
+
+    fn uniquely_owned_equipment_unit() -> u64 {
+        let mut owners = HashMap::<u64, HashSet<(EquipmentCategory, String)>>::new();
+        for (name, parts) in ArmorMappingTable::bundled().unwrap().entries() {
+            for unit_id in parts.all_file_ids() {
+                owners
+                    .entry(unit_id)
+                    .or_default()
+                    .insert((EquipmentCategory::Armor, name.to_owned()));
+            }
+        }
+        for (name, unit_id) in HelmetMappingTable::bundled().unwrap().entries() {
+            owners
+                .entry(unit_id)
+                .or_default()
+                .insert((EquipmentCategory::Helmet, name.to_owned()));
+        }
+        owners
+            .into_iter()
+            .find_map(|(unit_id, owners)| (owners.len() == 1).then_some(unit_id))
+            .expect("bundled equipment tables must contain a uniquely owned Unit")
+    }
+
+    fn patch_with_units(unit_ids: &[u64]) -> PatchBytes {
+        if unit_ids.is_empty() {
+            return PatchBytes {
+                name: "empty.patch_0".to_owned(),
+                toc: Vec::new(),
+                gpu: Vec::new(),
+                stream: Vec::new(),
+            };
+        }
+
+        assert_eq!(unit_ids.len(), 1, "test helper supports one Unit");
+        let mut toc = vec![0u8; 184];
+        toc[0..4].copy_from_slice(&crate::constants::LEGACY_MAGIC.to_le_bytes());
+        toc[4..8].copy_from_slice(&1u32.to_le_bytes());
+        toc[8..12].copy_from_slice(&1u32.to_le_bytes());
+        toc[104..112].copy_from_slice(&unit_ids[0].to_le_bytes());
+        toc[112..120].copy_from_slice(&UNIT_ID.to_le_bytes());
+        PatchBytes {
+            name: "unit.patch_0".to_owned(),
+            toc,
+            gpu: Vec::new(),
+            stream: Vec::new(),
+        }
     }
 
     fn option(category: EquipmentCategory, hash: &str, name: &str) -> WebEquipmentOption {

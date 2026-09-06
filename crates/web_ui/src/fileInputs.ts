@@ -1,4 +1,5 @@
 import type { PatchFiles } from "@hd2-mod-tools/migrator-ui";
+import { throwIfTaskCancelled } from "@hd2-mod-tools/migrator-ui/task-error";
 
 const GPU_SUFFIX = ".gpu_resources";
 const STREAM_SUFFIX = ".stream";
@@ -22,19 +23,67 @@ export type ReadPatchSidecarRequirements = (
   streamLength: number,
 ) => Promise<PatchSidecarRequirements>;
 
+export interface PatchFileSources {
+  name: string;
+  originalName?: string;
+  toc: Uint8Array;
+  gpu?: File;
+  stream?: File;
+}
+
+interface SelectPatchFileOptions {
+  originalName?: string;
+  signal?: AbortSignal;
+}
+
 export async function patchFilesFromList(
   files: FileList | File[],
   messages: PatchFileMessages,
   readRequirements: ReadPatchSidecarRequirements,
   originalName?: string,
 ) {
+  const source = await patchFileSourcesFromList(
+    files,
+    messages,
+    readRequirements,
+    { originalName },
+  );
+  return loadPatchFiles(source);
+}
+
+/** Read the TOC and retain sidecar File references until the task starts. */
+export async function patchFileSourcesFromList(
+  files: FileList | File[],
+  messages: PatchFileMessages,
+  readRequirements: ReadPatchSidecarRequirements,
+  options: SelectPatchFileOptions = {},
+): Promise<PatchFileSources> {
   const values = Array.from(files);
   const toc = selectTocFile(values, messages);
-  const tocBytes = await fileBytes(toc);
-  const loaded = await loadPatchSelection(values, toc, tocBytes, originalName);
-  const required = await readRequirements(tocBytes, loaded.patch.stream.length);
-  validatePatchFiles(loaded.patch, loaded.presence, required, messages);
-  return loaded.patch;
+  const tocBytes = await fileBytes(toc, options.signal);
+  const source = selectPatchSources(values, toc, tocBytes, options.originalName);
+  if (options.signal) throwIfTaskCancelled(options.signal);
+  const required = await readRequirements(tocBytes, source.stream?.size ?? 0);
+  if (options.signal) throwIfTaskCancelled(options.signal);
+  validatePatchSourceSizes(source, required, messages);
+  return source;
+}
+
+/** Load sidecars only when an operation is ready to execute. */
+export async function loadPatchFiles(
+  source: PatchFileSources,
+  signal?: AbortSignal,
+): Promise<PatchFiles> {
+  if (signal) throwIfTaskCancelled(signal);
+  const gpu = source.gpu ? await fileBytes(source.gpu, signal) : new Uint8Array();
+  const stream = source.stream ? await fileBytes(source.stream, signal) : new Uint8Array();
+  return {
+    name: source.name,
+    originalName: source.originalName,
+    toc: source.toc,
+    gpu,
+    stream,
+  };
 }
 
 function selectTocFile(values: File[], messages: PatchFileMessages): File {
@@ -48,27 +97,37 @@ function selectTocFile(values: File[], messages: PatchFileMessages): File {
   return tocFiles[0];
 }
 
-async function loadPatchSelection(
+function selectPatchSources(
   values: File[],
   toc: File,
   tocBytes: Uint8Array,
   originalName?: string,
-) {
+): PatchFileSources {
   const gpuFile = values.find((file) => file.name === `${toc.name}${GPU_SUFFIX}`);
   const streamFile = values.find((file) => file.name === `${toc.name}${STREAM_SUFFIX}`);
   return {
-    patch: {
-      name: toc.name,
-      originalName: originalName ?? originalNameFromRelativePath(toc),
-      toc: tocBytes,
-      gpu: gpuFile ? await fileBytes(gpuFile) : new Uint8Array(),
-      stream: streamFile ? await fileBytes(streamFile) : new Uint8Array(),
-    } satisfies PatchFiles,
-    presence: {
-      hasGpuFile: Boolean(gpuFile),
-      hasStreamFile: Boolean(streamFile),
-    },
+    name: toc.name,
+    originalName: originalName ?? originalNameFromRelativePath(toc),
+    toc: tocBytes,
+    gpu: gpuFile,
+    stream: streamFile,
   };
+}
+
+function validatePatchSourceSizes(
+  source: PatchFileSources,
+  required: PatchSidecarRequirements,
+  messages: PatchFileMessages,
+): void {
+  validatePatchSidecarSizes({
+    gpuSize: source.gpu?.size ?? 0,
+    hasGpuFile: Boolean(source.gpu),
+    hasStreamFile: Boolean(source.stream),
+    messages,
+    name: source.name,
+    required,
+    streamSize: source.stream?.size ?? 0,
+  });
 }
 
 function originalNameFromRelativePath(file: File): string | undefined {
@@ -353,6 +412,9 @@ function isTocFile(file: File) {
   return !file.name.endsWith(GPU_SUFFIX) && !file.name.endsWith(STREAM_SUFFIX);
 }
 
-async function fileBytes(file: File) {
-  return new Uint8Array(await file.arrayBuffer());
+async function fileBytes(file: File, signal?: AbortSignal) {
+  if (signal) throwIfTaskCancelled(signal);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (signal) throwIfTaskCancelled(signal);
+  return bytes;
 }
