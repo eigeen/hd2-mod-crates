@@ -1,13 +1,13 @@
 import AccountTreeIcon from "@mui/icons-material/AccountTree";
 import GitHubIcon from "@mui/icons-material/GitHub";
 import { IconButton, Tab, Tabs, Tooltip } from "@mui/material";
-import { useRef, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import {
   AdvancedToolsMenu,
   LanguageMenu,
   TaskReportHistoryButton,
   ToolIntro,
-  ToolModeNavIndicator,
+  ToolModeNav,
   UpdateInfoButton,
   titleUrl,
   useI18n,
@@ -32,7 +32,6 @@ interface AppChromeProps {
 }
 
 export function AppChrome(props: AppChromeProps) {
-  const navRef = useRef<HTMLDivElement | null>(null);
   const desktop = props.layout === "desktop";
   const mainClass = desktop
     ? "min-h-screen w-full"
@@ -49,7 +48,7 @@ export function AppChrome(props: AppChromeProps) {
           <div className={panelClass} data-desktop-shell={desktop || undefined}>
             <Header {...props} />
             {props.afterHeader}
-            <ToolNavigation navRef={navRef} {...props} />
+            <ToolNavigation {...props} />
             <ToolIntro mode={props.toolMode} />
             {props.children}
           </div>
@@ -91,15 +90,15 @@ function Header(props: AppChromeProps) {
   );
 }
 
-function ToolNavigation(props: AppChromeProps & { navRef: { current: HTMLDivElement | null } }) {
+function ToolNavigation(props: AppChromeProps) {
   const { t } = useI18n();
   return (
-    <div className="toolModeNav" ref={props.navRef}>
+    <ToolModeNav>
       <Tabs value={props.toolMode === "migrate" || props.toolMode === "repatch" ? props.toolMode : false} onChange={(_, mode: ToolMode) => {
         if (!props.navigationDisabled) props.onToolModeChange(mode);
       }}>
-        <Tab disabled={props.navigationDisabled} label={t("mode.migrate")} value="migrate" />
-        <Tab disabled={props.navigationDisabled} label={t("mode.repatch")} value="repatch" />
+        <Tab data-tool-nav-active={props.toolMode === "migrate"} disabled={props.navigationDisabled} label={t("mode.migrate")} value="migrate" />
+        <Tab data-tool-nav-active={props.toolMode === "repatch"} disabled={props.navigationDisabled} label={t("mode.repatch")} value="repatch" />
       </Tabs>
       <AdvancedToolsMenu
         active={props.toolMode}
@@ -107,7 +106,6 @@ function ToolNavigation(props: AppChromeProps & { navRef: { current: HTMLDivElem
         items={[{ mode: "merge", label: t("mode.merge") }, { mode: "head-merge", label: t("mode.headMerge") }]}
         onSelect={(mode) => props.onToolModeChange(mode as ToolMode)}
       />
-      <ToolModeNavIndicator active={props.toolMode} navRef={props.navRef} />
-    </div>
+    </ToolModeNav>
   );
 }

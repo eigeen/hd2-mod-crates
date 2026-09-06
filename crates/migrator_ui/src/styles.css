@@ -716,10 +716,10 @@ textarea {
 
 /* Toolbar: primary tabs + secondary-tools dropdown, centered as one group */
 .toolModeNav {
+  position: relative;
   display: flex;
   align-items: stretch;
   justify-content: center;
-  position: relative; /* anchor for the shared .toolModeIndicator */
 }
 
 /* MUI v9 Tabs defaults to width:100%; shrink it to its tabs inside the group */
@@ -728,14 +728,11 @@ textarea {
   flex: 0 1 auto;
 }
 
-/* The MUI indicator collapses to the far-left (left:0,width:0) and slides there
-   whenever no primary tab is selected; replace it with one shared bar below. */
+/* One indicator covers both the primary tabs and the advanced-tools trigger. */
 .toolModeNav .MuiTabs-indicator {
   display: none;
 }
 
-/* One sliding underline shared by the primary tabs and the advanced-tools
-   dropdown button, so the highlight moves continuously between them. */
 .toolModeIndicator {
   position: absolute;
   bottom: 0;
@@ -743,7 +740,7 @@ textarea {
   height: 2px;
   background: var(--color-hd2-yellow);
   pointer-events: none;
-  transition: left 300ms cubic-bezier(0.4, 0, 0.2, 1), width 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 250ms cubic-bezier(0.4, 0, 0.2, 1), width 250ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -39,6 +39,7 @@ export function AdvancedToolsMenu<TMode extends string>({
         aria-expanded={Boolean(anchor)}
         aria-haspopup="menu"
         className={activeItem ? "advancedToolsTab advancedToolsTab-active" : "advancedToolsTab"}
+        data-tool-nav-active={Boolean(activeItem)}
         disabled={disabled}
         endIcon={<ExpandMoreIcon />}
         onClick={(event) => setAnchor(event.currentTarget)}
