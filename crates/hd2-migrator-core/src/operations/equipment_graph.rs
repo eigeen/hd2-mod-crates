@@ -466,45 +466,87 @@ mod tests {
     }
 
     #[test]
-    fn bundled_catalog_contains_cross_equipment_sharing() {
+    fn analyzes_generated_patch_with_shared_and_unmapped_units() {
+        use crate::archive::{StreamToc, TocEntry};
+        use crate::constants::UNIT_ID;
+
         let catalog = EquipmentGraphCatalog::bundled().expect("bundled catalog");
-        let shared_count = catalog
+        let (&shared_id, consumers) = catalog
             .by_unit
-            .values()
-            .filter(|relations| relations.len() > 1)
-            .count();
-
-        assert!(shared_count > 100);
-    }
-
-    #[test]
-    #[ignore = "requires local test_files/PH56&PH-9/9ba626afa44a3aa3.patch_0"]
-    fn analyzes_real_patch_fixture_with_shared_equipment_parts() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../test_files/PH56&PH-9/9ba626afa44a3aa3.patch_0");
-        let patch = PatchBytes {
-            name: "9ba626afa44a3aa3.patch_0".to_owned(),
-            toc: std::fs::read(path).expect("read real patch fixture"),
-            gpu: Vec::new(),
-            stream: Vec::new(),
+            .iter()
+            .find(|(_, relations)| {
+                relations
+                    .iter()
+                    .map(|relation| &relation.equipment_name)
+                    .collect::<HashSet<_>>()
+                    .len()
+                    > 1
+            })
+            .expect("bundled catalog has a Unit shared across equipment");
+        let unknown_id = (0..=u64::MAX)
+            .find(|id| !catalog.by_unit.contains_key(id))
+            .unwrap();
+        let expected_names: BTreeSet<_> = consumers
+            .iter()
+            .map(|relation| relation.equipment_name.as_str())
+            .collect();
+        let mut archive = StreamToc {
+            entries: vec![
+                TocEntry::new(shared_id, UNIT_ID),
+                TocEntry::new(shared_id, UNIT_ID),
+                TocEntry::new(unknown_id, UNIT_ID),
+                TocEntry::new(unknown_id + 1, 0),
+            ],
+            ..Default::default()
         };
+        let (toc, gpu, stream) = archive.serialize();
+        let patch = PatchBytes {
+            name: "generated.patch_0".to_owned(),
+            toc,
+            gpu,
+            stream,
+        };
+        let graph = build_equipment_part_graph(&patch).expect("analyze generated patch");
 
-        let graph = build_equipment_part_graph(&patch).expect("analyze real patch fixture");
-
-        assert_eq!(graph.patch.unit_count, 26);
-        assert_eq!(graph.components.len(), 26);
-        assert_eq!(graph.patch.mapped_unit_count, 12);
-        assert_eq!(graph.patch.relation_count, 20);
-        assert_eq!(graph.patch.equipment_count, 2);
-        assert_eq!(shared_component_count(&graph.relations), 8);
-    }
-
-    fn shared_component_count(relations: &[WebEquipmentPartRelation]) -> usize {
-        let mut counts = HashMap::<&str, usize>::new();
-        for relation in relations {
-            *counts.entry(&relation.component_id).or_default() += 1;
+        // Duplicate Units and non-Unit entries must not become extra components.
+        assert_eq!(graph.patch.unit_count, 2);
+        assert_eq!(graph.components.len(), 2);
+        assert_eq!(graph.patch.mapped_unit_count, 1);
+        assert_eq!(graph.patch.unmapped_unit_count, 1);
+        let actual_names: BTreeSet<_> = graph
+            .equipments
+            .iter()
+            .map(|equipment| equipment.name.as_str())
+            .collect();
+        assert_eq!(actual_names, expected_names);
+        assert_eq!(graph.patch.equipment_count, graph.equipments.len());
+        assert_eq!(graph.relations.len(), consumers.len());
+        assert_eq!(graph.patch.relation_count, graph.relations.len());
+        assert!(
+            graph
+                .relations
+                .iter()
+                .all(|relation| relation.component_id == component_id(shared_id))
+        );
+        for consumer in consumers {
+            let equipment = graph
+                .equipments
+                .iter()
+                .find(|equipment| {
+                    equipment.name == consumer.equipment_name
+                        && equipment.category == consumer.category
+                })
+                .expect("shared Unit consumer is present");
+            assert!(graph.relations.iter().any(|relation| {
+                relation.equipment_id == equipment.id && relation.role == consumer.role
+            }));
         }
-        counts.values().filter(|count| **count > 1).count()
+        assert_eq!(graph.diagnostics.len(), 1);
+        assert_eq!(
+            graph.diagnostics[0].code,
+            WebEquipmentGraphDiagnosticCode::UnmappedUnit
+        );
+        assert_eq!(graph.diagnostics[0].component_id, component_id(unknown_id));
     }
 
     fn test_catalog(unit_id: u64, names: &[&str]) -> EquipmentGraphCatalog {

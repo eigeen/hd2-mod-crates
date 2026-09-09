@@ -13,33 +13,31 @@ fn lists_targets_from_builtin_index() {
 fn lists_unexcluded_helmet_targets() {
     let targets = list_target_options("Helmet").unwrap();
 
-    assert_eq!(targets.len(), 109);
+    let mapping = HelmetMappingTable::bundled().unwrap();
+    let entries = ArchiveIndex::builtin().category("Helmet").unwrap();
+    let expected: HashSet<_> = entries
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .filter(|name| mapping.unit_id(name).is_some())
+        .collect();
+    let actual: HashSet<_> = targets.iter().map(|target| target.name.as_str()).collect();
+
     assert!(
-        targets
-            .iter()
-            .any(|target| target.name == "KDM-500 Outrider")
+        !expected.is_empty(),
+        "builtin data must offer helmet targets"
     );
+    assert_eq!(actual, expected, "list every mapped helmet in the index");
+    assert_eq!(targets.len(), actual.len(), "one option per helmet name");
     assert!(targets.iter().all(|target| !target.excluded));
-    assert!(
-        targets
-            .iter()
-            .any(|target| target.name == "TG-8 Sharpshooter")
-    );
-    assert!(
-        targets
-            .iter()
-            .any(|target| target.name == "TG-122 Demo-Trooper")
-    );
-    assert!(
-        targets
-            .iter()
-            .any(|target| target.name == "UF-84 Doubt Killer")
-    );
-    assert!(
-        targets
-            .iter()
-            .any(|target| target.name == "O-44 Bonded Pilot")
-    );
+    for target in &targets {
+        assert!(
+            entries
+                .iter()
+                .any(|entry| { entry.name == target.name && entry.hash == target.hash }),
+            "target must retain a matching archive hash: {}",
+            target.name
+        );
+    }
 }
 
 #[test]

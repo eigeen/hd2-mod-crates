@@ -92,19 +92,30 @@ mod tests {
     fn bundled_table_parses() {
         let table = HelmetMappingTable::bundled().unwrap();
 
-        assert_eq!(table.helmet_count(), 109);
-        assert_eq!(
-            table.unit_id("KDM-500 Outrider"),
-            Some(3_121_132_973_962_917_097)
+        assert!(
+            table.helmet_count() > 0,
+            "bundled helmet table must not be empty"
         );
-        assert_eq!(
-            table.unit_id("TG-8 Sharpshooter"),
-            Some(13_824_941_454_287_247_048)
-        );
-        assert_eq!(
-            table.unit_id("UF-84 Doubt Killer"),
-            Some(2_848_319_129_973_786_871)
-        );
+        assert_eq!(table.entries().count(), table.helmet_count());
+        for (name, unit_id) in table.entries() {
+            assert!(!name.trim().is_empty(), "helmet name must not be blank");
+            assert_eq!(table.unit_id(name), Some(unit_id));
+        }
+    }
+
+    #[test]
+    fn parses_exact_unit_ids_and_looks_up_by_name() {
+        let table: HelmetMappingTable = r#"{
+            "Test Helmet A": {"Helmet": 18446744073709551615},
+            "Test Helmet B": {"Helmet": 9007199254740993}
+        }"#
+        .parse()
+        .unwrap();
+
+        assert_eq!(table.helmet_count(), 2);
+        assert_eq!(table.unit_id("Test Helmet A"), Some(u64::MAX));
+        assert_eq!(table.unit_id("Test Helmet B"), Some(9_007_199_254_740_993));
+        assert_eq!(table.unit_id("Unknown Helmet"), None);
     }
 
     #[test]

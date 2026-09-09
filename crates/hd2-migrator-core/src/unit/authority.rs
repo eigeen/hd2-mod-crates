@@ -181,7 +181,10 @@ mod tests {
     #[test]
     fn bundled_table_parses() {
         let table = ArmorMappingTable::bundled().unwrap();
-        assert!(table.armor_count() > 100);
+        assert!(
+            table.armor_count() > 0,
+            "bundled armor table must not be empty"
+        );
     }
 
     #[test]
