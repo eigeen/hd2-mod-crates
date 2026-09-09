@@ -92,7 +92,11 @@ mod tests {
     fn bundled_table_parses() {
         let table = HelmetMappingTable::bundled().unwrap();
 
-        assert_eq!(table.helmet_count(), 108);
+        assert_eq!(table.helmet_count(), 109);
+        assert_eq!(
+            table.unit_id("KDM-500 Outrider"),
+            Some(3_121_132_973_962_917_097)
+        );
         assert_eq!(
             table.unit_id("TG-8 Sharpshooter"),
             Some(13_824_941_454_287_247_048)

@@ -13,7 +13,12 @@ fn lists_targets_from_builtin_index() {
 fn lists_unexcluded_helmet_targets() {
     let targets = list_target_options("Helmet").unwrap();
 
-    assert_eq!(targets.len(), 108);
+    assert_eq!(targets.len(), 109);
+    assert!(
+        targets
+            .iter()
+            .any(|target| target.name == "KDM-500 Outrider")
+    );
     assert!(targets.iter().all(|target| !target.excluded));
     assert!(
         targets

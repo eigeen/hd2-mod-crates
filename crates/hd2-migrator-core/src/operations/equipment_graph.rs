@@ -478,6 +478,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires local test_files/PH56&PH-9/9ba626afa44a3aa3.patch_0"]
     fn analyzes_real_patch_fixture_with_shared_equipment_parts() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../test_files/PH56&PH-9/9ba626afa44a3aa3.patch_0");
