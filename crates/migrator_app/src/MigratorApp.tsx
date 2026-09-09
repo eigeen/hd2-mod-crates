@@ -1,7 +1,7 @@
 import CancelIcon from "@mui/icons-material/Cancel";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { Button, CircularProgress } from "@mui/material";
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useEffectEvent, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { toast, Toaster } from "sonner";
 import {
   MappingPreviewAccordion,
@@ -32,7 +32,7 @@ import {
 import { useMigrationWorkspace } from "./useMigrationWorkspace";
 import { compileMigrationRequest } from "./migrationRequest";
 import { createRepatchProgress } from "./repatchProgress";
-import { TaskControllerProvider, useTaskController } from "./taskController";
+import { TaskControllerProvider, useTaskController, useTaskPhase, useTaskProgressLabel } from "./taskController";
 
 export function MigratorApp<PatchSource, GameDataSource>(
   props: MigratorAppProps<PatchSource, GameDataSource>,
@@ -75,6 +75,8 @@ function MigratorAppContent<PatchSource, GameDataSource>(
   },
 ) {
   const { platform, reportError } = props;
+  const { loadEquipmentOptions, restoreGameData } = platform;
+  const reportInitializationError = useEffectEvent(reportError);
   const { t } = useI18n();
   const [equipmentOptions, setEquipmentOptions] = useState<Awaited<ReturnType<typeof platform.loadEquipmentOptions>>>([]);
   const [patch, setPatch] = useState<SelectedPatch<PatchSource> | null>(null);
@@ -111,20 +113,20 @@ function MigratorAppContent<PatchSource, GameDataSource>(
 
   useEffect(() => {
     let disposed = false;
-    void platform.loadEquipmentOptions().then((options) => {
+    void loadEquipmentOptions().then((options) => {
       if (!disposed) setEquipmentOptions(options);
-    }).catch(reportError);
+    }).catch((error) => { if (!disposed) reportInitializationError(error); });
     return () => { disposed = true; };
-  }, [platform, reportError]);
+  }, [loadEquipmentOptions]);
 
   useEffect(() => {
-    if (!platform.restoreGameData) return;
+    if (!restoreGameData) return;
     let disposed = false;
-    void platform.restoreGameData().then((selection) => {
-      if (!disposed && selection) setGameData(selection);
-    }).catch(reportError);
+    void restoreGameData().then((selection) => {
+      if (!disposed && selection) setGameData((current) => current ?? selection);
+    }).catch((error) => { if (!disposed) reportInitializationError(error); });
     return () => { disposed = true; };
-  }, [platform, reportError]);
+  }, [restoreGameData]);
 
   useEffect(() => {
     if (!patch) {
@@ -206,7 +208,7 @@ function MigratorAppContent<PatchSource, GameDataSource>(
       return;
     }
     workspace.setMultiTarget(true);
-  }, [workspace]);
+  }, [workspace.multiTargetEligible, workspace.disableMultiTarget, workspace.setMultiTarget]);
 
   const replaceTargets = useCallback((targets: string[]) => {
     const nextCount = configuredMappingCount(workspace, targets);
@@ -216,7 +218,7 @@ function MigratorAppContent<PatchSource, GameDataSource>(
       return;
     }
     workspace.replaceActiveTargets(targets);
-  }, [activeLimit, platform.resourceLimits, selectedTargetCount, workspace]);
+  }, [activeLimit, platform.resourceLimits, selectedTargetCount, workspace.activeSource, workspace.targetsBySource, workspace.replaceActiveTargets]);
 
   const chooseTarget = useCallback((hash: string) => {
     const current = workspace.activeTargets;
@@ -265,14 +267,12 @@ function MigratorAppContent<PatchSource, GameDataSource>(
           <ActionRow
             blockerHint={hint}
             busy={task.busy || inspecting}
-            cancelling={task.snapshot.phase === "cancelling"}
             canRun={canRun}
             onCancel={() => {
               inspectionController.current?.abort();
               task.cancel();
             }}
             onRun={requestRun}
-            progressLabel={task.snapshot.progressLabel}
             toolMode={activeToolMode}
             workspace={workspace}
           />
@@ -405,17 +405,16 @@ function MigrationWorkspacePanels<PatchSource, GameDataSource>(props: WorkspaceP
 interface ActionRowProps {
   blockerHint: string;
   busy: boolean;
-  cancelling: boolean;
   canRun: boolean;
   onCancel: () => void;
   onRun: () => void;
-  progressLabel: string;
   toolMode: "migrate" | "repatch";
   workspace: ReturnType<typeof useMigrationWorkspace>;
 }
 
 function ActionRow(props: ActionRowProps) {
   const { t } = useI18n();
+  const cancelling = useTaskPhase() === "cancelling";
   return (
     <div className="flex flex-col items-stretch gap-3 border-t border-hd2-border bg-hd2-pit px-5 py-3 min-[51.25rem]:flex-row min-[51.25rem]:items-center min-[51.25rem]:gap-4">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 min-[51.25rem]:shrink-0">
@@ -428,16 +427,22 @@ function ActionRow(props: ActionRowProps) {
       <div className="flex min-w-0 flex-1 items-center gap-4">
         <div aria-atomic="true" aria-live="polite" className="flex min-w-0 flex-1 items-center justify-end gap-2">
           <span className="flex h-5 w-5 shrink-0 items-center justify-center">{props.busy && <CircularProgress size="1.25rem" />}</span>
-          <span className="min-w-0 truncate text-xs text-hd2-muted" title={props.busy ? props.progressLabel : props.blockerHint}>{props.busy ? props.progressLabel : props.blockerHint}</span>
+          <TaskProgressText busy={props.busy} idleLabel={props.blockerHint} />
         </div>
         {props.busy ? (
-          <Button disabled={props.cancelling} onClick={props.onCancel} startIcon={<CancelIcon />} variant="outlined">{props.cancelling ? t("task.cancelling") : t("task.cancel")}</Button>
+          <Button disabled={cancelling} onClick={props.onCancel} startIcon={<CancelIcon />} variant="outlined">{cancelling ? t("task.cancelling") : t("task.cancel")}</Button>
         ) : (
           <Button disabled={!props.canRun} onClick={props.onRun} startIcon={<PlayArrowIcon />} variant="contained">{props.toolMode === "migrate" ? t("app.run") : t("repatch.run")}</Button>
         )}
       </div>
     </div>
   );
+}
+
+function TaskProgressText({ busy, idleLabel }: { busy: boolean; idleLabel: string }) {
+  const progressLabel = useTaskProgressLabel();
+  const label = busy ? progressLabel : idleLabel;
+  return <span className="min-w-0 truncate text-xs text-hd2-muted" title={label}>{label}</span>;
 }
 
 function copyDiagnostic<PatchSource, GameDataSource>(

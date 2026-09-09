@@ -29,7 +29,8 @@ export function useMigrationWorkspace(equipmentOptions: EquipmentOption[]) {
   const [missingUnitPolicy, setMissingUnitPolicy] = useState<MissingUnitPolicy>("drop");
 
   const activeSource = sources.find((source) => source.id === activeSourceId) ?? null;
-  const activeTargets = activeSource ? targetsBySource[activeSource.id] ?? [] : [];
+  const emptyTargets = useMemo<string[]>(() => [], []);
+  const activeTargets = activeSource ? targetsBySource[activeSource.id] ?? emptyTargets : emptyTargets;
   const configuredMappings = useMemo(
     () => collectConfiguredMappings(sources, targetsBySource),
     [sources, targetsBySource],

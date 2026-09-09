@@ -34,7 +34,6 @@ export interface TaskController {
   busy: boolean;
   cancel: () => void;
   run: <Result>(execution: TaskExecution<Result>) => Promise<Result | null>;
-  snapshot: TaskSnapshot;
 }
 
 type ReportError = (error: TaskError) => void;
@@ -55,8 +54,12 @@ export function createTaskControllerCore(
   let active: AbortController | null = null;
   let disposed = false;
   let generation = 0;
+  let lastPublished: TaskSnapshot = { phase: "idle", progressLabel: "" };
   const publishWhileMounted = (snapshot: TaskSnapshot) => {
-    if (!disposed) publish(snapshot);
+    if (disposed) return;
+    if (lastPublished.phase === snapshot.phase && lastPublished.progressLabel === snapshot.progressLabel) return;
+    lastPublished = snapshot;
+    publish(snapshot);
   };
   return {
     activate: () => {
@@ -116,6 +119,8 @@ export function createTaskControllerCore(
 }
 
 const TaskContext = createContext<TaskController | null>(null);
+const TaskPhaseContext = createContext<TaskPhase | null>(null);
+const TaskProgressContext = createContext<string | null>(null);
 
 export function TaskControllerProvider({ children, recordReport, reportError }: {
   children: ReactNode;
@@ -139,12 +144,31 @@ export function TaskControllerProvider({ children, recordReport, reportError }: 
   const cancel = useCallback(() => core.cancel(), [core]);
   const run = useCallback(<Result,>(execution: TaskExecution<Result>) => core.run(execution), [core]);
   const busy = snapshot.phase === "preparing" || snapshot.phase === "running" || snapshot.phase === "cancelling";
-  const value = useMemo(() => ({ busy, cancel, run, snapshot }), [busy, cancel, run, snapshot]);
-  return <TaskContext.Provider value={value}>{children}</TaskContext.Provider>;
+  const value = useMemo(() => ({ busy, cancel, run }), [busy, cancel, run]);
+  return (
+    <TaskContext.Provider value={value}>
+      <TaskPhaseContext.Provider value={snapshot.phase}>
+        <TaskProgressContext.Provider value={snapshot.progressLabel}>{children}</TaskProgressContext.Provider>
+      </TaskPhaseContext.Provider>
+    </TaskContext.Provider>
+  );
 }
 
 export function useTaskController(): TaskController {
   const controller = useContext(TaskContext);
   if (!controller) throw new Error("TaskControllerProvider is missing");
   return controller;
+}
+
+export function useTaskPhase(): TaskPhase {
+  const phase = useContext(TaskPhaseContext);
+  if (phase === null) throw new Error("TaskControllerProvider is missing");
+  return phase;
+}
+
+/** Subscribe only the progress display, keeping task messages out of the workspace tree. */
+export function useTaskProgressLabel(): string {
+  const label = useContext(TaskProgressContext);
+  if (label === null) throw new Error("TaskControllerProvider is missing");
+  return label;
 }

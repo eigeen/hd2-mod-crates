@@ -2,27 +2,37 @@
 id: v1.2.0
 sequence: 4
 version: "1.2.0"
-releasedAt: "2026-08-24"
+releasedAt: "2026-09-09"
 locale: en
 title: Version 1.2.0
 ---
 
 # Version 1.2.0
 
-## Update Mod Version
+## Head Merge
 
-- Completed the legacy Unit update flow. It now checks and fixes the Unit version, legacy vertex format, and LOD data.
-- If a part cannot be matched directly, geometry from the Mod's original equipment is used to reduce missing and incorrect matches.
+Added Head Merge, a tool for combining a helmet model with a body model.
 
-These fixes run only with “Update Mod Version.” Appearance migration and Mod merging are unaffected.
+*After merging, install a separate helmet-removal Mod to hide the game's original helmet.*
 
-## Compatibility and Stability
+## Merge Mods
 
-- Added resource overrides to prevent the wrong resource from being selected when game resources share a name. This fixes an issue where some equipment migrations incorrectly used the Democracy Officer as the target.
-- The web and desktop apps now use the same Patch sidecar checks. Missing files are reported directly.
+- Added Merge Mods to the desktop app. Combine multiple Patch sets into one Mod and adjust which takes priority when resources conflict.
+
+## Appearance Migration and Update Mod Version
+
+- Improved part matching during appearance migration. When direct matching is unavailable, the tool uses the original game equipment's model to reduce missing and incorrect matches.
+- Fixed an issue where migrating to FS-05 replaced the Democracy Officer instead.
+- Improved legacy model repair in Update Mod Version, handling versions and legacy vertex formats, and updating LOD data where required by the version transition.
+- Significantly sped up game-file scanning when updating Mods.
+
+Run Update Mod Version separately to apply model version repairs. Appearance migration and Mod merging do not apply these repairs automatically.
+
+## Stability and Usability
+
+- Reduced memory use when importing and merging large Mods in the web app, lowering the risk of out-of-memory failures.
+- Fixed read failures caused by incorrect resource metadata in some Mods. Missing or incomplete companion files are reported directly.
 - Fixed incomplete ZIP output in the desktop app.
-
-## Usability
-
+- Aligned tool interfaces, task reports, and error messages across the web and desktop apps, and improved responsiveness during progress updates.
 - Advanced options now live in a separate menu for a simpler interface.
-- The web app recommends the desktop app for larger jobs.
+- Added a desktop download entry to the web app, with recommendations for larger jobs or browser limitations.

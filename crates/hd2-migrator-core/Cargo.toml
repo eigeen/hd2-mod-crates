@@ -8,6 +8,7 @@ description = "Shared migration engine for HD2 native and WASM hosts"
 [dependencies]
 byteorder.workspace = true
 eyre.workspace = true
+futures-util.workspace = true
 hd2-archive-format = { path = "../hd2-archive-format" }
 hd2-migrator-data = { path = "../hd2-migrator-data" }
 lz4_flex.workspace = true

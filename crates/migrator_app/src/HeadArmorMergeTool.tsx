@@ -2,7 +2,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import MergeTypeIcon from "@mui/icons-material/MergeType";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import { Button, CircularProgress, IconButton, MenuItem, TextField } from "@mui/material";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   combineEquipmentChoices,
@@ -101,6 +101,10 @@ export function HeadArmorMergeTool<Source, FileSource>({ adapter }: { adapter: H
   ), [adapter, receiveFiles, runTask]);
   const blocker = headMergeBlocker(records, combined, armorHash, helmetHash, t);
   const canRun = !task.busy && !adding && blocker === null;
+  const removeRecord = useCallback((id: string) => {
+    setRecords((current) => current.filter((record) => record.id !== id));
+    setSummary(null);
+  }, []);
 
   const run = useCallback(async () => {
     const armorRecord = records.find((record) => record.armors.some((option) => option.hash === armorHash));
@@ -126,10 +130,7 @@ export function HeadArmorMergeTool<Source, FileSource>({ adapter }: { adapter: H
           {dropEnabled && <span className="text-xs text-hd2-muted">{dropZone.dragging ? t("headMerge.dropActive") : t("headMerge.dropHint")}</span>}
         </div>
       </div>
-      <HeadMergeRecordList busy={task.busy} records={records} removeRecord={(id) => {
-        setRecords((current) => current.filter((record) => record.id !== id));
-        setSummary(null);
-      }} />
+      <HeadMergeRecordList busy={task.busy} records={records} removeRecord={removeRecord} />
       <div className="mt-5 grid gap-4 min-[51.25rem]:grid-cols-2">
         <EquipmentChoice disabled={task.busy} label={t("headMerge.armorChoice")} onChange={setArmorHash} options={combined.armors} records={records.length} value={armorHash} />
         <EquipmentChoice disabled={task.busy} label={t("headMerge.helmetChoice")} onChange={setHelmetHash} options={combined.helmets} records={records.length} value={helmetHash} />
@@ -146,7 +147,7 @@ export function HeadArmorMergeTool<Source, FileSource>({ adapter }: { adapter: H
   );
 }
 
-function HeadMergeRecordList<Source>({ busy, records, removeRecord }: {
+const HeadMergeRecordList = memo(function HeadMergeRecordList<Source>({ busy, records, removeRecord }: {
   busy: boolean;
   records: HeadMergeRecord<Source>[];
   removeRecord: (id: string) => void;
@@ -154,7 +155,7 @@ function HeadMergeRecordList<Source>({ busy, records, removeRecord }: {
   const { t } = useI18n();
   if (!records.length) return <p className="m-0 mt-4 border border-hd2-line px-4 py-6 text-center text-sm text-hd2-muted">{t("headMerge.empty")}</p>;
   return <div className="mt-4 space-y-2">{records.map((record, index) => <HeadMergeRecordRow busy={busy} index={index} key={record.id} onRemove={() => removeRecord(record.id)} record={record} />)}</div>;
-}
+});
 
 function HeadMergeRecordRow<Source>({ busy, index, onRemove, record }: {
   busy: boolean;

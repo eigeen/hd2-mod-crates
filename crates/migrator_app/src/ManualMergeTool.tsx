@@ -5,7 +5,7 @@ import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import MergeTypeIcon from "@mui/icons-material/MergeType";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import { Button, CircularProgress, IconButton, TextField } from "@mui/material";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   closestCenter,
@@ -132,6 +132,10 @@ export function ManualMergeTool<Source, FileSource>({ adapter }: { adapter: Manu
     const targetId = event.over?.id;
     if (targetId) moveRecord(String(event.active.id), String(targetId));
   }, [moveRecord]);
+  const removeRecord = useCallback((id: string) => {
+    setRecords((current) => current.filter((record) => record.id !== id));
+    setSummary(null);
+  }, []);
 
   return (
     <section className="border-t border-hd2-border bg-black/20 p-5 min-[51.25rem]:p-6">
@@ -146,10 +150,7 @@ export function ManualMergeTool<Source, FileSource>({ adapter }: { adapter: Manu
         finishDrag={finishDrag}
         moveRecord={moveRecord}
         records={records}
-        removeRecord={(id) => {
-          setRecords((current) => current.filter((record) => record.id !== id));
-          setSummary(null);
-        }}
+        removeRecord={removeRecord}
         sensors={sensors}
         summaries={summaries}
       />
@@ -177,7 +178,7 @@ interface RecordListProps<Source> {
   summaries: PatchMergeSummary["sources"];
 }
 
-function RecordList<Source>(props: RecordListProps<Source>) {
+const RecordList = memo(function RecordList<Source>(props: RecordListProps<Source>) {
   const { t } = useI18n();
   if (!props.records.length) {
     return <p className="mb-0 mt-4 border border-hd2-line px-4 py-6 text-center text-sm text-hd2-muted">{t("merge.empty")}</p>;
@@ -204,7 +205,7 @@ function RecordList<Source>(props: RecordListProps<Source>) {
       </SortableContext>
     </DndContext>
   );
-}
+});
 
 function MergeRecordRow<Source>(props: {
   busy: boolean;

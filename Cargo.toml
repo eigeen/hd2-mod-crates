@@ -25,6 +25,7 @@ clap = { version = "4.6.1", features = ["derive"] }
 color-eyre = "0.6.5"
 dialoguer = { version = "0.12.0", features = ["fuzzy-select"] }
 eyre = "0.6.12"
+futures-util = { version = "0.3.31", default-features = false, features = ["alloc"] }
 indicatif = "0.18.3"
 lz4_flex = { version = "0.13.1", default-features = false, features = [
     "std",

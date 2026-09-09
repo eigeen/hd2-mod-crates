@@ -1,5 +1,7 @@
 //! Browser-compatible Unit repatching over an async game-data source.
 
+mod bundled_scan;
+
 use super::migration::PatchBytes;
 use crate::archive::dsar;
 use crate::archive::toc_only::{
@@ -10,11 +12,10 @@ use crate::io::{BundleSlicer, DataSource};
 use crate::migrator::mode_a_web::WebProgress;
 use crate::unit::repatch::{LatestUnitParts, RepatchOutcome, repatch_unit};
 use eyre::WrapErr;
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
-
-const TOC_HEADER_SIZE: u64 = 72;
 
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -266,9 +267,14 @@ impl LatestUnitLookup {
             .collect();
         let packages = prioritize(packages, self.preferred_archive.as_deref());
         let total = packages.len();
-        for (index, package) in packages.into_iter().enumerate() {
+        let mut directories = bundled_scan::prefetch_directories(source, &slicer, &packages);
+        for index in 0..total {
             notify_scan_progress(progress, index + 1, total)?;
-            self.load_bundled_package(source, &slicer, &package).await?;
+            let Some(directory) = directories.next().await else {
+                break;
+            };
+            self.consume_bundled_directory(source, &slicer, directory?)
+                .await?;
             if self.missing.is_empty() {
                 break;
             }
@@ -276,59 +282,18 @@ impl LatestUnitLookup {
         Ok(())
     }
 
-    async fn load_bundled_package<S: DataSource + ?Sized>(
+    async fn consume_bundled_directory<S: DataSource + ?Sized>(
         &mut self,
         source: &S,
         slicer: &BundleSlicer,
-        package: &str,
+        directory: bundled_scan::BundledDirectory,
     ) -> crate::Result<()> {
         self.scanned_archives += 1;
-        let Some(package_size) = slicer.packages.get(package).map(|metadata| metadata.size) else {
-            self.warn_package(package, eyre::eyre!("bundled package is missing"));
-            return Ok(());
-        };
-        if package_size < TOC_HEADER_SIZE {
-            self.warn_package(
-                package,
-                eyre::eyre!("TOC is too small: {package_size} bytes"),
-            );
-            return Ok(());
-        }
-        let prefix = slicer
-            .load_package_range(source, package, 0..TOC_HEADER_SIZE)
-            .await?;
-        let header = match TocHeader::parse(&prefix) {
-            Ok(header) => header,
-            Err(error) => {
-                self.warn_package(package, error);
-                return Ok(());
-            }
-        };
-        let table_size = match header
-            .table_size()
-            .and_then(|size| Ok(u64::try_from(size)?))
-        {
-            Ok(size) => size,
-            Err(error) => {
-                self.warn_package(package, error);
-                return Ok(());
-            }
-        };
-        if table_size > package_size {
-            self.warn_package(package, eyre::eyre!("TOC header table is truncated"));
-            return Ok(());
-        }
-        let mut table = prefix;
-        if table_size > TOC_HEADER_SIZE {
-            let tail = slicer
-                .load_package_range(source, package, TOC_HEADER_SIZE..table_size)
-                .await?;
-            table.extend_from_slice(&tail);
-        }
-        let all_locations = match parse_entry_locations(&table, &header) {
-            Ok(locations) => locations,
-            Err(error) => {
-                self.warn_package(package, error);
+        let package = directory.package;
+        let all_locations = match directory.contents {
+            bundled_scan::DirectoryContents::Parsed(locations) => locations,
+            bundled_scan::DirectoryContents::Invalid(error) => {
+                self.warn_package(&package, error);
                 return Ok(());
             }
         };
@@ -338,10 +303,10 @@ impl LatestUnitLookup {
                 let is_valid = location
                     .toc_offset
                     .checked_add(u64::from(location.toc_size))
-                    .is_some_and(|end| end <= package_size);
+                    .is_some_and(|end| end <= directory.package_size);
                 if !is_valid {
                     self.warn_location(
-                        package,
+                        &package,
                         location.file_id,
                         eyre::eyre!("Unit body is out of bounds"),
                     );
@@ -351,14 +316,14 @@ impl LatestUnitLookup {
             .collect::<Vec<_>>();
         for range in coalesce_location_ranges(&locations) {
             let bodies = slicer
-                .load_package_range(source, package, range.clone())
+                .load_package_range(source, &package, range.clone())
                 .await?;
             let selected = locations
                 .iter()
                 .copied()
                 .filter(|location| location_range_contains(&range, location))
                 .collect::<Vec<_>>();
-            self.insert_locations(package, &selected, range.start, &bodies);
+            self.insert_locations(&package, &selected, range.start, &bodies);
         }
         Ok(())
     }

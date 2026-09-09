@@ -97,14 +97,15 @@ export function WebSetupPanels(
       if (activeImport.current === controller) activeImport.current = null;
     }
   }, [props.onPatchChange, props.reportError, t]);
+  const changeGameData = useCallback((selection: GameDirSelection | null) => {
+    props.onGameDataChange(selection ? selectedWebGameData(selection) : null);
+  }, [props.onGameDataChange]);
 
   return (
     <div className="flex flex-col min-[51.25rem]:flex-row">
       <div className="flex min-w-0 flex-1">
         <GameDataDirPanel
-          onChange={(selection) => props.onGameDataChange(
-            selection ? selectedWebGameData(selection) : null,
-          )}
+          onChange={changeGameData}
           onDirectoryAccessAborted={props.onDirectoryAccessAborted ?? (() => undefined)}
           selection={props.gameData?.source ?? null}
         />
@@ -157,8 +158,10 @@ async function runWebMigration(
 async function runWebRepatch(
   request: Parameters<typeof webPlatform.runRepatch>[0],
 ) {
+  const startedAt = performance.now();
   request.onStage("reading_patch");
   const patch = await loadPatchFiles(request.patch.source, request.signal);
+  const patchLoadedAt = performance.now();
   const output = await repatchUnits(
     patch,
     { missingUnitPolicy: request.missingUnitPolicy },
@@ -166,6 +169,7 @@ async function runWebRepatch(
     { onStage: (_name, stage) => request.onStage(stage), signal: request.signal },
   );
   throwIfTaskCancelled(request.signal);
+  const repairedAt = performance.now();
   const outputName = DEFAULT_REPATCH_OUTPUT;
   request.onStage("saving_output");
   downloadRepatchedPatch(
@@ -175,6 +179,15 @@ async function runWebRepatch(
     output.gpuBytes,
     output.streamBytes,
   );
+  if (import.meta.env.DEV) {
+    const finishedAt = performance.now();
+    console.info("[hd2-repatch] timings (ms)", JSON.stringify({
+      loadPatch: Math.round(patchLoadedAt - startedAt),
+      repair: Math.round(repairedAt - patchLoadedAt),
+      prepareDownload: Math.round(finishedAt - repairedAt),
+      total: Math.round(finishedAt - startedAt),
+    }));
+  }
   return { output: outputName, summary: output.summary };
 }
 

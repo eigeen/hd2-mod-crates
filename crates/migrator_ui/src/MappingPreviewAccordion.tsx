@@ -6,7 +6,7 @@ import {
   AccordionSummary,
   CircularProgress,
 } from "@mui/material";
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useI18n } from "./i18n";
 import {
   EmptyPreview,
@@ -34,7 +34,7 @@ interface MappingPreviewAccordionProps {
   onUnitBehaviorChange: (behavior: UnitBehaviorOptions) => void;
 }
 
-export function MappingPreviewAccordion(props: MappingPreviewAccordionProps) {
+export const MappingPreviewAccordion = memo(function MappingPreviewAccordion(props: MappingPreviewAccordionProps) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const [loaded, setLoaded] = useState<LoadedPreviewBatch | null>(null);
@@ -106,7 +106,7 @@ export function MappingPreviewAccordion(props: MappingPreviewAccordionProps) {
       </AccordionDetails>
     </Accordion>
   );
-}
+});
 
 function PreviewBody(props: MappingPreviewAccordionProps & {
   error: boolean;
