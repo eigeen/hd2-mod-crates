@@ -3,7 +3,7 @@ import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import FolderOffIcon from "@mui/icons-material/FolderOff";
 import { Alert, Button } from "@mui/material";
 import { useDropZone, useI18n } from "@hd2-mod-tools/migrator-ui";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DesktopDownloadButton } from "./DesktopGuidance";
 import { isDesktopRecoverableWebError } from "./desktopGuidancePolicy";
 import {
@@ -40,6 +40,7 @@ type PanelState =
 
 export function GameDataDirPanel({ selection, onChange, onDirectoryAccessAborted }: GameDataDirPanelProps) {
   const { t } = useI18n();
+  const restoreAttempt = useRef(0);
   const [state, setState] = useState<PanelState>(() =>
     isDirectoryAccessSupported() ? { kind: "empty" } : { kind: "unsupported" },
   );
@@ -62,10 +63,19 @@ export function GameDataDirPanel({ selection, onChange, onDirectoryAccessAborted
     if (!isDirectoryAccessSupported() || selection) {
       return;
     }
-    void restoreRemembered(setState, onChange);
+    const attempt = ++restoreAttempt.current;
+    void restoreRemembered().then((restored) => {
+      if (!restored || restoreAttempt.current !== attempt) return;
+      setState({ kind: "ready", selection: restored });
+      onChange(restored);
+    });
+    return () => {
+      if (restoreAttempt.current === attempt) restoreAttempt.current += 1;
+    };
   }, [selection, onChange]);
 
   const selectDirectory = useCallback(async (handle: FileSystemDirectoryHandle) => {
+    restoreAttempt.current += 1;
     const ready = await activate(handle, t("gameData.permissionDenied"));
     await rememberGameDirectory(handle);
     setState({ kind: "ready", selection: ready });
@@ -115,6 +125,7 @@ export function GameDataDirPanel({ selection, onChange, onDirectoryAccessAborted
   const dropZone = useDropZone(handleDrop);
 
   const handleForget = useCallback(async () => {
+    restoreAttempt.current += 1;
     setError("");
     setErrorDesktopFallback(false);
     await forgetRememberedDirectory();
@@ -243,26 +254,16 @@ async function activate(
   return { handle, status };
 }
 
-async function restoreRemembered(
-  setState: (s: PanelState) => void,
-  onChange: (selection: GameDirSelection | null) => void,
-) {
-  const handle = await loadRememberedDirectory();
-  if (!handle) {
-    return;
-  }
-  const permission = await queryReadPermission(handle);
-  if (permission !== "granted") {
-    setState({ kind: "empty" });
-    return;
-  }
+async function restoreRemembered(): Promise<GameDirSelection | null> {
   try {
+    const handle = await loadRememberedDirectory();
+    if (!handle) return null;
+    const permission = await queryReadPermission(handle);
+    if (permission !== "granted") return null;
     const status = await inspectGameDirectory(handle);
-    const ready: GameDirSelection = { handle, status };
-    setState({ kind: "ready", selection: ready });
-    onChange(ready);
+    return { handle, status };
   } catch {
-    setState({ kind: "empty" });
+    return null;
   }
 }
 

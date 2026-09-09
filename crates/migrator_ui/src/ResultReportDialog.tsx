@@ -10,8 +10,10 @@ import {
 import { useI18n, type Translate } from "./i18n";
 import type {
   EquipmentOption,
+  HeadArmorMergeSummary,
   MigrationReportRow,
   MigrationSummary,
+  PatchMergeSummary,
   UnitRepatchSummary,
 } from "./types";
 import type { CompletedTaskReport } from "./taskReportHistory";
@@ -29,7 +31,7 @@ export function ResultReportDialog(props: ResultReportDialogProps) {
   return (
     <Hd2Dialog open={Boolean(props.report)} onClose={props.onClose} size="large">
       <Hd2DialogTitle>
-        {props.report?.kind === "repatch" ? t("result.repatchTitle") : t("result.migrationTitle")}
+        {props.report && reportTitle(props.report.kind, t)}
       </Hd2DialogTitle>
       <Hd2DialogContent>
         {props.report && (
@@ -42,8 +44,12 @@ export function ResultReportDialog(props: ResultReportDialogProps) {
                 summary={props.report.summary}
                 t={t}
               />
-            ) : (
+            ) : props.report.kind === "repatch" ? (
               <RepatchDetails summary={props.report.summary} t={t} />
+            ) : props.report.kind === "merge" ? (
+              <PatchMergeDetails summary={props.report.summary} t={t} />
+            ) : (
+              <HeadMergeDetails summary={props.report.summary} t={t} />
             )}
           </div>
         )}
@@ -141,10 +147,32 @@ function RepatchDetails({ summary, t }: { summary: UnitRepatchSummary; t: Transl
     <section className="space-y-3 border border-hd2-border bg-black/25 p-3">
       <MetricGrid metrics={[
         [t("result.updated"), summary.updatedUnits],
+        [t("result.formats"), summary.convertedFormats ?? 0],
+        [t("result.lodGroups"), summary.refreshedLodGroups ?? 0],
         [t("result.current"), summary.alreadyCurrentUnits],
         [t("result.removed"), summary.removedUnits],
-        [t("result.failed"), summary.failedUnits],
         [t("result.archives"), summary.scannedArchives],
+      ]} />
+      <WarningList warnings={summary.warnings} t={t} />
+    </section>
+  );
+}
+
+function PatchMergeDetails({ summary, t }: { summary: PatchMergeSummary; t: Translate }) {
+  return <MetricGrid metrics={[
+    [t("result.mods"), summary.inputCount],
+    [t("result.resources"), summary.resourceCount],
+    [t("result.replaced"), summary.conflictCount],
+    [t("result.duplicates"), summary.duplicateCount],
+  ]} />;
+}
+
+function HeadMergeDetails({ summary, t }: { summary: HeadArmorMergeSummary; t: Translate }) {
+  return (
+    <section className="space-y-3">
+      <MetricGrid metrics={[
+        [t("result.bodyVariants"), summary.mergedBodyUnits],
+        [t("result.lods"), summary.mergedLods],
       ]} />
       <WarningList warnings={summary.warnings} t={t} />
     </section>
@@ -193,5 +221,13 @@ function equipmentName(hash: string, options: EquipmentOption[]): string {
 function reportHasWarnings(report: CompletedTaskReport | null): boolean {
   if (!report) return false;
   if (report.kind === "migration") return report.summary.warningCount > 0;
-  return report.summary.failedUnits > 0 || report.summary.warnings.length > 0;
+  if (report.kind === "repatch" || report.kind === "headMerge") return report.summary.warnings.length > 0;
+  return false;
+}
+
+function reportTitle(kind: CompletedTaskReport["kind"], t: Translate): string {
+  if (kind === "migration") return t("result.migrationTitle");
+  if (kind === "repatch") return t("result.repatchTitle");
+  if (kind === "merge") return t("mode.merge");
+  return t("mode.headMerge");
 }

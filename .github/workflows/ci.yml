@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Shared frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain for WASM
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: frontend-wasm-ci
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+
+      - name: Install JavaScript dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build WASM bindings
+        run: bun run web:wasm
+
+      - name: Typecheck shared and host frontends
+        run: bun run ui:typecheck
+
+      - name: Test shared and host frontend behavior
+        run: bun run ui:test
+
+  shared-rust:
+    name: Shared Rust library
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: shared-rust-ci
+
+      # These library suites use repository-owned deterministic fixtures. Tests
+      # ignored because they need an installed game remain supplementary only.
+      - name: Check shared engine consumers and integration tests
+        run: cargo check --locked -p hd2-migrator-core -p hd2-migrator-wasm -p hd2-migrator-cli --all-targets
+
+      - name: Test shared migration library
+        run: cargo test --locked -p hd2-migrator-core --lib
+
+      - name: Test WASM contract library
+        run: cargo test --locked -p hd2-migrator-wasm --lib
+
+      - name: Test CLI integration
+        run: cargo test --locked -p hd2-migrator-cli
+
+      - name: Lint shared migration libraries
+        run: cargo clippy --locked -p hd2-migrator-core -p hd2-migrator-wasm --lib -- -D warnings
+
+  desktop-rust:
+    name: Desktop Rust backend
+    runs-on: windows-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: desktop-rust-ci
+
+      - name: Test desktop library
+        run: cargo test --locked -p hd2_migrator_desktop --lib
+
+      - name: Lint desktop backend
+        run: cargo clippy --locked -p hd2_migrator_desktop --all-targets --no-deps -- -D warnings

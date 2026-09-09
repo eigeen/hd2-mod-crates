@@ -11,6 +11,12 @@ import type {
   MigrationSummary,
   MigrationMapping,
   RepatchRequest,
+  HeadArmorMergeRequest,
+  HeadArmorMergeSummary,
+  PatchDescriptor,
+  DiscoveredPatchFile,
+  PatchMergeRequest,
+  PatchMergeSummary,
   UnitRepatchSummary,
 } from "./types";
 
@@ -38,20 +44,26 @@ export function inspectPatch(paths: string[], dataDir: string | null): Promise<I
   return invoke("inspect_patch", { request: { paths, dataDir } });
 }
 
+export function describePatch(paths: string[]): Promise<PatchDescriptor> {
+  return invoke("describe_patch", { paths });
+}
+
+export function enumeratePatchFiles(paths: string[]): Promise<DiscoveredPatchFile[]> {
+  return invoke("enumerate_patch_files", { paths });
+}
+
 export function previewEquipmentMapping(
   patchPaths: string[],
   mapping: MigrationMapping,
-  dataDir: string | null,
 ): Promise<EquipmentMappingPreview> {
-  return invoke("preview_equipment_mapping", { request: { patchPaths, mapping, dataDir } });
+  return invoke("preview_equipment_mapping", { request: { patchPaths, mapping } });
 }
 
 export function previewEquipmentMappings(
   patchPaths: string[],
   mappings: MigrationMapping[],
-  dataDir: string | null,
 ): Promise<EquipmentMappingPreview[]> {
-  return invoke("preview_equipment_mappings", { request: { patchPaths, mappings, dataDir } });
+  return invoke("preview_equipment_mappings", { request: { patchPaths, mappings } });
 }
 
 export async function choosePatchPaths(): Promise<string[] | null> {
@@ -90,6 +102,20 @@ export function startRepatch(
   onProgress: (event: MigrationProgressEvent) => void,
 ): DesktopTask<UnitRepatchSummary> {
   return startTask("repatch_mod", request, onProgress);
+}
+
+export function startHeadArmorMerge(
+  request: HeadArmorMergeRequest,
+  onProgress: (event: MigrationProgressEvent) => void,
+): DesktopTask<HeadArmorMergeSummary> {
+  return startTask("merge_head_into_armor", request, onProgress);
+}
+
+export function startPatchMerge(
+  request: PatchMergeRequest,
+  onProgress: (event: MigrationProgressEvent) => void,
+): DesktopTask<PatchMergeSummary> {
+  return startTask("merge_patches", request, onProgress);
 }
 
 function startTask<TRequest, TResult>(

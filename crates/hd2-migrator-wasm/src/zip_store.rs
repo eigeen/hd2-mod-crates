@@ -1,5 +1,5 @@
 use crc32fast::Hasher;
-use hd2_migrator_io::web::WebOutputFile;
+use hd2_migrator_core::operations::WebOutputFile;
 
 const LOCAL_FILE_HEADER: u32 = 0x0403_4b50;
 const CENTRAL_DIRECTORY_HEADER: u32 = 0x0201_4b50;

@@ -27,6 +27,27 @@ test("accepts a precomputed CRC without changing ZIP bytes", async () => {
     .toEqual(await computed.finish().arrayBuffer());
 });
 
+test("assembles one ZIP entry from bounded chunks", async () => {
+  const complete = new StoreZipBuilder();
+  const chunked = new StoreZipBuilder();
+  complete.add("file.bin", new Uint8Array([1, 2, 3, 4, 5]));
+  chunked.beginFile("file.bin", 5, 0x470b99f4);
+  chunked.addFileChunk(new Uint8Array([1, 2]));
+  chunked.addFileChunk(new Uint8Array([3, 4, 5]));
+  chunked.endFile();
+
+  expect(await chunked.finish().arrayBuffer())
+    .toEqual(await complete.finish().arrayBuffer());
+});
+
+test("rejects an incomplete chunked ZIP entry", () => {
+  const builder = new StoreZipBuilder();
+  builder.beginFile("file.bin", 2, 0);
+  builder.addFileChunk(new Uint8Array([1]));
+
+  expect(() => builder.endFile()).toThrow("before all data was received");
+});
+
 test("keeps all three repatched files when sidecars are empty", async () => {
   const patchName = "example.patch_0";
   const blob = buildRepatchedPatchZip({

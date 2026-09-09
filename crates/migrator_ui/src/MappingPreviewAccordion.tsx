@@ -6,7 +6,7 @@ import {
   AccordionSummary,
   CircularProgress,
 } from "@mui/material";
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useI18n } from "./i18n";
 import {
   EmptyPreview,
@@ -15,7 +15,6 @@ import {
 } from "./MappingPreviewCanvas";
 import { summarizeMappingGraph } from "./mappingPreviewGraph";
 import type {
-  CullingPolicy,
   EquipmentMappingPreview,
   EquipmentPartGraph,
   MigrationMapping,
@@ -26,9 +25,8 @@ import type {
 const PREVIEW_DEBOUNCE_MS = 220;
 
 interface MappingPreviewAccordionProps {
-  cullingPolicy: CullingPolicy;
   contextKey: string;
-  loadPreviews: (mappings: MigrationMapping[]) => Promise<EquipmentMappingPreview[]>;
+  loadPreviews: (mappings: MigrationMapping[], context?: { signal?: AbortSignal }) => Promise<EquipmentMappingPreview[]>;
   mappings: MigrationMapping[];
   patchGraph: EquipmentPartGraph | null;
   unitBehavior: UnitBehaviorOptions;
@@ -36,7 +34,7 @@ interface MappingPreviewAccordionProps {
   onUnitBehaviorChange: (behavior: UnitBehaviorOptions) => void;
 }
 
-export function MappingPreviewAccordion(props: MappingPreviewAccordionProps) {
+export const MappingPreviewAccordion = memo(function MappingPreviewAccordion(props: MappingPreviewAccordionProps) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const [loaded, setLoaded] = useState<LoadedPreviewBatch | null>(null);
@@ -61,13 +59,17 @@ export function MappingPreviewAccordion(props: MappingPreviewAccordionProps) {
   useEffect(() => {
     if (!expanded || debounced.mappings.length === 0) return;
     let current = true;
+    const controller = new AbortController();
     setErrorRequestKey(null);
-    void props.loadPreviews(debounced.mappings).then((result) => {
+    void props.loadPreviews(debounced.mappings, { signal: controller.signal }).then((result) => {
       if (current) setLoaded({ previews: result, requestKey: debounced.requestKey });
     }).catch(() => {
       if (current) setErrorRequestKey(debounced.requestKey);
     });
-    return () => { current = false; };
+    return () => {
+      current = false;
+      controller.abort();
+    };
   }, [debounced, expanded, props.loadPreviews]);
 
   const summary = useMemo(
@@ -104,7 +106,7 @@ export function MappingPreviewAccordion(props: MappingPreviewAccordionProps) {
       </AccordionDetails>
     </Accordion>
   );
-}
+});
 
 function PreviewBody(props: MappingPreviewAccordionProps & {
   error: boolean;
@@ -114,7 +116,6 @@ function PreviewBody(props: MappingPreviewAccordionProps & {
   if (props.mappings.length === 0 && props.patchGraph) {
     return <PatchGraphCanvas
       behavior={props.unitBehavior}
-      cullingPolicy={props.cullingPolicy}
       graph={props.patchGraph}
       onBehaviorChange={props.onUnitBehaviorChange}
       unmatchedUnitPolicy={props.unmatchedUnitPolicy}
@@ -128,7 +129,6 @@ function PreviewBody(props: MappingPreviewAccordionProps & {
   }
   return <MappingBatchCanvas
     behavior={props.unitBehavior}
-    cullingPolicy={props.cullingPolicy}
     onBehaviorChange={props.onUnitBehaviorChange}
     previews={props.previews}
     unmatchedUnitPolicy={props.unmatchedUnitPolicy}

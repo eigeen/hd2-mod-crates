@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 crc32fast = "1.5.0"
 eyre.workspace = true
-hd2-migrator-io = { path = "../hd2-migrator-io" }
+hd2-migrator-core = { path = "../hd2-migrator-core" }
 js-sys = "0.3.82"
 serde.workspace = true
 serde-wasm-bindgen = "0.6.5"

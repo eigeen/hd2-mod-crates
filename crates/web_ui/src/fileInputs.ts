@@ -1,4 +1,5 @@
 import type { PatchFiles } from "@hd2-mod-tools/migrator-ui";
+import { throwIfTaskCancelled } from "@hd2-mod-tools/migrator-ui/task-error";
 
 const GPU_SUFFIX = ".gpu_resources";
 const STREAM_SUFFIX = ".stream";
@@ -19,7 +20,21 @@ export interface PatchSidecarRequirements {
 
 export type ReadPatchSidecarRequirements = (
   toc: Uint8Array,
+  streamLength: number,
 ) => Promise<PatchSidecarRequirements>;
+
+export interface PatchFileSources {
+  name: string;
+  originalName?: string;
+  toc: Uint8Array;
+  gpu?: File;
+  stream?: File;
+}
+
+interface SelectPatchFileOptions {
+  originalName?: string;
+  signal?: AbortSignal;
+}
 
 export async function patchFilesFromList(
   files: FileList | File[],
@@ -27,13 +42,48 @@ export async function patchFilesFromList(
   readRequirements: ReadPatchSidecarRequirements,
   originalName?: string,
 ) {
+  const source = await patchFileSourcesFromList(
+    files,
+    messages,
+    readRequirements,
+    { originalName },
+  );
+  return loadPatchFiles(source);
+}
+
+/** Read the TOC and retain sidecar File references until the task starts. */
+export async function patchFileSourcesFromList(
+  files: FileList | File[],
+  messages: PatchFileMessages,
+  readRequirements: ReadPatchSidecarRequirements,
+  options: SelectPatchFileOptions = {},
+): Promise<PatchFileSources> {
   const values = Array.from(files);
   const toc = selectTocFile(values, messages);
-  const tocBytes = await fileBytes(toc);
-  const required = await readRequirements(tocBytes);
-  const loaded = await loadPatchSelection(values, toc, tocBytes, originalName);
-  validatePatchFiles(loaded.patch, loaded.presence, required, messages);
-  return loaded.patch;
+  const tocBytes = await fileBytes(toc, options.signal);
+  const source = selectPatchSources(values, toc, tocBytes, options.originalName);
+  if (options.signal) throwIfTaskCancelled(options.signal);
+  const required = await readRequirements(tocBytes, source.stream?.size ?? 0);
+  if (options.signal) throwIfTaskCancelled(options.signal);
+  validatePatchSourceSizes(source, required, messages);
+  return source;
+}
+
+/** Load sidecars only when an operation is ready to execute. */
+export async function loadPatchFiles(
+  source: PatchFileSources,
+  signal?: AbortSignal,
+): Promise<PatchFiles> {
+  if (signal) throwIfTaskCancelled(signal);
+  const gpu = source.gpu ? await fileBytes(source.gpu, signal) : new Uint8Array();
+  const stream = source.stream ? await fileBytes(source.stream, signal) : new Uint8Array();
+  return {
+    name: source.name,
+    originalName: source.originalName,
+    toc: source.toc,
+    gpu,
+    stream,
+  };
 }
 
 function selectTocFile(values: File[], messages: PatchFileMessages): File {
@@ -47,27 +97,37 @@ function selectTocFile(values: File[], messages: PatchFileMessages): File {
   return tocFiles[0];
 }
 
-async function loadPatchSelection(
+function selectPatchSources(
   values: File[],
   toc: File,
   tocBytes: Uint8Array,
   originalName?: string,
-) {
+): PatchFileSources {
   const gpuFile = values.find((file) => file.name === `${toc.name}${GPU_SUFFIX}`);
   const streamFile = values.find((file) => file.name === `${toc.name}${STREAM_SUFFIX}`);
   return {
-    patch: {
-      name: toc.name,
-      originalName: originalName ?? originalNameFromRelativePath(toc),
-      toc: tocBytes,
-      gpu: gpuFile ? await fileBytes(gpuFile) : new Uint8Array(),
-      stream: streamFile ? await fileBytes(streamFile) : new Uint8Array(),
-    } satisfies PatchFiles,
-    presence: {
-      hasGpuFile: Boolean(gpuFile),
-      hasStreamFile: Boolean(streamFile),
-    },
+    name: toc.name,
+    originalName: originalName ?? originalNameFromRelativePath(toc),
+    toc: tocBytes,
+    gpu: gpuFile,
+    stream: streamFile,
   };
+}
+
+function validatePatchSourceSizes(
+  source: PatchFileSources,
+  required: PatchSidecarRequirements,
+  messages: PatchFileMessages,
+): void {
+  validatePatchSidecarSizes({
+    gpuSize: source.gpu?.size ?? 0,
+    hasGpuFile: Boolean(source.gpu),
+    hasStreamFile: Boolean(source.stream),
+    messages,
+    name: source.name,
+    required,
+    streamSize: source.stream?.size ?? 0,
+  });
 }
 
 function originalNameFromRelativePath(file: File): string | undefined {
@@ -90,6 +150,26 @@ export function validatePatchFiles(
     hasStreamFile: presence.hasStreamFile,
     required,
     messages,
+  });
+}
+
+export function validatePatchSidecarSizes(check: {
+  gpuSize: number;
+  hasGpuFile: boolean;
+  hasStreamFile: boolean;
+  messages: PatchFileMessages;
+  name: string;
+  required: PatchSidecarRequirements;
+  streamSize: number;
+}): void {
+  validatePatchSidecars({
+    gpuLen: check.gpuSize,
+    hasGpuFile: check.hasGpuFile,
+    hasStreamFile: check.hasStreamFile,
+    messages: check.messages,
+    name: check.name,
+    required: check.required,
+    streamLen: check.streamSize,
   });
 }
 
@@ -138,21 +218,43 @@ function storeZip(entries: StoreZipEntry[]): Blob {
 export class StoreZipBuilder {
   private readonly fileParts: Blob[] = [];
   private readonly centralParts: ArrayBuffer[] = [];
+  private activeRemaining: number | null = null;
   private offset = 0;
   private centralSize = 0;
 
   add(name: string, bytes: Uint8Array, precomputedCrc?: number): void {
+    this.beginFile(name, bytes.length, precomputedCrc ?? crc32(bytes));
+    this.addFileChunk(bytes);
+    this.endFile();
+  }
+
+  beginFile(name: string, size: number, crc: number): void {
+    if (this.activeRemaining !== null) throw new Error("Finish the current ZIP entry first.");
     const encodedName = new TextEncoder().encode(name);
-    const crc = precomputedCrc ?? crc32(bytes);
-    const local = localZipHeader(encodedName, bytes.length, crc);
-    const central = centralZipHeader(encodedName, bytes.length, crc, this.offset);
-    this.fileParts.push(new Blob([exactBuffer(local), exactBuffer(bytes)]));
+    const local = localZipHeader(encodedName, size, crc);
+    const central = centralZipHeader(encodedName, size, crc, this.offset);
+    this.fileParts.push(new Blob([exactBuffer(local)]));
     this.centralParts.push(exactBuffer(central));
-    this.offset += local.length + bytes.length;
+    this.offset += local.length + size;
     this.centralSize += central.length;
+    this.activeRemaining = size;
+  }
+
+  addFileChunk(bytes: Uint8Array): void {
+    if (this.activeRemaining === null) throw new Error("Start a ZIP entry before adding data.");
+    if (bytes.length > this.activeRemaining) throw new Error("ZIP entry received too much data.");
+    if (bytes.length > 0) this.fileParts.push(new Blob([exactBuffer(bytes)]));
+    this.activeRemaining -= bytes.length;
+  }
+
+  endFile(): void {
+    if (this.activeRemaining === null) throw new Error("No ZIP entry is active.");
+    if (this.activeRemaining !== 0) throw new Error("ZIP entry ended before all data was received.");
+    this.activeRemaining = null;
   }
 
   finish(): Blob {
+    if (this.activeRemaining !== null) throw new Error("Finish the current ZIP entry first.");
     const end = endOfCentralDirectory(
       this.centralParts.length,
       this.centralSize,
@@ -310,6 +412,9 @@ function isTocFile(file: File) {
   return !file.name.endsWith(GPU_SUFFIX) && !file.name.endsWith(STREAM_SUFFIX);
 }
 
-async function fileBytes(file: File) {
-  return new Uint8Array(await file.arrayBuffer());
+async function fileBytes(file: File, signal?: AbortSignal) {
+  if (signal) throwIfTaskCancelled(signal);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (signal) throwIfTaskCancelled(signal);
+  return bytes;
 }

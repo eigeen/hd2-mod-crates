@@ -64,22 +64,6 @@ describe("mapping preview layout", () => {
     expect(layout.nodes.find((node) => node.id === "unit:c")?.height).toBe(72);
   });
 
-  test("adds a stable row for Unit-internal culling meshes", () => {
-    const input = preview([
-      mapping("a-to-b", "unit:a", "unit:b", "slimBody", "replace"),
-    ]);
-    input.units[0].patchCullingMeshCount = 2;
-
-    const layout = layoutMappingPreview(input);
-
-    expect(layout.nodes.find((node) => node.id === "unit:a")?.data).toMatchObject({
-      kind: "unit",
-      cullingMeshCount: 2,
-      patchCullingMeshCount: 2,
-    });
-    expect(layout.nodes.find((node) => node.id === "unit:a")?.height).toBe(88);
-  });
-
   test("shows recognized relationships and groups wild Units without a target mapping", () => {
     const layout = layoutPatchEquipmentGraph(patchGraph());
 
@@ -133,7 +117,6 @@ function densePatchGraph(): EquipmentPartGraph {
     fileId: `0x${index.toString(16).padStart(16, "0")}`,
     kind: "unit" as const,
     presentInPatch: true,
-    cullingMeshCount: 0,
   }));
   const relations = components.slice(0, 7).map((component, index) => ({
     id: `relation:${index}`,
@@ -169,8 +152,8 @@ function patchGraph(): EquipmentPartGraph {
     },
     equipments: [{ id: "equipment:source", category: "Armor", hash: "source", name: "Source" }],
     components: [
-      { id: "unit:known", fileId: "known", kind: "unit", presentInPatch: true, cullingMeshCount: 0 },
-      { id: "unit:wild", fileId: "wild", kind: "unit", presentInPatch: true, cullingMeshCount: 0 },
+      { id: "unit:known", fileId: "known", kind: "unit", presentInPatch: true },
+      { id: "unit:wild", fileId: "wild", kind: "unit", presentInPatch: true },
     ],
     relations: [{ id: "owns:known", equipmentId: "equipment:source", componentId: "unit:known", role: "slimBody" }],
     diagnostics: [{ code: "unmappedUnit", componentId: "unit:wild", fileId: "wild" }],
@@ -189,8 +172,6 @@ function preview(mappings: EquipmentMappingPreview["mappings"]): EquipmentMappin
       presentInPatch: true,
       sourceRoles: mappings.filter((mapping) => mapping.sourceUnitId === id).map((mapping) => mapping.role),
       targetRoles: mappings.filter((mapping) => mapping.targetUnitId === id).map((mapping) => mapping.role),
-      patchCullingMeshCount: null,
-      targetCullingMeshCount: null,
     })),
     mappings,
     summary: {

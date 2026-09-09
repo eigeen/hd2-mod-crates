@@ -4,12 +4,17 @@
 Web/WASM 和命令行入口。核心功能包括：
 
 - 将护甲、头盔外观迁移到其他装备；
-- 根据当前游戏数据更新 Mod 中与 Unit 版本相关的布局；
+- 通过“更新 Mod 版本”将旧 Unit Patch 从 `10800437` 更新到 `10800438`；
 - 从 `bundles.*.nxa` 读取迁移所需的游戏资源；
 - 使用经过人工校验的部件映射，并在必要时进行几何和自定义名称匹配；
 - 为多个目标生成可直接安装的独立结果。
 
 工具只读取游戏 `data/` 目录，不会修改游戏文件。
+
+“更新 Mod 版本”会检查 Unit 版本、旧顶点格式和原版 repatcher 使用的 LOD 数据。
+经过样本确认的 `10800437 → 10800438` 路径只修改版本号和顶点格式；其他版本会在
+安全检查通过后同步当前游戏的 LOD group。普通装备迁移与手动 Patch 合并不会自动
+执行这项更新，GPU 和 stream sidecar 始终原样保留。
 
 ## 项目入口
 
@@ -99,22 +104,29 @@ cargo build --release -p hd2-migrator-cli
 | `crates/hd2-archive-format` | 可在 WASM 中使用的归档格式基础能力 |
 | `crates/hd2-migrator-data` | 内嵌索引、装备映射和空网格资源 |
 | `crates/hd2-unit-matching` | Unit 部件识别与匹配 |
-| `crates/hd2-migrator-core` | 平台无关的迁移规划与核心类型 |
-| `crates/hd2-migrator-io` | 原生文件系统、归档读取和迁移编排 |
+| `crates/hd2-migrator-core` | Desktop / Web / CLI 共用迁移引擎：业务用例、运行归档模型、Unit 算法与数据读取接口 |
 | `crates/hd2-migrator-wasm` | Web 前端使用的 WASM API |
 | `crates/hd2-migrator-cli` | 命令行入口 |
-| `crates/migrator_ui` | Desktop / Web 共用界面 |
+| `crates/migrator_ui` | Desktop / Web 共用组件、类型、文案和报告 |
+| `crates/migrator_app` | Desktop / Web 共用工具页面、请求组装与任务生命周期 |
 | `crates/desktop` | Tauri 桌面端 |
 | `crates/web_ui` | React Web 前端 |
 | `crates/svd-core` | SVD 打包与解包核心能力 |
 | `crates/svd-pack` | SVD 打包工具 |
 | `crates/svd-export` | SVD 导出工具 |
 
+`hd2-migrator-io` 已并入 `hd2-migrator-core`，仓库内不再维护独立的 IO crate。
+Web 通过 WASM 桥接调用 `core::operations`，桌面通过 Tauri 调用同一套用例；
+CLI 使用 `core::migrator` 的原生编排入口。`core::io` 保留数据读取接口和原生文件读取实现，
+浏览器回调、桌面保存与更新分别留在宿主中。新增业务规则应放入共享引擎，平台差异只负责接入。
+模块边界和本次合并取舍见 [共享引擎架构](docs/shared-engine-architecture.md)。
+
 ## 内嵌数据
 
 构建时会将下列数据打包进程序：
 
 - `assets/archivehashes.json`：装备哈希与名称索引；
+- `assets/archivehash_overrides.json`：同名装备需要固定使用的 archive ID；
 - `assets/armor_mappings.merged.json`：护甲主要 Unit 部件映射；
 - `assets/helmet_mappings.json`：头盔 Unit 映射；
 - `assets/empty_mesh/{toc,gpu,stream}.bin`：默认空网格模板；

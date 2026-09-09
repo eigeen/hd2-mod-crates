@@ -8,13 +8,16 @@ export type {
   UnmatchedUnitPolicy,
   UnitRepatchSummary,
   UnifiedMigrateOptions,
+  HeadArmorMergeOptions,
+  HeadArmorMergeSummary,
+  PatchMergeSummary,
 } from "@hd2-mod-tools/migrator-ui";
 
 import type {
   DetectedSource,
   EquipmentMappingPreview,
   EquipmentPartGraph,
-  RepatchCullingSummary,
+  HeadArmorMergeOptions,
   UnifiedMigrateOptions,
   UnitRepatchOptions,
 } from "@hd2-mod-tools/migrator-ui";
@@ -28,11 +31,19 @@ export interface PatchDescriptor {
   byteLength: number;
 }
 
+export interface DiscoveredPatchFile {
+  name: string;
+  path: string;
+  relativePath: string;
+  rootId: number;
+  size: number;
+  sourceRoot: string;
+}
+
 export interface InspectPatchResult {
   patch: PatchDescriptor;
   inspection: { sources: DetectedSource[] };
   equipmentGraph: EquipmentPartGraph;
-  cullingSummary: RepatchCullingSummary;
 }
 
 export interface GameDataDiscovery {
@@ -52,6 +63,19 @@ export interface RepatchRequest {
   dataDir: string;
   outputPath: string;
   options: UnitRepatchOptions;
+}
+
+export interface HeadArmorMergeRequest {
+  armorPaths: string[];
+  headPaths: string[] | null;
+  outputPath: string;
+  options: HeadArmorMergeOptions;
+}
+
+export interface PatchMergeRequest {
+  inputPaths: string[][];
+  outputName: string;
+  outputPath: string;
 }
 
 export interface MigrationProgressEvent {

@@ -52,7 +52,7 @@ describe("unified migration mapping state", () => {
       .toBe("FS-55 Devastator → XX-66 Armor");
   });
 
-  test("retains the final progress label instead of clearing between stages", () => {
+  test("labels out-of-order completion events with the target that actually finished", () => {
     const mappings = configuredMappings([source("armor", armor)], {
       armor: [armorTarget.hash, "armor-target-2"],
     });
@@ -60,12 +60,13 @@ describe("unified migration mapping state", () => {
     const progressLabels = mappings.map((mapping) => migrationMappingLabel(mapping, [armor, armorTarget]));
     const counter = createMigrationProgressCounter(progressLabels, (label) => labels.push(label));
 
-    counter.advance();
-    counter.advance();
+    counter.finish("armor-target-2");
+    counter.finish("XX-66 Armor");
 
     expect(labels).toEqual([
-      "1/2 FS-55 Devastator → XX-66 Armor",
-      "2/2 FS-55 Devastator → armor-target-2",
+      "0/2",
+      "1/2 armor-target-2",
+      "2/2 XX-66 Armor",
     ]);
   });
 

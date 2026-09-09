@@ -7,7 +7,6 @@ import {
   mappingSharedUnitIds,
 } from "./mappingPreviewGraph";
 import type {
-  CullingPolicy,
   EquipmentMappingPreview,
   EquipmentPartGraph,
   EquipmentPartRole,
@@ -40,10 +39,6 @@ export interface PreviewUnitNodeData extends Record<string, unknown> {
   fileId: string;
   sourceRoles: EquipmentPartRole[];
   targetRoles: EquipmentPartRole[];
-  cullingMeshCount: number | null;
-  patchCullingMeshCount: number | null;
-  targetCullingMeshCount: number | null;
-  cullingPolicy?: CullingPolicy;
   layout: "compact" | "detailed";
   shared?: boolean;
   directReuse?: boolean;
@@ -91,7 +86,6 @@ export function layoutPatchEquipmentGraph(graph: EquipmentPartGraph): MappingPre
   const unitNodes = graph.components.map((component) => patchUnitNode(
     component.id,
     component.fileId,
-    component.cullingMeshCount,
     rolesByComponent,
   ));
   const unmatchedIds = new Set(graph.diagnostics.map((diagnostic) => diagnostic.componentId));
@@ -169,9 +163,6 @@ function collectUnitNodes(previews: EquipmentMappingPreview[]): MappingPreviewNo
       fileId: unit.fileId,
       sourceRoles: [...unit.sourceRoles],
       targetRoles: [...unit.targetRoles],
-      cullingMeshCount: unit.patchCullingMeshCount,
-      patchCullingMeshCount: unit.patchCullingMeshCount,
-      targetCullingMeshCount: unit.targetCullingMeshCount,
       layout: "detailed",
       shared: shared.has(id),
       directReuse: directReuse.has(id),
@@ -185,8 +176,6 @@ interface UnitRoleBuilder {
   fileId: string;
   sourceRoles: Set<EquipmentPartRole>;
   targetRoles: Set<EquipmentPartRole>;
-  patchCullingMeshCount: number | null;
-  targetCullingMeshCount: number | null;
 }
 
 function mergeUnitRoles(
@@ -197,17 +186,9 @@ function mergeUnitRoles(
     fileId: unit.fileId,
     sourceRoles: new Set<EquipmentPartRole>(),
     targetRoles: new Set<EquipmentPartRole>(),
-    patchCullingMeshCount: unit.patchCullingMeshCount,
-    targetCullingMeshCount: unit.targetCullingMeshCount,
   };
   unit.sourceRoles.forEach((role) => builder.sourceRoles.add(role));
   unit.targetRoles.forEach((role) => builder.targetRoles.add(role));
-  if (unit.patchCullingMeshCount !== null) {
-    builder.patchCullingMeshCount = unit.patchCullingMeshCount;
-  }
-  if (unit.targetCullingMeshCount !== null) {
-    builder.targetCullingMeshCount = unit.targetCullingMeshCount;
-  }
   roles.set(unit.id, builder);
 }
 
@@ -391,7 +372,6 @@ function patchEquipmentNode(equipment: EquipmentPartGraph["equipments"][number])
 function patchUnitNode(
   id: string,
   fileId: string,
-  cullingMeshCount: number | null,
   rolesByComponent: ReadonlyMap<string, EquipmentPartRole[]>,
 ): MappingPreviewNode {
   return {
@@ -404,9 +384,6 @@ function patchUnitNode(
       fileId,
       sourceRoles: rolesByComponent.get(id) ?? [],
       targetRoles: [],
-      cullingMeshCount,
-      patchCullingMeshCount: cullingMeshCount,
-      targetCullingMeshCount: null,
       layout: "compact",
     },
   };
@@ -448,11 +425,8 @@ function detailedUnitHeight(unit: PreviewUnitNodeData): number {
   const roleRows = Number(unit.sourceRoles.length > 0) + Number(unit.targetRoles.length > 0);
   const relationshipRows = Number(Boolean(unit.directReuse || unit.shared));
   const conflictRows = Number(Boolean(unit.conflictCapable));
-  const cullingRows = Number(
-    (unit.patchCullingMeshCount ?? 0) > 0 || (unit.targetCullingMeshCount ?? 0) > 0,
-  );
   const height = UNIT_BASE_HEIGHT
-    + UNIT_ROW_HEIGHT * (roleRows + relationshipRows + conflictRows + cullingRows);
+    + UNIT_ROW_HEIGHT * (roleRows + relationshipRows + conflictRows);
   return Math.max(UNIT_MIN_HEIGHT, height);
 }
 

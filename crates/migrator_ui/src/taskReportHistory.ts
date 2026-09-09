@@ -1,12 +1,19 @@
 import { useCallback, useMemo, useState } from "react";
-import type { MigrationSummary, UnitRepatchSummary } from "./types";
+import type {
+  HeadArmorMergeSummary,
+  MigrationSummary,
+  PatchMergeSummary,
+  UnitRepatchSummary,
+} from "./types";
 
 const HISTORY_STORAGE_KEY = "hd2-migrator-task-report-history-v1";
 const HISTORY_STORAGE_VERSION = 1;
 
 export type TaskReportInput =
   | { kind: "migration"; output: string; summary: MigrationSummary }
-  | { kind: "repatch"; output: string; summary: UnitRepatchSummary };
+  | { kind: "repatch"; output: string; summary: UnitRepatchSummary }
+  | { kind: "merge"; output: string; summary: PatchMergeSummary }
+  | { kind: "headMerge"; output: string; summary: HeadArmorMergeSummary };
 
 export type CompletedTaskReport = TaskReportInput & {
   completedAt: number;
@@ -96,7 +103,9 @@ function isCompletedTaskReport(value: unknown): value is CompletedTaskReport {
   if (!isRecord(value) || typeof value.id !== "string" || typeof value.output !== "string") return false;
   if (!Number.isFinite(value.completedAt)) return false;
   if (value.kind === "migration") return isMigrationSummary(value.summary);
-  return value.kind === "repatch" && isRepatchSummary(value.summary);
+  if (value.kind === "repatch") return isRepatchSummary(value.summary);
+  if (value.kind === "merge") return isPatchMergeSummary(value.summary);
+  return value.kind === "headMerge" && isHeadMergeSummary(value.summary);
 }
 
 function isMigrationSummary(value: unknown): value is MigrationSummary {
@@ -118,8 +127,37 @@ function isMapping(value: unknown): boolean {
 
 function isRepatchSummary(value: unknown): value is UnitRepatchSummary {
   if (!isRecord(value)) return false;
-  const numbers = ["unitCount", "updatedUnits", "alreadyCurrentUnits", "removedUnits", "failedUnits", "scannedArchives"];
+  const numbers = ["unitCount", "updatedUnits", "alreadyCurrentUnits", "removedUnits", "scannedArchives"];
   return hasNumbers(value, numbers) && isStringArray(value.warnings);
+}
+
+function isPatchMergeSummary(value: unknown): value is PatchMergeSummary {
+  if (!isRecord(value)) return false;
+  return hasNumbers(value, ["inputCount", "resourceCount", "conflictCount", "duplicateCount", "repairedMetadataCount"])
+    && Array.isArray(value.sources)
+    && value.sources.every(isPatchMergeSourceSummary);
+}
+
+function isPatchMergeSourceSummary(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.name === "string"
+    && hasNumbers(value, ["resourceCount", "repairedMetadataCount", "replacedResourceCount"]);
+}
+
+function isHeadMergeSummary(value: unknown): value is HeadArmorMergeSummary {
+  if (!isRecord(value)) return false;
+  return typeof value.helmetHash === "string"
+    && typeof value.armorHash === "string"
+    && hasNumbers(value, ["mergedBodyUnits", "mergedLods", "copiedResources", "remappedConflicts", "removedHelmetUnits"])
+    && isStringArray(value.warnings)
+    && Array.isArray(value.mergedParts)
+    && value.mergedParts.every(isHeadMergePart)
+    && Array.isArray(value.skippedParts)
+    && value.skippedParts.every((part) => isHeadMergePart(part) && typeof part.reason === "string");
+}
+
+function isHeadMergePart(value: unknown): value is Record<string, unknown> {
+  return isRecord(value) && typeof value.bodyVariant === "string" && typeof value.lod === "number";
 }
 
 function hasNumbers(value: Record<string, unknown>, keys: string[]): boolean {

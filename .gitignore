@@ -1,8 +1,10 @@
 /target
 /test_files
 node_modules/
+*.tsbuildinfo
 /crates/web_ui/dist
 /crates/web_ui/node_modules
 /crates/web_ui/public/assets/armor_mappings.merged.json
 /crates/web_ui/public/assets/helmet_mappings.json
 /crates/web_ui/public/update-info
+/crates/migrator_app/public

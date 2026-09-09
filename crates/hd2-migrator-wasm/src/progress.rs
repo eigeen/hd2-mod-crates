@@ -7,7 +7,7 @@
 //!
 //! Missing methods are silently ignored (no-op progress).
 
-use hd2_migrator_io::web::WebProgress;
+use hd2_migrator_core::operations::WebProgress;
 use js_sys::{Array, Function};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -42,7 +42,7 @@ impl JsProgress {
 }
 
 impl WebProgress for JsProgress {
-    fn target_started(&self, target_name: &str, target_hash: &str) -> hd2_migrator_io::Result<()> {
+    fn target_started(&self, target_name: &str, target_hash: &str) -> hd2_migrator_core::Result<()> {
         let Some(fun) = self.on_target_start.as_ref() else {
             return Ok(());
         };
@@ -53,7 +53,7 @@ impl WebProgress for JsProgress {
         Ok(())
     }
 
-    fn stage(&self, target_name: &str, stage: &str) -> hd2_migrator_io::Result<()> {
+    fn stage(&self, target_name: &str, stage: &str) -> hd2_migrator_core::Result<()> {
         let Some(fun) = self.on_stage.as_ref() else {
             return Ok(());
         };
@@ -64,7 +64,7 @@ impl WebProgress for JsProgress {
         Ok(())
     }
 
-    fn target_finished(&self, target_name: &str) -> hd2_migrator_io::Result<()> {
+    fn target_finished(&self, target_name: &str) -> hd2_migrator_core::Result<()> {
         let Some(fun) = self.on_target_finish.as_ref() else {
             return Ok(());
         };

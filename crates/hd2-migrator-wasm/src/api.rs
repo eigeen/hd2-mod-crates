@@ -1,12 +1,12 @@
 use crate::data_source::JsDataSource;
 use crate::error::{WasmResult, js_error};
-use crate::output_sink::JsOutputSink;
+use crate::output_sink::{JsArchiveOutputSink, JsOutputSink};
 use crate::progress::JsProgress;
 use crate::zip_store::zip_store;
-use hd2_migrator_io::{
+use hd2_migrator_core::{
     index::ArchiveIndex,
+    operations::{self, PatchBytes, WebMigrateOptions, WebMigrationSummary, WebTargetOption},
     target_exclusions::is_default_excluded_target,
-    web::{self, PatchBytes, WebMigrateOptions, WebMigrationSummary, WebTargetOption},
 };
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use serde::Serialize;
@@ -22,9 +22,11 @@ struct JsSidecarRequirements {
 }
 
 #[wasm_bindgen]
-pub fn patch_sidecar_requirements(toc: Vec<u8>) -> WasmResult<JsValue> {
-    let required =
-        hd2_migrator_io::archive::sidecar::patch_sidecar_requirements(&toc).map_err(js_error)?;
+pub fn patch_sidecar_requirements(toc: Vec<u8>, stream_len: usize) -> WasmResult<JsValue> {
+    let required = hd2_migrator_core::archive::sidecar::repairable_patch_sidecar_requirements(
+        &toc, stream_len,
+    )
+    .map_err(js_error)?;
     serde_wasm_bindgen::to_value(&JsSidecarRequirements {
         gpu: required.gpu.to_string(),
         stream: required.stream.to_string(),
@@ -51,7 +53,7 @@ pub fn builtin_target_options(category: Option<String>) -> WasmResult<JsValue> {
 
 #[wasm_bindgen]
 pub fn builtin_equipment_options() -> WasmResult<JsValue> {
-    let options = web::list_equipment_options().map_err(js_error)?;
+    let options = operations::list_equipment_options().map_err(js_error)?;
     serde_wasm_bindgen::to_value(&options).map_err(js_error)
 }
 
@@ -64,8 +66,73 @@ pub fn merge_patches(inputs: JsValue, output_name: String) -> WasmResult<JsValue
         .iter()
         .map(|value| patch_bytes_from_js(&value))
         .collect::<WasmResult<Vec<_>>>()?;
-    let result = web::merge_patches(inputs, output_name).map_err(js_error)?;
+    let result = operations::merge_patches(inputs, output_name).map_err(js_error)?;
     patch_merge_result(result)
+}
+
+/// Merge patches and move each archive part to JS in bounded chunks.
+#[wasm_bindgen]
+pub fn merge_patches_stream(
+    inputs: JsValue,
+    output_name: String,
+    output_sink: JsValue,
+) -> WasmResult<JsValue> {
+    if !Array::is_array(&inputs) {
+        return Err(js_error("merge inputs must be an array"));
+    }
+    let inputs = Array::from(&inputs)
+        .iter()
+        .map(|value| patch_bytes_from_js(&value))
+        .collect::<WasmResult<Vec<_>>>()?;
+    let prepared = operations::prepare_patch_merge(inputs, output_name).map_err(js_error)?;
+    let sink = JsArchiveOutputSink::from_js(output_sink)?;
+    let mut output = prepared.output;
+    sink.write_archive(&mut output)?;
+    serialized_summary_result(&prepared.summary)
+}
+
+/// Merge helmet geometry into armor while passing a single Patch only once.
+#[wasm_bindgen]
+pub fn merge_head_into_armor(
+    armor_patch: JsValue,
+    head_patch: JsValue,
+    options: JsValue,
+) -> WasmResult<JsValue> {
+    let armor_patch = patch_bytes_from_js(&armor_patch)?;
+    let head_patch = optional_patch_bytes_from_js(&head_patch)?;
+    let options: operations::HeadArmorMergeOptions =
+        serde_wasm_bindgen::from_value(options).map_err(js_error)?;
+    let result =
+        operations::merge_head_into_armor(armor_patch, head_patch, options).map_err(js_error)?;
+    patch_and_summary_result(result.patch, &result.summary)
+}
+
+/// Merge and move each output archive part to JS in bounded chunks.
+#[wasm_bindgen]
+pub fn merge_head_into_armor_stream(
+    armor_patch: JsValue,
+    head_patch: JsValue,
+    options: JsValue,
+    output_sink: JsValue,
+) -> WasmResult<JsValue> {
+    let armor_patch = patch_bytes_from_js(&armor_patch)?;
+    let head_patch = optional_patch_bytes_from_js(&head_patch)?;
+    let options: operations::HeadArmorMergeOptions =
+        serde_wasm_bindgen::from_value(options).map_err(js_error)?;
+    let prepared =
+        operations::prepare_head_armor_merge(armor_patch, head_patch, options).map_err(js_error)?;
+    let sink = JsArchiveOutputSink::from_js(output_sink)?;
+    write_prepared_head_merge(prepared, &sink)
+}
+
+fn write_prepared_head_merge(
+    prepared: operations::PreparedHeadArmorMerge,
+    sink: &JsArchiveOutputSink,
+) -> WasmResult<JsValue> {
+    let summary = prepared.summary.clone();
+    let mut output = prepared.into_output();
+    sink.write_archive(&mut output)?;
+    serialized_summary_result(&summary)
 }
 
 #[wasm_bindgen]
@@ -77,7 +144,7 @@ pub fn detect_source(
     let category = category.unwrap_or_else(|| DEFAULT_CATEGORY.to_string());
     // 仅 toc 参与识别；gpu/stream 不需要传入，避免无谓地把数百 MB 拷贝进 WASM 内存导致 OOM。
     let patch = toc_only_patch(patch_name, toc);
-    let source = web::detect_source_archive(&category, &patch).map_err(js_error)?;
+    let source = operations::detect_source_archive(&category, &patch).map_err(js_error)?;
     serde_wasm_bindgen::to_value(&source).map_err(js_error)
 }
 
@@ -90,14 +157,14 @@ pub fn inspect_patch(
     let category = category.unwrap_or_else(|| DEFAULT_CATEGORY.to_string());
     // Inspection only needs the TOC. One combined call avoids copying a large TOC twice.
     let patch = toc_only_patch(patch_name, toc);
-    let inspection = web::inspect_patch(&category, &patch).map_err(js_error)?;
+    let inspection = operations::inspect_patch(&category, &patch).map_err(js_error)?;
     serde_wasm_bindgen::to_value(&inspection).map_err(js_error)
 }
 
 #[wasm_bindgen]
 pub fn inspect_equipment(patch_name: String, toc: Vec<u8>) -> WasmResult<JsValue> {
     let patch = toc_only_patch(patch_name, toc);
-    let inspection = web::inspect_equipment(&patch).map_err(js_error)?;
+    let inspection = operations::inspect_equipment(&patch).map_err(js_error)?;
     serde_wasm_bindgen::to_value(&inspection).map_err(js_error)
 }
 
@@ -109,7 +176,7 @@ pub async fn inspect_equipment_with_source(
 ) -> WasmResult<JsValue> {
     let patch = toc_only_patch(patch_name, toc);
     let source = JsDataSource::from_js(data_source)?;
-    let inspection = web::inspect_equipment_with_source(&patch, &source)
+    let inspection = operations::inspect_equipment_with_source(&patch, &source)
         .await
         .map_err(js_error)?;
     serde_wasm_bindgen::to_value(&inspection).map_err(js_error)
@@ -118,7 +185,7 @@ pub async fn inspect_equipment_with_source(
 #[wasm_bindgen]
 pub fn analyze_equipment_patch(patch_name: String, toc: Vec<u8>) -> WasmResult<JsValue> {
     let patch = toc_only_patch(patch_name, toc);
-    let analysis = web::analyze_equipment_patch(&patch).map_err(js_error)?;
+    let analysis = operations::analyze_equipment_patch(&patch).map_err(js_error)?;
     serde_wasm_bindgen::to_value(&analysis).map_err(js_error)
 }
 
@@ -129,9 +196,9 @@ pub fn preview_equipment_mapping(
     mapping: JsValue,
 ) -> WasmResult<JsValue> {
     let patch = toc_only_patch(patch_name, toc);
-    let mapping: web::WebMigrationMapping =
+    let mapping: operations::WebMigrationMapping =
         serde_wasm_bindgen::from_value(mapping).map_err(js_error)?;
-    let preview = web::preview_equipment_mapping(&patch, &mapping).map_err(js_error)?;
+    let preview = operations::preview_equipment_mapping(&patch, &mapping).map_err(js_error)?;
     serde_wasm_bindgen::to_value(&preview).map_err(js_error)
 }
 
@@ -142,43 +209,9 @@ pub fn preview_equipment_mappings(
     mappings: JsValue,
 ) -> WasmResult<JsValue> {
     let patch = toc_only_patch(patch_name, toc);
-    let mappings: Vec<web::WebMigrationMapping> =
+    let mappings: Vec<operations::WebMigrationMapping> =
         serde_wasm_bindgen::from_value(mappings).map_err(js_error)?;
-    let previews = web::preview_equipment_mappings(&patch, &mappings).map_err(js_error)?;
-    serde_wasm_bindgen::to_value(&previews).map_err(js_error)
-}
-
-#[wasm_bindgen]
-pub async fn preview_equipment_mapping_with_source(
-    patch_name: String,
-    toc: Vec<u8>,
-    mapping: JsValue,
-    data_source: JsValue,
-) -> WasmResult<JsValue> {
-    let patch = toc_only_patch(patch_name, toc);
-    let mapping: web::WebMigrationMapping =
-        serde_wasm_bindgen::from_value(mapping).map_err(js_error)?;
-    let source = JsDataSource::from_js(data_source)?;
-    let preview = web::preview_equipment_mapping_with_source(&patch, &mapping, &source)
-        .await
-        .map_err(js_error)?;
-    serde_wasm_bindgen::to_value(&preview).map_err(js_error)
-}
-
-#[wasm_bindgen]
-pub async fn preview_equipment_mappings_with_source(
-    patch_name: String,
-    toc: Vec<u8>,
-    mappings: JsValue,
-    data_source: JsValue,
-) -> WasmResult<JsValue> {
-    let patch = toc_only_patch(patch_name, toc);
-    let mappings: Vec<web::WebMigrationMapping> =
-        serde_wasm_bindgen::from_value(mappings).map_err(js_error)?;
-    let source = JsDataSource::from_js(data_source)?;
-    let previews = web::preview_equipment_mappings_with_source(&patch, &mappings, &source)
-        .await
-        .map_err(js_error)?;
+    let previews = operations::preview_equipment_mappings(&patch, &mappings).map_err(js_error)?;
     serde_wasm_bindgen::to_value(&previews).map_err(js_error)
 }
 
@@ -190,7 +223,7 @@ pub async fn analyze_equipment_patch_with_source(
 ) -> WasmResult<JsValue> {
     let patch = toc_only_patch(patch_name, toc);
     let source = JsDataSource::from_js(data_source)?;
-    let analysis = web::analyze_equipment_patch_with_source(&patch, &source)
+    let analysis = operations::analyze_equipment_patch_with_source(&patch, &source)
         .await
         .map_err(js_error)?;
     serde_wasm_bindgen::to_value(&analysis).map_err(js_error)
@@ -215,10 +248,15 @@ pub async fn migrate_cross_archive(
     let source = JsDataSource::from_js(data_source)?;
     let progress_sink = JsProgress::from_js(progress)?;
     let patch = patch_bytes_from_js(&patch)?;
-    let bundle =
-        web::migrate_many_with_source(&category, patch, request, &source, Some(&progress_sink))
-            .await
-            .map_err(js_error)?;
+    let bundle = operations::migrate_many_with_source(
+        &category,
+        patch,
+        request,
+        &source,
+        Some(&progress_sink),
+    )
+    .await
+    .map_err(js_error)?;
     migration_result(zip_store(&bundle.files), bundle.summary)
 }
 
@@ -229,18 +267,18 @@ pub async fn migrate_equipment_variants(
     data_source: JsValue,
     callbacks: JsValue,
 ) -> WasmResult<JsValue> {
-    let request: web::WebUnifiedMigrateOptions =
+    let request: operations::WebUnifiedMigrateOptions =
         serde_wasm_bindgen::from_value(options).map_err(js_error)?;
     let source = JsDataSource::from_js(data_source)?;
     let progress_sink = JsProgress::from_js(callbacks.clone())?;
     let output_sink = JsOutputSink::from_js(callbacks)?;
     let patch = patch_bytes_from_js(&patch)?;
-    let callbacks = web::VariantMigrationCallbacks::new(Some(&progress_sink), |file| {
+    let callbacks = operations::VariantMigrationCallbacks::new(Some(&progress_sink), |file| {
         output_sink
             .write(file)
             .map_err(|_| eyre::eyre!("web output sink rejected a file"))
     });
-    let summary = web::migrate_variants_to_sink(patch, request, &source, callbacks)
+    let summary = operations::migrate_variants_to_sink(patch, request, &source, callbacks)
         .await
         .map_err(js_error)?;
     summary_result(summary)
@@ -248,7 +286,7 @@ pub async fn migrate_equipment_variants(
 
 /// Repatch Unit resources using the latest Unit structures from game data.
 ///
-/// GPU/stream replacements are returned only when target culling is selected.
+/// Only Unit TOC metadata is updated. GPU and stream sidecars remain unchanged.
 #[wasm_bindgen]
 pub async fn repatch_units(
     patch: JsValue,
@@ -256,12 +294,12 @@ pub async fn repatch_units(
     data_source: JsValue,
     callbacks: JsValue,
 ) -> WasmResult<JsValue> {
-    let options: web::UnitRepatchOptions =
+    let options: operations::UnitRepatchOptions =
         serde_wasm_bindgen::from_value(options).map_err(js_error)?;
     let source = JsDataSource::from_js(data_source)?;
     let progress = JsProgress::from_js(callbacks)?;
     let patch = patch_bytes_from_js(&patch)?;
-    let output = web::repatch_patch_with_progress(patch, options, &source, Some(&progress))
+    let output = operations::repatch_patch_with_progress(patch, options, &source, Some(&progress))
         .await
         .map_err(js_error)?;
     let result = Object::new();
@@ -301,6 +339,13 @@ fn patch_bytes_from_js(patch: &JsValue) -> WasmResult<PatchBytes> {
         gpu: required_bytes(patch, "gpu")?,
         stream: required_bytes(patch, "stream")?,
     })
+}
+
+fn optional_patch_bytes_from_js(patch: &JsValue) -> WasmResult<Option<PatchBytes>> {
+    if patch.is_null() || patch.is_undefined() {
+        return Ok(None);
+    }
+    patch_bytes_from_js(patch).map(Some)
 }
 
 fn required_string(value: &JsValue, key: &str) -> WasmResult<String> {
@@ -349,26 +394,34 @@ fn migration_result(zip_bytes: Vec<u8>, summary: WebMigrationSummary) -> WasmRes
 }
 
 fn summary_result(summary: WebMigrationSummary) -> WasmResult<JsValue> {
+    serialized_summary_result(&summary)
+}
+
+fn serialized_summary_result<T: Serialize>(summary: &T) -> WasmResult<JsValue> {
     let result = Object::new();
     Reflect::set(
         &result,
         &JsValue::from_str("summary"),
-        &serde_wasm_bindgen::to_value(&summary).map_err(js_error)?,
+        &serde_wasm_bindgen::to_value(summary).map_err(js_error)?,
     )?;
     Ok(result.into())
 }
 
-fn patch_merge_result(result: web::PatchMergeResult) -> WasmResult<JsValue> {
+fn patch_merge_result(result: operations::PatchMergeResult) -> WasmResult<JsValue> {
+    patch_and_summary_result(result.patch, &result.summary)
+}
+
+fn patch_and_summary_result<T: Serialize>(patch: PatchBytes, summary: &T) -> WasmResult<JsValue> {
     let output = Object::new();
     Reflect::set(
         &output,
         &JsValue::from_str("patch"),
-        &patch_bytes_to_js(result.patch)?,
+        &patch_bytes_to_js(patch)?,
     )?;
     Reflect::set(
         &output,
         &JsValue::from_str("summary"),
-        &serde_wasm_bindgen::to_value(&result.summary).map_err(js_error)?,
+        &serde_wasm_bindgen::to_value(summary).map_err(js_error)?,
     )?;
     Ok(output.into())
 }

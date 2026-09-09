@@ -94,23 +94,21 @@ export function migrationMappingLabel(
 }
 
 export interface MigrationProgressCounter {
-  advance: () => void;
+  finish: (targetName: string) => void;
 }
 
-/** Show the first mapping immediately and retain the final label until task teardown. */
+/** Count completion events and label the exact target that produced each event. */
 export function createMigrationProgressCounter(
   labels: string[],
   setLabel: (label: string) => void,
 ): MigrationProgressCounter {
   if (!labels.length) throw new Error("migration progress requires at least one label");
-  let index = 0;
-  const showCurrent = () => setLabel(`${index + 1}/${labels.length} ${labels[index]}`);
-  showCurrent();
+  let completed = 0;
+  setLabel(`0/${labels.length}`);
   return {
-    advance: () => {
-      if (index >= labels.length - 1) return;
-      index += 1;
-      showCurrent();
+    finish: (targetName) => {
+      completed = Math.min(labels.length, completed + 1);
+      setLabel(`${completed}/${labels.length} ${targetName}`);
     },
   };
 }

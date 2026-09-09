@@ -34,7 +34,6 @@ import type {
   EquipmentCategory,
   EquipmentOption,
   PatchInfo,
-  CullingPolicy,
   UnmatchedUnitPolicy,
 } from "./types";
 import { EquipmentCategoryIcon } from "./EquipmentCategoryIcon";
@@ -189,6 +188,11 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
   const { t } = useI18n();
   const selectedTargetSet = useMemo(() => new Set(props.selectedTargets), [props.selectedTargets]);
   const [targetQuery, setTargetQuery] = useState("");
+  const emptyTargets = useMemo<string[]>(() => [], []);
+  const targetNames = useMemo(
+    () => new Map(props.equipmentOptions.map((option) => [option.hash, option.name])),
+    [props.equipmentOptions],
+  );
 
   const filteredTargets = useMemo(
     () => filterTargets(props.targetOptions, targetQuery),
@@ -209,9 +213,9 @@ const MappingGrid = memo(function MappingGrid(props: MappingGridProps) {
                 key={source.id}
                 onActivate={props.onSourceChange}
                 onResolve={props.onResolveSource}
-                selectedTargets={props.targetsBySource[source.id] ?? []}
+                selectedTargets={props.targetsBySource[source.id] ?? emptyTargets}
                 source={source}
-                targetOptions={props.equipmentOptions}
+                targetNames={targetNames}
               />
             ))}
           </div>
@@ -328,14 +332,14 @@ interface SourceChoiceProps {
   onResolve: (sourceId: string, hash: string) => void;
   selectedTargets: string[];
   source: DetectedSource;
-  targetOptions: EquipmentOption[];
+  targetNames: ReadonlyMap<string, string>;
 }
 
-function SourceChoice(props: SourceChoiceProps) {
+const SourceChoice = memo(function SourceChoice(props: SourceChoiceProps) {
   const { t } = useI18n();
   const resolved = props.source.candidates.find((candidate) => candidate.hash === props.source.resolvedHash);
   const selectedNames = props.selectedTargets
-    .map((hash) => props.targetOptions.find((target) => target.hash === hash)?.name ?? hash);
+    .map((hash) => props.targetNames.get(hash) ?? hash);
   return (
     <div
       className={`mb-2 cursor-pointer border px-3 py-2 transition-colors ${
@@ -381,7 +385,7 @@ function SourceChoice(props: SourceChoiceProps) {
       )}
     </div>
   );
-}
+});
 
 function EquipmentIcon({ category }: { category: EquipmentCategory }) {
   const className = "shrink-0 text-hd2-faint";
@@ -398,9 +402,7 @@ function EmptyMapping({ icon, text }: { icon: ReactNode; text: string }) {
 }
 
 interface OptionsPanelProps {
-  cullingPolicy: CullingPolicy;
   noPadding: boolean;
-  setCullingPolicy: (value: CullingPolicy) => void;
   setNoPadding: (value: boolean) => void;
   setUnmatchedUnitPolicy: (value: UnmatchedUnitPolicy) => void;
   unmatchedUnitPolicy: UnmatchedUnitPolicy;
@@ -420,12 +422,6 @@ function AdvancedOptionsContent(props: OptionsPanelProps) {
   const { t } = useI18n();
   return (
     <>
-      <AdvancedCheckboxOption
-        checked={props.cullingPolicy === "target"}
-        help={t("options.patchCullingHelp")}
-        label={t("options.patchCulling")}
-        onChange={(checked) => props.setCullingPolicy(checked ? "target" : "patch")}
-      />
       <AdvancedCheckboxOption
         checked={props.noPadding}
         help={t("options.noPaddingHelp")}

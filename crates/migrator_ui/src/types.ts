@@ -17,19 +17,6 @@ export interface PatchInspection {
 export interface EquipmentPatchAnalysis {
   inspection: PatchInspection;
   equipmentGraph: EquipmentPartGraph;
-  cullingSummary: RepatchCullingSummary;
-}
-
-export interface CullingSetSummary {
-  unitCount: number;
-  parsedUnitCount: number;
-  cullingUnitCount: number;
-  cullingMeshCount: number;
-}
-
-export interface RepatchCullingSummary {
-  patch: CullingSetSummary;
-  target: CullingSetSummary | null;
 }
 
 export interface EquipmentMappingPreview {
@@ -47,8 +34,6 @@ export interface MappingPreviewUnit {
   presentInPatch: boolean;
   sourceRoles: EquipmentPartRole[];
   targetRoles: EquipmentPartRole[];
-  patchCullingMeshCount: number | null;
-  targetCullingMeshCount: number | null;
 }
 
 export interface UnitMappingPreview {
@@ -96,7 +81,6 @@ export interface GraphComponent {
   fileId: string;
   kind: "unit";
   presentInPatch: boolean;
-  cullingMeshCount: number | null;
 }
 
 export type EquipmentPartRole =
@@ -141,6 +125,58 @@ export interface PatchFiles {
   stream: Uint8Array;
 }
 
+export interface PatchMergeSourceSummary {
+  name: string;
+  resourceCount: number;
+  repairedMetadataCount: number;
+  replacedResourceCount: number;
+}
+
+export interface PatchMergeSummary {
+  inputCount: number;
+  resourceCount: number;
+  conflictCount: number;
+  duplicateCount: number;
+  repairedMetadataCount: number;
+  sources: PatchMergeSourceSummary[];
+}
+
+export interface HeadArmorMergeOptions {
+  helmetHash: string;
+  armorHash: string;
+}
+
+export interface HeadArmorMergeSkippedPart {
+  bodyVariant: string;
+  lod: number;
+  reason: string;
+}
+
+export interface HeadArmorMergedPart {
+  bodyVariant: string;
+  lod: number;
+}
+
+export interface HeadArmorMergeSummary {
+  helmetHash: string;
+  helmetName: string;
+  armorHash: string;
+  armorName: string;
+  mergedBodyUnits: number;
+  mergedLods: number;
+  mergedParts: HeadArmorMergedPart[];
+  skippedParts: HeadArmorMergeSkippedPart[];
+  copiedResources: number;
+  remappedConflicts: number;
+  removedHelmetUnits: number;
+  warnings: string[];
+}
+
+export interface HeadArmorMergeResult {
+  patch: PatchFiles;
+  summary: HeadArmorMergeSummary;
+}
+
 // 仅供 UI 展示用的轻量元数据；patch 的字节存在 ref 里，避免 React DevTools 在 state 里枚举上百 MB 数据。
 export interface PatchInfo {
   name: string;
@@ -167,10 +203,7 @@ export interface UnifiedMigrateOptions {
   noPadding: boolean;
   unmatchedUnitPolicy: UnmatchedUnitPolicy;
   unitBehavior: UnitBehaviorOptions;
-  cullingPolicy: CullingPolicy;
 }
-
-export type CullingPolicy = "patch" | "target";
 
 export type UnmatchedUnitPolicy = "drop" | "keep";
 
@@ -223,7 +256,6 @@ export type MissingUnitPolicy = "drop" | "keep" | "fail";
 
 export interface UnitRepatchOptions {
   missingUnitPolicy: MissingUnitPolicy;
-  cullingPolicy: CullingPolicy;
 }
 
 export interface UnitRepatchResult {
@@ -236,9 +268,10 @@ export interface UnitRepatchResult {
 export interface UnitRepatchSummary {
   unitCount: number;
   updatedUnits: number;
+  convertedFormats?: number;
+  refreshedLodGroups?: number;
   alreadyCurrentUnits: number;
   removedUnits: number;
-  failedUnits: number;
   scannedArchives: number;
   warnings: string[];
 }

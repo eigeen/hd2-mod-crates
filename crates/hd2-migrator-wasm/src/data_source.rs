@@ -10,7 +10,7 @@
 //! Function refs are extracted once via `Reflect::get` at construction; per-call
 //! cost is one `Function::call*` + one `JsFuture` await.
 
-use hd2_migrator_io::io::{DataSource, IoFuture};
+use hd2_migrator_core::io::{DataSource, IoFuture};
 use js_sys::{Array, Function, Promise, Uint8Array};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -107,21 +107,21 @@ impl DataSource for JsDataSource {
     }
 }
 
-async fn await_promise(value: JsValue, label: &str) -> hd2_migrator_io::Result<JsValue> {
+async fn await_promise(value: JsValue, label: &str) -> hd2_migrator_core::Result<JsValue> {
     let promise = Promise::from(value);
     JsFuture::from(promise)
         .await
         .map_err(|e| eyre::eyre!("{label} rejected: {}", js_err_string(&e)))
 }
 
-fn uint8_array_to_vec(value: JsValue, label: &str) -> hd2_migrator_io::Result<Vec<u8>> {
+fn uint8_array_to_vec(value: JsValue, label: &str) -> hd2_migrator_core::Result<Vec<u8>> {
     let array: Uint8Array = value
         .dyn_into()
         .map_err(|_| eyre::eyre!("{label} must resolve to a Uint8Array"))?;
     Ok(array.to_vec())
 }
 
-fn string_array_to_vec(value: JsValue, label: &str) -> hd2_migrator_io::Result<Vec<String>> {
+fn string_array_to_vec(value: JsValue, label: &str) -> hd2_migrator_core::Result<Vec<String>> {
     let array: Array = value
         .dyn_into()
         .map_err(|_| eyre::eyre!("{label} must resolve to a string array"))?;

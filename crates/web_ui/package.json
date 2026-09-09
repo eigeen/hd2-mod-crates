@@ -1,21 +1,20 @@
 {
   "name": "hd2-migrator-web-ui",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
     "update-info": "bun run scripts/build-update-info.ts",
     "wasm": "wasm-pack build ../hd2-migrator-wasm --target web --out-dir ../web_ui/src/wasm/hd2_migrator_wasm",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
     "dev": "bun run update-info && bun run wasm && bunx --bun vite",
-    "build": "bun run update-info && bun run wasm && bunx --bun tsc && bunx --bun vite build",
+    "build": "bun run update-info && bun run wasm && bun run typecheck && bunx --bun vite build",
     "preview": "bunx --bun vite preview"
   },
   "dependencies": {
-    "@dnd-kit/core": "^6.3.1",
-    "@dnd-kit/sortable": "^10.0.0",
-    "@dnd-kit/utilities": "^3.2.2",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
+    "@hd2-mod-tools/migrator-app": "workspace:*",
     "@hd2-mod-tools/migrator-ui": "workspace:*",
     "@mui/icons-material": "^9.3.1",
     "@mui/material": "^9.3.1",
@@ -27,6 +26,7 @@
     "vite": "^8.2.1"
   },
   "devDependencies": {
+    "@types/node": "^24.10.13",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
