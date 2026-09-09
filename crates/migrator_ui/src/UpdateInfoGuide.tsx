@@ -59,7 +59,7 @@ export function UpdateInfoDialog({ controller }: { controller: UpdateInfoControl
             onClick={() => controller.goToPage(controller.pageIndex - 1)}
             side="newer"
           />
-          <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 py-5 min-[35rem]:px-8" aria-live="polite">
+          <main className="hd2-scroll min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 py-5 min-[35rem]:px-8" aria-live="polite">
             <div
               className={pageTransitionClass(controller.navigationDirection)}
               key={`${release.id}-${language}`}
